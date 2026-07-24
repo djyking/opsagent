@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: opsagent
+  profiles:
+    active: local
+  docker:
+    compose:
+      enabled: false
+
+server:
+  port: 8080
+
+mybatis-plus:
+  mapper-locations: classpath*:/mybatis/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: assign_id
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs

@@ -1,18 +1,38 @@
-CREATE DATABASE IF NOT EXISTS opsagent DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE IF NOT EXISTS opsagent DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 
 USE opsagent;
 
+DROP TABLE IF EXISTS ai_task;
+DROP TABLE IF EXISTS notification_record;
+DROP TABLE IF EXISTS operation_log;
+DROP TABLE IF EXISTS ai_chat_log;
+DROP TABLE IF EXISTS document_chunk;
 DROP TABLE IF EXISTS document;
-DROP TABLE IF EXISTS knowledge_base;
+DROP TABLE IF EXISTS ticket_status_log;
 DROP TABLE IF EXISTS ticket;
+DROP TABLE IF EXISTS sys_user;
+
+CREATE TABLE sys_user (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+    username VARCHAR(64) NOT NULL COMMENT 'username',
+    password VARCHAR(128) NOT NULL COMMENT 'password',
+    display_name VARCHAR(64) NOT NULL COMMENT 'display name',
+    status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT 'ENABLED, DISABLED',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_sys_user_username (username),
+    KEY idx_sys_user_status (status)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'system user';
 
 CREATE TABLE ticket (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
-    title VARCHAR(100) NOT NULL COMMENT 'ticket title',
-    description TEXT NULL COMMENT 'ticket description',
-    status VARCHAR(32) NOT NULL COMMENT 'ticket status',
-    priority VARCHAR(32) NOT NULL COMMENT 'ticket priority',
-    source_system VARCHAR(64) NULL COMMENT 'source system',
+    title VARCHAR(128) NOT NULL COMMENT 'ticket title',
+    description TEXT NOT NULL COMMENT 'ticket description',
+    priority VARCHAR(32) NOT NULL COMMENT 'LOW, MEDIUM, HIGH, URGENT',
+    status VARCHAR(32) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN, PROCESSING, RESOLVED, CLOSED',
+    creator VARCHAR(64) NOT NULL COMMENT 'creator',
     assignee VARCHAR(64) NULL COMMENT 'assignee',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
@@ -20,54 +40,109 @@ CREATE TABLE ticket (
     PRIMARY KEY (id),
     KEY idx_ticket_status (status),
     KEY idx_ticket_priority (priority),
-    KEY idx_ticket_source_system (source_system),
+    KEY idx_ticket_creator (creator),
+    KEY idx_ticket_assignee (assignee),
     KEY idx_ticket_created_at (created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ops ticket';
 
-CREATE TABLE knowledge_base (
+CREATE TABLE ticket_status_log (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
-    name VARCHAR(100) NOT NULL COMMENT 'knowledge base name',
-    description VARCHAR(1000) NULL COMMENT 'description',
-    owner VARCHAR(64) NULL COMMENT 'owner',
+    ticket_id BIGINT NOT NULL COMMENT 'ticket id',
+    from_status VARCHAR(32) NOT NULL COMMENT 'from status',
+    to_status VARCHAR(32) NOT NULL COMMENT 'to status',
+    operator VARCHAR(64) NOT NULL COMMENT 'operator',
+    reason VARCHAR(512) NULL COMMENT 'change reason',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
-    deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
     PRIMARY KEY (id),
-    KEY idx_knowledge_base_name (name),
-    KEY idx_knowledge_base_owner (owner),
-    KEY idx_knowledge_base_created_at (created_at)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'knowledge base';
+    KEY idx_ticket_status_log_ticket_id (ticket_id),
+    KEY idx_ticket_status_log_created_at (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ticket status change log';
 
 CREATE TABLE document (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
-    knowledge_base_id BIGINT NOT NULL COMMENT 'knowledge base id',
     file_name VARCHAR(255) NOT NULL COMMENT 'file name',
-    file_type VARCHAR(32) NULL COMMENT 'file type',
+    file_type VARCHAR(32) NOT NULL COMMENT 'file type',
     file_size BIGINT NOT NULL DEFAULT 0 COMMENT 'file size in bytes',
-    parse_status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING, PROCESSING, SUCCESS, FAILED',
+    storage_path VARCHAR(512) NULL COMMENT 'storage path',
+    status VARCHAR(32) NOT NULL DEFAULT 'UPLOADED' COMMENT 'UPLOADED, PARSED, FAILED',
+    uploader VARCHAR(64) NOT NULL COMMENT 'uploader',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
     PRIMARY KEY (id),
-    KEY idx_document_knowledge_base_id (knowledge_base_id),
-    KEY idx_document_parse_status (parse_status),
-    KEY idx_document_file_type (file_type),
+    KEY idx_document_file_name (file_name),
+    KEY idx_document_status (status),
+    KEY idx_document_uploader (uploader),
     KEY idx_document_created_at (created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'document metadata';
 
-INSERT INTO ticket (title, description, status, priority, source_system, assignee)
-VALUES
-    ('CPU usage is high', 'Production server CPU usage is above 90%.', 'OPEN', 'HIGH', 'monitoring', 'alice'),
-    ('Database slow query', 'Order query response time increased.', 'PROCESSING', 'MEDIUM', 'apm', 'bob'),
-    ('Disk usage warning', 'Log disk usage reached 80%.', 'RESOLVED', 'LOW', 'monitoring', 'charlie');
+CREATE TABLE document_chunk (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+    document_id BIGINT NOT NULL COMMENT 'document id',
+    chunk_index INT NOT NULL COMMENT 'chunk index',
+    content TEXT NOT NULL COMMENT 'chunk content',
+    token_estimate INT NULL COMMENT 'estimated token count',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_document_chunk_document_index (document_id, chunk_index),
+    KEY idx_document_chunk_document_id (document_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'document chunk';
 
-INSERT INTO knowledge_base (name, description, owner)
-VALUES
-    ('Linux Operations', 'Common Linux troubleshooting guides.', 'ops-team'),
-    ('Database Operations', 'MySQL operation and troubleshooting notes.', 'dba-team');
+CREATE TABLE ai_chat_log (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+    question TEXT NOT NULL COMMENT 'user question',
+    answer TEXT NULL COMMENT 'model answer',
+    document_id BIGINT NULL COMMENT 'related document id',
+    used_chunks TEXT NULL COMMENT 'used chunk ids, json text',
+    cost_time_ms BIGINT NULL COMMENT 'cost time in milliseconds',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    PRIMARY KEY (id),
+    KEY idx_ai_chat_log_document_id (document_id),
+    KEY idx_ai_chat_log_created_at (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ai chat log';
 
-INSERT INTO document (knowledge_base_id, file_name, file_type, file_size, parse_status)
-VALUES
-    (1, 'linux-cpu-troubleshooting.md', 'md', 2048, 'SUCCESS'),
-    (1, 'disk-cleanup-guide.pdf', 'pdf', 102400, 'PENDING'),
-    (2, 'mysql-slow-query.md', 'md', 4096, 'SUCCESS');
+CREATE TABLE operation_log (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+    biz_type VARCHAR(64) NOT NULL COMMENT 'business type',
+    biz_id BIGINT NOT NULL COMMENT 'business id',
+    operation_type VARCHAR(64) NOT NULL COMMENT 'operation type',
+    operator VARCHAR(64) NOT NULL COMMENT 'operator',
+    content VARCHAR(1000) NOT NULL COMMENT 'operation content',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    PRIMARY KEY (id),
+    KEY idx_operation_log_biz (biz_type, biz_id),
+    KEY idx_operation_log_operator (operator),
+    KEY idx_operation_log_created_at (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'operation audit log';
+
+CREATE TABLE notification_record (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+    ticket_id BIGINT NOT NULL COMMENT 'ticket id',
+    receiver VARCHAR(64) NOT NULL COMMENT 'receiver',
+    title VARCHAR(128) NOT NULL COMMENT 'notification title',
+    content VARCHAR(1000) NOT NULL COMMENT 'notification content',
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING, SENT, FAILED',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    PRIMARY KEY (id),
+    KEY idx_notification_record_ticket_id (ticket_id),
+    KEY idx_notification_record_receiver (receiver),
+    KEY idx_notification_record_status (status),
+    KEY idx_notification_record_created_at (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'notification record';
+
+CREATE TABLE ai_task (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+    biz_type VARCHAR(64) NOT NULL COMMENT 'business type',
+    biz_id BIGINT NOT NULL COMMENT 'business id',
+    task_type VARCHAR(64) NOT NULL COMMENT 'task type',
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING, PROCESSING, SUCCESS, FAILED',
+    request_payload TEXT NULL COMMENT 'request payload, json text',
+    result TEXT NULL COMMENT 'ai result',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
+    PRIMARY KEY (id),
+    KEY idx_ai_task_biz (biz_type, biz_id),
+    KEY idx_ai_task_status (status),
+    KEY idx_ai_task_created_at (created_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ai task';
