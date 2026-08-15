@@ -3,12 +3,12 @@ package com.example.opsagent.common.exception;
 public enum ErrorCode implements IErrorCode {
 
     SUCCESS(0, "success"),
-    BAD_REQUEST(400, "bad request"),
-    UNAUTHORIZED(401, "unauthorized"),
-    FORBIDDEN(403, "forbidden"),
-    NOT_FOUND(404, "resource not found"),
-    CONFLICT(409, "business conflict"),
-    INTERNAL_ERROR(500, "internal server error");
+    BAD_REQUEST(400, "请求参数错误"),
+    UNAUTHORIZED(401, "未认证或认证凭证无效"),
+    FORBIDDEN(403, "没有访问权限"),
+    NOT_FOUND(404, "资源不存在"),
+    CONFLICT(409, "业务状态冲突"),
+    INTERNAL_ERROR(500, "系统内部错误");
 
     private final Integer code;
 

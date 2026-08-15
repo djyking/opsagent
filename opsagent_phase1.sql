@@ -22,7 +22,7 @@ CREATE TABLE sys_user (
     username VARCHAR(64) NOT NULL COMMENT 'username',
     password VARCHAR(128) NOT NULL COMMENT 'BCrypt password',
     display_name VARCHAR(64) NOT NULL COMMENT 'display name',
-    status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT 'ENABLED, DISABLED',
+    status VARCHAR(32) NOT NULL DEFAULT 'enable' COMMENT 'enable, disable',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',

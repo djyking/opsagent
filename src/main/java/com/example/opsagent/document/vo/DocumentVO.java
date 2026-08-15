@@ -14,8 +14,6 @@ public class DocumentVO {
 
     private Long fileSize;
 
-    private String storagePath;
-
     private String status;
 
     private String uploader;

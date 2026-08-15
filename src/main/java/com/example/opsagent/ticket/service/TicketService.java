@@ -24,4 +24,6 @@ public interface TicketService extends IService<Ticket> {
     TicketVO updateStatus(Long id, TicketStatusUpdateRequest request);
 
     List<TicketStatusLogVO> listStatusLogs(Long id);
+
+    void deleteTicket(Long id);
 }

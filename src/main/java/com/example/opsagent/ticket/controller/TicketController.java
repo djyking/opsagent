@@ -23,6 +23,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 提供工单创建、查询、修改、状态流转和删除接口。
+ *
+ * @author heyu
+ * @since 2026/8/15
+ */
 @Validated
 @RestController
 @RequiredArgsConstructor
@@ -42,12 +48,12 @@ public class TicketController {
     }
 
     @GetMapping
-    public ApiResponse<PageResponse<TicketVO>> page(@ModelAttribute TicketQueryRequest request) {
+    public ApiResponse<PageResponse<TicketVO>> page(@Valid @ModelAttribute TicketQueryRequest request) {
         return ApiResponse.success(ticketService.pageTickets(request));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<TicketVO> update(@PathVariable Long id, @RequestBody TicketUpdateRequest request) {
+    public ApiResponse<TicketVO> update(@PathVariable Long id, @Valid @RequestBody TicketUpdateRequest request) {
         return ApiResponse.success(ticketService.updateTicket(id, request));
     }
 
@@ -65,7 +71,7 @@ public class TicketController {
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> delete(@PathVariable Long id) {
-        ticketService.removeById(id);
+        ticketService.deleteTicket(id);
         return ApiResponse.success();
     }
 }

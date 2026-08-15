@@ -2,9 +2,16 @@ package com.example.opsagent.document.parser;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.springframework.stereotype.Component;
-import org.springframework.web.multipart.MultipartFile;
 
+/**
+ * 以 UTF-8 读取纯文本文档内容。
+ *
+ * @author heyu
+ * @since 2026/8/15
+ */
 @Component
 public class TxtDocumentParser implements DocumentParser {
 
@@ -14,11 +21,11 @@ public class TxtDocumentParser implements DocumentParser {
     }
 
     @Override
-    public String parse(MultipartFile file) {
+    public String parse(Path file) {
         try {
-            return new String(file.getBytes(), StandardCharsets.UTF_8);
+            return Files.readString(file, StandardCharsets.UTF_8);
         } catch (IOException exception) {
-            throw new IllegalArgumentException("failed to parse txt file", exception);
+            throw new IllegalArgumentException("TXT 文件读取失败", exception);
         }
     }
 }

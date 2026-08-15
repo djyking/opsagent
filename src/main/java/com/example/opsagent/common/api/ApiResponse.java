@@ -5,6 +5,12 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/**
+ * 统一 API 响应对象。
+ *
+ * @author heyu
+ * @since 2026/8/15
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

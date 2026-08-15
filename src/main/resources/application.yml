@@ -6,6 +6,10 @@ spring:
   docker:
     compose:
       enabled: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
 
 server:
   port: 8080
@@ -26,3 +30,19 @@ springdoc:
     path: /swagger-ui.html
   api-docs:
     path: /v3/api-docs
+
+ops-agent:
+  document:
+    storage-root: ${OPS_AGENT_DOCUMENT_STORAGE:./data/uploads}
+    max-file-size: 10485760
+  security:
+    permit-all:
+      - /api/auth/login
+      - /api/auth/register
+      - /actuator/health
+      - /swagger-ui.html
+      - /swagger-ui/**
+      - /v3/api-docs/**
+    jwt:
+      secret: ${OPS_AGENT_JWT_SECRET:}
+      expire-minutes: 120

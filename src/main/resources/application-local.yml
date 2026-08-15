@@ -3,6 +3,6 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     #加载环境变量，避免泄露敏感信息
     #密码由环境变量获取
-    url: jdbc:mysql://localhost:3306/opsagent?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: root
+    url: ${OPSAGENT_DB_URL:jdbc:mysql://localhost:3306/opsagent?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${OPSAGENT_DB_USERNAME:root}
     password: ${OPSAGENT_DB_PASSWORD}

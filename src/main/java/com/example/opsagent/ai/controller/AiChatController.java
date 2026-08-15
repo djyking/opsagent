@@ -32,7 +32,7 @@ public class AiChatController {
     }
 
     @GetMapping("/chat-logs")
-    public ApiResponse<PageResponse<AiChatLogVO>> logs(@ModelAttribute AiChatLogQueryRequest request) {
+    public ApiResponse<PageResponse<AiChatLogVO>> logs(@Valid @ModelAttribute AiChatLogQueryRequest request) {
         return ApiResponse.success(aiChatService.pageLogs(request));
     }
 

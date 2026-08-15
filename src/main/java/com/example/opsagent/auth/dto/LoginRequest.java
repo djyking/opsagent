@@ -1,21 +1,23 @@
 package com.example.opsagent.auth.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 /**
- * 这里可以用 {record} 16新特性去实现DTO，
- * 但是比起class没有大升级，只是为了解决重复代码的问题
- * 还是用class和lombok
+ * 承载登录或注册时提交的用户凭证。
+ *
+ * @author heyu
+ * @since 2026/8/15
  */
 @Data
 public class LoginRequest {
 
     @NotBlank
+    @Size(max = 64)
     private String username;
 
     @NotBlank
+    @Size(max = 72)
     private String password;
-
-    private String displayName;
 }

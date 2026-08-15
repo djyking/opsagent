@@ -1,16 +1,13 @@
 package com.example.opsagent.auth.service;
 
-import com.example.opsagent.auth.dto.LoginRequest;
-import com.example.opsagent.auth.dto.LoginResponse;
-import com.example.opsagent.auth.vo.AuthUserVO;
-
+import com.example.opsagent.auth.dto.RegisterRequest;
+/**
+ * 提供认证模块保留的用户注册业务能力。
+ *
+ * @author heyu
+ * @since 2026/8/15
+ */
 public interface AuthService {
 
-    LoginResponse login(LoginRequest request);
-
-    AuthUserVO me(String authorization);
-
-    void logout(String authorization);
-
-    void register(LoginRequest request);
+    void register(RegisterRequest request);
 }

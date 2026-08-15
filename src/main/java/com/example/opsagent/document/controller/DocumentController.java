@@ -6,6 +6,7 @@ import com.example.opsagent.document.dto.DocumentQueryRequest;
 import com.example.opsagent.document.service.DocumentService;
 import com.example.opsagent.document.vo.DocumentChunkVO;
 import com.example.opsagent.document.vo.DocumentVO;
+import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
@@ -35,7 +36,7 @@ public class DocumentController {
     }
 
     @GetMapping
-    public ApiResponse<PageResponse<DocumentVO>> page(@ModelAttribute DocumentQueryRequest request) {
+    public ApiResponse<PageResponse<DocumentVO>> page(@Valid @ModelAttribute DocumentQueryRequest request) {
         return ApiResponse.success(documentService.pageDocuments(request));
     }
 

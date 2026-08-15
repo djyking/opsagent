@@ -15,11 +15,11 @@ DROP TABLE IF EXISTS sys_user;
 CREATE TABLE sys_user (
     id BIGINT NOT NULL AUTO_INCREMENT COMMENT 'primary key',
     username VARCHAR(64) NOT NULL COMMENT 'username',
-    password VARCHAR(128) NOT NULL COMMENT 'password',
+    password VARCHAR(128) NOT NULL COMMENT 'BCrypt password',
     display_name VARCHAR(64) NOT NULL COMMENT 'display name',
-    status VARCHAR(32) NOT NULL DEFAULT 'ENABLED' COMMENT 'ENABLED, DISABLED',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
+    status VARCHAR(32) NOT NULL DEFAULT 'enable' COMMENT 'enable, disable',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
     PRIMARY KEY (id),
     UNIQUE KEY uk_sys_user_username (username),
@@ -34,15 +34,15 @@ CREATE TABLE ticket (
     status VARCHAR(32) NOT NULL DEFAULT 'OPEN' COMMENT 'OPEN, PROCESSING, RESOLVED, CLOSED',
     creator VARCHAR(64) NOT NULL COMMENT 'creator',
     assignee VARCHAR(64) NULL COMMENT 'assignee',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
     PRIMARY KEY (id),
     KEY idx_ticket_status (status),
     KEY idx_ticket_priority (priority),
     KEY idx_ticket_creator (creator),
     KEY idx_ticket_assignee (assignee),
-    KEY idx_ticket_created_at (created_at)
+    KEY idx_ticket_create_time (create_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ops ticket';
 
 CREATE TABLE ticket_status_log (
@@ -52,10 +52,10 @@ CREATE TABLE ticket_status_log (
     to_status VARCHAR(32) NOT NULL COMMENT 'to status',
     operator VARCHAR(64) NOT NULL COMMENT 'operator',
     reason VARCHAR(512) NULL COMMENT 'change reason',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
     PRIMARY KEY (id),
     KEY idx_ticket_status_log_ticket_id (ticket_id),
-    KEY idx_ticket_status_log_created_at (created_at)
+    KEY idx_ticket_status_log_create_time (create_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ticket status change log';
 
 CREATE TABLE document (
@@ -66,14 +66,14 @@ CREATE TABLE document (
     storage_path VARCHAR(512) NULL COMMENT 'storage path',
     status VARCHAR(32) NOT NULL DEFAULT 'UPLOADED' COMMENT 'UPLOADED, PARSED, FAILED',
     uploader VARCHAR(64) NOT NULL COMMENT 'uploader',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
     PRIMARY KEY (id),
     KEY idx_document_file_name (file_name),
     KEY idx_document_status (status),
     KEY idx_document_uploader (uploader),
-    KEY idx_document_created_at (created_at)
+    KEY idx_document_create_time (create_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'document metadata';
 
 CREATE TABLE document_chunk (
@@ -82,7 +82,7 @@ CREATE TABLE document_chunk (
     chunk_index INT NOT NULL COMMENT 'chunk index',
     content TEXT NOT NULL COMMENT 'chunk content',
     token_estimate INT NULL COMMENT 'estimated token count',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'logical delete flag, 0 normal, 1 deleted',
     PRIMARY KEY (id),
     UNIQUE KEY uk_document_chunk_document_index (document_id, chunk_index),
@@ -96,10 +96,10 @@ CREATE TABLE ai_chat_log (
     document_id BIGINT NULL COMMENT 'related document id',
     used_chunks TEXT NULL COMMENT 'used chunk ids, json text',
     cost_time_ms BIGINT NULL COMMENT 'cost time in milliseconds',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
     PRIMARY KEY (id),
     KEY idx_ai_chat_log_document_id (document_id),
-    KEY idx_ai_chat_log_created_at (created_at)
+    KEY idx_ai_chat_log_create_time (create_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ai chat log';
 
 CREATE TABLE operation_log (
@@ -109,11 +109,11 @@ CREATE TABLE operation_log (
     operation_type VARCHAR(64) NOT NULL COMMENT 'operation type',
     operator VARCHAR(64) NOT NULL COMMENT 'operator',
     content VARCHAR(1000) NOT NULL COMMENT 'operation content',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
     PRIMARY KEY (id),
     KEY idx_operation_log_biz (biz_type, biz_id),
     KEY idx_operation_log_operator (operator),
-    KEY idx_operation_log_created_at (created_at)
+    KEY idx_operation_log_create_time (create_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'operation audit log';
 
 CREATE TABLE notification_record (
@@ -123,12 +123,12 @@ CREATE TABLE notification_record (
     title VARCHAR(128) NOT NULL COMMENT 'notification title',
     content VARCHAR(1000) NOT NULL COMMENT 'notification content',
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING, SENT, FAILED',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
     PRIMARY KEY (id),
     KEY idx_notification_record_ticket_id (ticket_id),
     KEY idx_notification_record_receiver (receiver),
     KEY idx_notification_record_status (status),
-    KEY idx_notification_record_created_at (created_at)
+    KEY idx_notification_record_create_time (create_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'notification record';
 
 CREATE TABLE ai_task (
@@ -139,10 +139,10 @@ CREATE TABLE ai_task (
     status VARCHAR(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING, PROCESSING, SUCCESS, FAILED',
     request_payload TEXT NULL COMMENT 'request payload, json text',
     result TEXT NULL COMMENT 'ai result',
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'update time',
     PRIMARY KEY (id),
     KEY idx_ai_task_biz (biz_type, biz_id),
     KEY idx_ai_task_status (status),
-    KEY idx_ai_task_created_at (created_at)
+    KEY idx_ai_task_create_time (create_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'ai task';

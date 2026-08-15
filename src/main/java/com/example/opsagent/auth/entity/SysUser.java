@@ -8,10 +8,14 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-import jakarta.validation.constraints.Pattern;
 import lombok.Data;
-import lombok.NonNull;
 
+/**
+ * 映射系统用户表中的账号、密码和状态数据。
+ *
+ * @author heyu
+ * @since 2026/8/15
+ */
 @Data
 @TableName("sys_user")
 public class SysUser {
@@ -19,7 +23,6 @@ public class SysUser {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    @NonNull
     private String username;
 
     private String password;
@@ -29,10 +32,6 @@ public class SysUser {
      */
     private String displayName;
 
-    @Pattern(
-        regexp = "enable|disable",
-        message = "状态值只能是enable和disable"
-    )
     private String status;
 
     @TableField(fill = FieldFill.INSERT)
