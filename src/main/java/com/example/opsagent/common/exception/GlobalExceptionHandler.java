@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 将 MVC 参数异常、业务异常和系统异常转换为统一 HTTP 响应。
@@ -65,6 +66,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({MethodArgumentTypeMismatchException.class, IllegalArgumentException.class})
     public ResponseEntity<ApiResponse<Void>> handleBadRequestException(Exception exception) {
         return badRequest(exception.getMessage());
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFoundException() {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ApiResponse.fail(ErrorCode.NOT_FOUND));
     }
 
     @ExceptionHandler(Exception.class)

@@ -4,15 +4,15 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 工单状态及允许的状态流转规则。
+ * 定义工单最小业务闭环的状态和单向流转规则。
  *
  * @author heyu
- * @since 2026/8/15
+ * @since 2026/8/16
  */
 public enum TicketStatus {
-    OPEN(Set.of("PROCESSING")),
+    CREATED(Set.of("PROCESSING")),
     PROCESSING(Set.of("RESOLVED")),
-    RESOLVED(Set.of("PROCESSING", "CLOSED")),
+    RESOLVED(Set.of("CLOSED")),
     CLOSED(Set.of());
 
     private final Set<String> allowedTargets;
@@ -32,7 +32,7 @@ public enum TicketStatus {
         try {
             return valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("工单状态只能是 OPEN、PROCESSING、RESOLVED 或 CLOSED");
+            throw new IllegalArgumentException("工单状态只能是 CREATED、PROCESSING、RESOLVED 或 CLOSED");
         }
     }
 }

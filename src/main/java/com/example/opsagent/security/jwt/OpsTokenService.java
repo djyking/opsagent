@@ -7,13 +7,12 @@ import java.util.Date;
 
 import javax.crypto.SecretKey;
 
-import jakarta.annotation.PostConstruct;
 import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -35,6 +34,9 @@ public class OpsTokenService {
     @PostConstruct
     public void validateConfiguration() {
         signingKey();
+        if (properties.getExpireMinutes() <= 0) {
+            throw new IllegalStateException("JWT 有效期 expire-minutes 必须大于 0");
+        }
     }
 
     public String generateToken(OpsUserPrincipal principal) {
@@ -68,8 +70,9 @@ public class OpsTokenService {
 
     public boolean isExpired(String token) {
         try {
-            return extractTokenClaims(token).getExpiration().before(new Date());
-        } catch (ExpiredJwtException exception) {
+            Date expiration = extractTokenClaims(token).getExpiration();
+            return expiration == null || !expiration.after(new Date());
+        } catch (JwtException | IllegalArgumentException exception) {
             return true;
         }
     }

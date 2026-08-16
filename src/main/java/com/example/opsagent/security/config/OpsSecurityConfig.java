@@ -36,6 +36,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableConfigurationProperties({OpsSecurityProperties.class, OpsTokenProperties.class})
 public class OpsSecurityConfig {
 
+    private static final String[] ADMIN_API_PATTERNS = {
+        "/api/audit/**",
+        "/api/notifications/**",
+        "/api/tasks/**"
+    };
+
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
@@ -72,6 +78,7 @@ public class OpsSecurityConfig {
                 .accessDeniedHandler(accessDeniedHandler))
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(securityProperties.getPermitAll().toArray(String[]::new)).permitAll()
+                .requestMatchers(ADMIN_API_PATTERNS).hasRole("ADMIN")
                 .anyRequest().authenticated())
             // JWT 必须先恢复上下文，登录 Filter 随后只处理登录路径，最后才进入授权判断。
             .addFilterBefore(loginFilter, UsernamePasswordAuthenticationFilter.class)

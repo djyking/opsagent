@@ -15,12 +15,12 @@ class TicketStatusTest {
 
     @Test
     void shouldAllowOnlyDefinedTransitions() {
-        assertThat(TicketStatus.OPEN.canTransitionTo(TicketStatus.PROCESSING)).isTrue();
+        assertThat(TicketStatus.CREATED.canTransitionTo(TicketStatus.PROCESSING)).isTrue();
         assertThat(TicketStatus.PROCESSING.canTransitionTo(TicketStatus.RESOLVED)).isTrue();
-        assertThat(TicketStatus.RESOLVED.canTransitionTo(TicketStatus.PROCESSING)).isTrue();
+        assertThat(TicketStatus.RESOLVED.canTransitionTo(TicketStatus.PROCESSING)).isFalse();
         assertThat(TicketStatus.RESOLVED.canTransitionTo(TicketStatus.CLOSED)).isTrue();
-        assertThat(TicketStatus.OPEN.canTransitionTo(TicketStatus.CLOSED)).isFalse();
-        assertThat(TicketStatus.CLOSED.canTransitionTo(TicketStatus.OPEN)).isFalse();
+        assertThat(TicketStatus.CREATED.canTransitionTo(TicketStatus.CLOSED)).isFalse();
+        assertThat(TicketStatus.CLOSED.canTransitionTo(TicketStatus.CREATED)).isFalse();
     }
 
     @Test

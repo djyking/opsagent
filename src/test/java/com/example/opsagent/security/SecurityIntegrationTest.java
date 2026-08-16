@@ -3,6 +3,7 @@ package com.example.opsagent.security;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.example.opsagent.auth.dao.SysRoleDao;
 import com.example.opsagent.auth.dao.SysUserDao;
 import com.example.opsagent.auth.entity.SysUser;
 import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
@@ -22,10 +23,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -54,12 +58,20 @@ class SecurityIntegrationTest {
     @MockitoBean
     private SysUserDao sysUserDao;
 
+    @MockitoBean
+    private SysRoleDao sysRoleDao;
+
     private final AtomicReference<SysUser> currentUser = new AtomicReference<>();
+
+    private final AtomicReference<List<String>> currentRoles = new AtomicReference<>();
 
     @BeforeEach
     void setUp() {
         currentUser.set(user("enable"));
+        currentRoles.set(List.of("USER"));
         when(sysUserDao.selectOne(any())).thenAnswer(invocation -> currentUser.get());
+        when(sysRoleDao.selectEnabledRoleCodesByUserId(anyLong()))
+            .thenAnswer(invocation -> currentRoles.get());
     }
 
     @Test
@@ -72,6 +84,35 @@ class SecurityIntegrationTest {
             .andExpect(jsonPath("$.data.userId").value(1))
             .andExpect(jsonPath("$.data.username").value("alice"))
             .andExpect(jsonPath("$.data.authorities[0]").value("ROLE_USER"));
+    }
+
+    @Test
+    void shouldRedirectBrowserFromLoginApiToLoginPage() throws Exception {
+        mockMvc.perform(get("/api/auth/login"))
+            .andExpect(status().isFound())
+            .andExpect(header().string("Location", "/login"));
+    }
+
+    @Test
+    void shouldRedirectUnauthenticatedBrowserButKeepJson401ForApiClient() throws Exception {
+        mockMvc.perform(get("/api/auth/me").accept(MediaType.TEXT_HTML))
+            .andExpect(status().isFound())
+            .andExpect(header().string("Location", "/login"));
+
+        mockMvc.perform(get("/api/auth/me").accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.code").value(401));
+    }
+
+    @Test
+    void shouldServeFrontendLoginPageFromBackend() throws Exception {
+        mockMvc.perform(get("/login"))
+            .andExpect(status().isOk())
+            .andExpect(forwardedUrl("/index.html"));
+
+        mockMvc.perform(get("/favicon.ico"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value(404));
     }
 
     @Test
@@ -135,6 +176,18 @@ class SecurityIntegrationTest {
     void shouldAllowWhitelistedHealthEndpointWithoutToken() throws Exception {
         mockMvc.perform(get("/actuator/health"))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void shouldReturn403WhenAuthenticatedUserLacksAdminRole() throws Exception {
+        String token = loginAndGetToken();
+
+        for (String path : List.of("/api/audit/operation-logs", "/api/notifications", "/api/tasks/ai")) {
+            mockMvc.perform(get(path).header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403))
+                .andExpect(jsonPath("$.message").value("没有访问权限"));
+        }
     }
 
     private String loginAndGetToken() throws Exception {

@@ -4,13 +4,13 @@ import java.io.IOException;
 
 import com.example.opsagent.common.api.ApiResponse;
 import com.example.opsagent.common.exception.ErrorCode;
+import com.example.opsagent.security.authentication.exception.OpsLoginRequestException;
 import com.example.opsagent.security.handler.OpsSecurityResponseWriter;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.stereotype.Component;
@@ -30,7 +30,7 @@ public class OpsAuthenticationFailureHandler implements AuthenticationFailureHan
     @Override
     public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
         AuthenticationException exception) throws IOException, ServletException {
-        if (exception instanceof AuthenticationServiceException) {
+        if (exception instanceof OpsLoginRequestException) {
             responseWriter.write(response, HttpStatus.BAD_REQUEST.value(),
                 ApiResponse.fail(ErrorCode.BAD_REQUEST.getCode(), exception.getMessage()));
             return;

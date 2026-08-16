@@ -6,3 +6,8 @@ spring:
     url: ${OPSAGENT_DB_URL:jdbc:mysql://localhost:3306/opsagent?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${OPSAGENT_DB_USERNAME:root}
     password: ${OPSAGENT_DB_PASSWORD}
+ops-agent:
+  security:
+    jwt:
+      # 仅供本地开发兜底；部署环境必须通过环境变量覆盖。
+      secret: ${OPS_AGENT_JWT_SECRET:opsagent-local-jwt-secret-2026-change-me}

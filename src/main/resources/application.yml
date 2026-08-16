@@ -2,14 +2,23 @@ spring:
   application:
     name: opsagent
   profiles:
-    active: local
+    active: ${SPRING_PROFILES_ACTIVE:local}
   docker:
     compose:
       enabled: false
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: 50MB
+      max-request-size: 50MB
+  web:
+    resources:
+      # IDEA 直接运行后端时读取前端构建产物；打包后则使用 classpath:/static/。
+      static-locations:
+        - classpath:/META-INF/resources/
+        - classpath:/resources/
+        - classpath:/static/
+        - classpath:/public/
+        - file:./opsagent-web/dist/
 
 server:
   port: 8080
@@ -34,9 +43,32 @@ springdoc:
 ops-agent:
   document:
     storage-root: ${OPS_AGENT_DOCUMENT_STORAGE:./data/uploads}
-    max-file-size: 10485760
+    max-file-size: 52428800
+    chunk-size: 2400
+    chunk-overlap: 200
+  ai:
+    enabled: ${OPS_AGENT_AI_ENABLED:false}
+    base-url: ${OPS_AGENT_AI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${OPS_AGENT_AI_API_KEY:}
+    model: ${OPS_AGENT_AI_MODEL:gpt-4.1-mini}
+    top-k: ${OPS_AGENT_AI_TOP_K:5}
+    candidate-limit: ${OPS_AGENT_AI_CANDIDATE_LIMIT:200}
+    connect-timeout: ${OPS_AGENT_AI_CONNECT_TIMEOUT:10s}
+    read-timeout: ${OPS_AGENT_AI_READ_TIMEOUT:60s}
   security:
+    login-page-url: ${OPS_AGENT_LOGIN_PAGE_URL:/login}
     permit-all:
+      - /
+      - /index.html
+      - /login
+      - /register
+      - /dashboard
+      - /tickets
+      - /tickets/**
+      - /notifications
+      - /admin
+      - /assets/**
+      - /favicon.ico
       - /api/auth/login
       - /api/auth/register
       - /actuator/health

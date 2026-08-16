@@ -18,26 +18,33 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 提供工单文档问答、历史记录和引用详情接口。
+ *
+ * @author heyu
+ * @since 2026/8/16
+ */
 @Validated
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/ai")
+@RequestMapping("/api")
 public class AiChatController {
 
     private final AiChatService aiChatService;
 
-    @PostMapping("/chat")
-    public ApiResponse<AiChatVO> chat(@Valid @RequestBody AiChatRequest request) {
-        return ApiResponse.success(aiChatService.chat(request));
+    @PostMapping("/tickets/{ticketId}/questions")
+    public ApiResponse<AiChatVO> ask(@PathVariable Long ticketId, @Valid @RequestBody AiChatRequest request) {
+        return ApiResponse.success(aiChatService.ask(ticketId, request));
     }
 
-    @GetMapping("/chat-logs")
-    public ApiResponse<PageResponse<AiChatLogVO>> logs(@Valid @ModelAttribute AiChatLogQueryRequest request) {
-        return ApiResponse.success(aiChatService.pageLogs(request));
+    @GetMapping("/tickets/{ticketId}/questions")
+    public ApiResponse<PageResponse<AiChatLogVO>> questions(@PathVariable Long ticketId,
+        @Valid @ModelAttribute AiChatLogQueryRequest request) {
+        return ApiResponse.success(aiChatService.pageQuestions(ticketId, request));
     }
 
-    @GetMapping("/chat-logs/{id}")
-    public ApiResponse<AiChatLogVO> logDetail(@PathVariable Long id) {
-        return ApiResponse.success(aiChatService.logDetail(id));
+    @GetMapping("/questions/{id}")
+    public ApiResponse<AiChatLogVO> detail(@PathVariable Long id) {
+        return ApiResponse.success(aiChatService.questionDetail(id));
     }
 }

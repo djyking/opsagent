@@ -2,6 +2,7 @@ package com.example.opsagent.security.jwt;
 
 import org.junit.jupiter.api.Test;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -20,5 +21,24 @@ class OpsTokenServiceConfigurationTest {
         assertThatThrownBy(() -> new OpsTokenService(properties).validateConfiguration())
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("至少包含 32 个 UTF-8 字节");
+    }
+
+    @Test
+    void shouldRejectNonPositiveExpirationAtInitialization() {
+        OpsTokenProperties properties = new OpsTokenProperties();
+        properties.setSecret("ops-agent-test-secret-that-is-at-least-32-bytes-long");
+        properties.setExpireMinutes(0);
+
+        assertThatThrownBy(() -> new OpsTokenService(properties).validateConfiguration())
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("expire-minutes 必须大于 0");
+    }
+
+    @Test
+    void shouldTreatMalformedTokenAsNotUsable() {
+        OpsTokenProperties properties = new OpsTokenProperties();
+        properties.setSecret("ops-agent-test-secret-that-is-at-least-32-bytes-long");
+
+        assertThat(new OpsTokenService(properties).isExpired("not-a-jwt")).isTrue();
     }
 }

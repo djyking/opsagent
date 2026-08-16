@@ -27,17 +27,17 @@ public class AuditLogListener {
         try {
             OperationLog operationLog = new OperationLog();
             operationLog.setBizType("TICKET");
-            operationLog.setBizId(event.getTicketId());
+            operationLog.setBizId(event.ticketId());
             operationLog.setOperationType("STATUS_CHANGE");
-            operationLog.setOperator(event.getOperator());
-            operationLog.setContent("工单 #" + event.getTicketId() + " 状态从 " + event.getFromStatus()
-                + " 修改为 " + event.getToStatus()
-                + (event.getReason() == null ? "" : "，原因：" + event.getReason()));
+            operationLog.setOperator(String.valueOf(event.operatorId()));
+            operationLog.setContent("工单 #" + event.ticketId() + " 状态从 " + event.fromStatus()
+                + " 修改为 " + event.toStatus()
+                + (event.remark() == null ? "" : "，备注：" + event.remark()));
             if (!operationLogService.save(operationLog)) {
                 throw new IllegalStateException("操作审计日志保存失败");
             }
         } catch (RuntimeException exception) {
-            log.error("记录工单状态审计日志失败，ticketId={}", event.getTicketId(), exception);
+            log.error("记录工单状态审计日志失败，ticketId={}", event.ticketId(), exception);
         }
     }
 }

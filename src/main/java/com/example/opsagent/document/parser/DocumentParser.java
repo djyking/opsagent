@@ -1,5 +1,6 @@
 package com.example.opsagent.document.parser;
 
+import java.io.IOException;
 import java.nio.file.Path;
 
 /**
@@ -12,5 +13,5 @@ public interface DocumentParser {
 
     boolean supports(String fileType);
 
-    String parse(Path file);
+    String parse(Path file) throws IOException;
 }

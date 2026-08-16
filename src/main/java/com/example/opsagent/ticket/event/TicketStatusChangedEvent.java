@@ -1,26 +1,22 @@
 package com.example.opsagent.ticket.event;
 
 import java.time.LocalDateTime;
-import lombok.AllArgsConstructor;
-import lombok.Data;
 
-@Data
-@AllArgsConstructor
-public class TicketStatusChangedEvent {
-
-    private Long ticketId;
-
-    private String title;
-
-    private String fromStatus;
-
-    private String toStatus;
-
-    private String operator;
-
-    private String assignee;
-
-    private String reason;
-
-    private LocalDateTime changedAt;
+/**
+ * 表示工单主事务中已完成的状态变化事实。
+ *
+ * @author heyu
+ * @since 2026/8/16
+ */
+public record TicketStatusChangedEvent(
+    Long ticketId,
+    String title,
+    String fromStatus,
+    String toStatus,
+    Long operatorId,
+    Long creatorId,
+    Long assigneeId,
+    String remark,
+    LocalDateTime occurredAt
+) {
 }

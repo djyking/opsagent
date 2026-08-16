@@ -1,5 +1,6 @@
 HELP.md
 *.md
+!opsAgent使用文档.md
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/

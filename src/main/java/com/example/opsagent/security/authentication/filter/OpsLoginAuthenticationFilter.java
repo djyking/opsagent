@@ -3,13 +3,13 @@ package com.example.opsagent.security.authentication.filter;
 import java.io.IOException;
 
 import com.example.opsagent.auth.dto.LoginRequest;
+import com.example.opsagent.security.authentication.exception.OpsLoginRequestException;
 import com.example.opsagent.security.authentication.token.OpsAuthenticationToken;
 import com.fasterxml.jackson.core.JacksonException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.AuthenticationServiceException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.authentication.AbstractAuthenticationProcessingFilter;
@@ -42,16 +42,16 @@ public class OpsLoginAuthenticationFilter extends AbstractAuthenticationProcessi
         try {
             loginRequest = objectMapper.readValue(request.getInputStream(), LoginRequest.class);
         } catch (JacksonException exception) {
-            throw new AuthenticationServiceException("登录请求 JSON 格式错误", exception);
+            throw new OpsLoginRequestException("登录请求 JSON 格式错误", exception);
         } catch (IOException exception) {
-            throw new AuthenticationServiceException("无法读取登录请求", exception);
+            throw new OpsLoginRequestException("无法读取登录请求", exception);
         }
         if (!StringUtils.hasText(loginRequest.getUsername()) || !StringUtils.hasText(loginRequest.getPassword())) {
-            throw new AuthenticationServiceException("username 和 password 不能为空");
+            throw new OpsLoginRequestException("username 和 password 不能为空");
         }
         if (loginRequest.getUsername().trim().length() > 64
             || loginRequest.getPassword().getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 72) {
-            throw new AuthenticationServiceException("username 或 password 长度不合法");
+            throw new OpsLoginRequestException("username 或 password 长度不合法");
         }
 
         OpsAuthenticationToken token = OpsAuthenticationToken.unauthenticated(

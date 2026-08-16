@@ -17,4 +17,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class OpsSecurityProperties {
 
     private List<String> permitAll = new ArrayList<>();
+
+    private String loginPageUrl = "/login";
 }

@@ -1,9 +1,12 @@
 package com.example.opsagent.auth.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.opsagent.auth.dao.SysRoleDao;
 import com.example.opsagent.auth.dao.SysUserDao;
+import com.example.opsagent.auth.dao.SysUserRoleDao;
 import com.example.opsagent.auth.dto.RegisterRequest;
 import com.example.opsagent.auth.entity.SysUser;
+import com.example.opsagent.auth.entity.SysUserRole;
 import com.example.opsagent.auth.enums.AuthErrorCode;
 import com.example.opsagent.auth.service.AuthService;
 import com.example.opsagent.common.enums.AuthRegisterStatusEnum;
@@ -25,7 +28,13 @@ import org.springframework.util.StringUtils;
 @Service
 public class AuthServiceImpl implements AuthService {
 
+    private static final String DEFAULT_ROLE_CODE = "USER";
+
     private final SysUserDao sysUserDao;
+
+    private final SysRoleDao sysRoleDao;
+
+    private final SysUserRoleDao sysUserRoleDao;
 
     private final PasswordEncoder passwordEncoder;
 
@@ -53,7 +62,16 @@ public class AuthServiceImpl implements AuthService {
         } catch (DuplicateKeyException exception) {
             throw new BusinessException(AuthErrorCode.USER_ALREADY_EXIST);
         }
+        Long roleId = sysRoleDao.selectEnabledRoleIdByCode(DEFAULT_ROLE_CODE);
+        if (roleId == null) {
+            throw new IllegalStateException("缺少已启用的默认 USER 角色");
+        }
+        SysUserRole userRole = new SysUserRole();
+        userRole.setUserId(user.getId());
+        userRole.setRoleId(roleId);
+        sysUserRoleDao.insert(userRole);
     }
+
     private SysUser querySysUserOne(RegisterRequest request) {
         LambdaQueryWrapper<SysUser> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(SysUser::getUsername, request.getUsername().trim());

@@ -1,14 +1,21 @@
 package com.example.opsagent.document.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
+import java.time.LocalDateTime;
+
 import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
-import java.time.LocalDateTime;
 import lombok.Data;
 
+/**
+ * 映射工单文档的存储、安全校验与解析状态元数据。
+ *
+ * @author heyu
+ * @since 2026/8/16
+ */
 @Data
 @TableName("document")
 public class Document {
@@ -16,17 +23,27 @@ public class Document {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    private String fileName;
+    private Long ticketId;
 
-    private String fileType;
+    private String originalName;
 
-    private Long fileSize;
+    private String storageName;
 
     private String storagePath;
 
-    private String status;
+    private String contentType;
 
-    private String uploader;
+    private String fileExtension;
+
+    private Long fileSize;
+
+    private String fileHash;
+
+    private String parseStatus;
+
+    private String parseError;
+
+    private Long createBy;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

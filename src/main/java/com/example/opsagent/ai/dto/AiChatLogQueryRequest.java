@@ -4,6 +4,12 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.Data;
 
+/**
+ * 承载工单问答记录的文档筛选和分页参数。
+ *
+ * @author heyu
+ * @since 2026/8/16
+ */
 @Data
 public class AiChatLogQueryRequest {
 

@@ -1,13 +1,20 @@
 package com.example.opsagent.ai.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
+import java.time.LocalDateTime;
+
 import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import java.time.LocalDateTime;
 import lombok.Data;
 
+/**
+ * 映射工单文档问答的成功或失败处理记录。
+ *
+ * @author heyu
+ * @since 2026/8/16
+ */
 @Data
 @TableName("ai_chat_log")
 public class AiChatLog {
@@ -15,13 +22,25 @@ public class AiChatLog {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    private Long ticketId;
+
+    private Long documentId;
+
+    private Long userId;
+
     private String question;
 
     private String answer;
 
-    private Long documentId;
+    private String modelName;
 
-    private String usedChunks;
+    private Integer promptTokens;
+
+    private Integer completionTokens;
+
+    private String status;
+
+    private String errorMessage;
 
     private Long costTimeMs;
 
