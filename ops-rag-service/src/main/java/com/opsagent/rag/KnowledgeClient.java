@@ -1,0 +1,2 @@
+package com.opsagent.rag;import java.util.*;import org.springframework.cloud.openfeign.FeignClient;import org.springframework.web.bind.annotation.*;
+@FeignClient(name="ops-knowledge-service",url="${ops.rag.knowledge-url:}") interface KnowledgeClient{@GetMapping("/api/knowledge/internal/search")Envelope<List<Map<String,Object>>> search(@RequestParam String query,@RequestParam int topK);record Envelope<T>(int code,String message,T data,String traceId){}}

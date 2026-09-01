@@ -1,16 +1,23 @@
 # opsagent
 
-`opsagent` 是一个前后端分离的运维工单与文档智能问答系统。后端采用 Java 17、Spring Boot、Spring Security、MyBatis-Plus 和 MySQL；前端位于 `opsagent-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
+`opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-第一阶段已形成“登录 → 工单 → 文档 → 解析 → 切片 → 检索 → 模型问答 → 引用 → 状态事件”的最小业务闭环。
+当前已形成“登录 → 工单 → 文档 → 解析 → 切片 → 检索 → 问答 → 引用 → 状态事件”的本地最小闭环。Redis、RabbitMQ、Elasticsearch、Nacos Config 和外部 LLM 默认关闭，属于可接入项，不能视为生产链路已经联调。原根目录 `src` 保存重构前未提交的单体代码作为迁移参照，不参与新的聚合构建。
 
 ## 项目结构
 
 ```text
 opsagent
-├─ src                         Spring Boot 后端代码
-├─ opsagent-web                Vue 3 前端项目
-├─ compose.yaml                MySQL 与 Redis 开发环境
+├─ ops-common                 公共响应、Web、安全、MyBatis、Redis/MQ 与可观测模块
+├─ ops-gateway                统一入口（8080）
+├─ ops-auth-service           认证服务（8101）
+├─ ops-ticket-service         工单服务（8102）
+├─ ops-knowledge-service      知识服务（8103）
+├─ ops-rag-service            RAG 服务（8104）
+├─ ops-platform-service       平台服务（8105）
+├─ ops-web                    Vue 3 前端项目
+├─ sql                        分库初始化脚本
+├─ compose.yaml               MySQL、Redis 与可选中间件
 ├─ opsAgent使用文档.md          完整功能使用说明
 └─ pom.xml                     后端 Maven 配置
 ```
@@ -26,17 +33,16 @@ opsagent
 ## 主要接口
 
 ```text
-POST /api/auth/register
 POST /api/auth/login
+POST /api/auth/refresh
 GET  /api/auth/me
 
 POST /api/tickets
 GET  /api/tickets
 GET  /api/tickets/{id}
 PUT  /api/tickets/{id}
-POST /api/tickets/{id}/accept
-POST /api/tickets/{id}/resolve
-POST /api/tickets/{id}/close
+POST /api/tickets/{id}/claim
+POST /api/tickets/{id}/transition
 
 POST   /api/tickets/{ticketId}/documents
 GET    /api/tickets/{ticketId}/documents
@@ -50,7 +56,7 @@ GET  /api/tickets/{ticketId}/questions
 GET  /api/questions/{id}
 ```
 
-完整请求和响应结构可在应用启动后通过 `http://localhost:8080/swagger-ui.html` 查看。
+各 MVC 服务启用 SpringDoc；经 Gateway 暴露 Swagger 聚合仍是后续项。
 
 ## 文档和问答
 
@@ -62,38 +68,37 @@ GET  /api/questions/{id}
 
 ## 配置
 
-通用配置位于 `src/main/resources/application.yml`，本地数据库配置位于 `src/main/resources/application-local.yml`。常用环境变量：
+配置位于各服务的 `src/main/resources/application.yml`。常用环境变量：
 
 ```text
-OPSAGENT_DB_URL
-OPSAGENT_DB_USERNAME
-OPSAGENT_DB_PASSWORD
-OPS_AGENT_JWT_SECRET          至少 32 个 UTF-8 字节
-OPS_AGENT_DOCUMENT_STORAGE    默认 ./data/uploads
-OPS_AGENT_AI_ENABLED           默认 false
-OPS_AGENT_AI_BASE_URL
-OPS_AGENT_AI_API_KEY
-OPS_AGENT_AI_MODEL
-OPS_AGENT_AI_TOP_K             默认 5
-OPS_AGENT_AI_CANDIDATE_LIMIT   默认 200
+OPS_AUTH_DB_URL / OPS_AUTH_DB_USERNAME / OPS_AUTH_DB_PASSWORD
+OPS_TICKET_DB_URL / OPS_TICKET_DB_USERNAME / OPS_TICKET_DB_PASSWORD
+OPS_KNOWLEDGE_DB_URL / OPS_KNOWLEDGE_DB_USERNAME / OPS_KNOWLEDGE_DB_PASSWORD
+OPS_JWT_SECRET                 至少 32 个 UTF-8 字节
+OPS_UPLOAD_DIR                 默认 ./data/uploads
+NACOS_ENABLED                  默认 false
+OPS_ES_ENABLED                 默认 false
+OPS_LLM_ENABLED                默认 false
+OPS_LLM_BASE_URL / OPS_LLM_API_KEY / OPS_LLM_MODEL
 ```
 
 密钥和生产数据库密码不要写入仓库。PowerShell 本地示例：
 
 ```powershell
-$env:OPS_AGENT_JWT_SECRET = '请替换为至少32字节的随机开发密钥'
+$env:OPS_JWT_SECRET = '请替换为至少32字节的随机开发密钥'
 ```
 
 ## 数据库与容器
 
-- 全新开发库：执行 `src/main/resources/db/schema.sql`。该脚本会删除并重建相关表，只能用于允许重建的数据库。
-- `schema.sql` 已合并表结构、权限表和基础角色数据，可重复执行；每次执行都会清空并重建项目表。
-- 本次代码不会自动执行任何 DDL。
+- 全新开发库：按顺序执行 `sql/01_ops_auth.sql` 至 `sql/05_ops_mq.sql`，最后执行 `sql/init_data.sql`。
+- Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
+- 本地初始管理员为 `admin / Admin@123`，仅用于开发，部署后必须替换。
 
-`compose.yaml` 提供 MySQL 8.4 和 Redis 7。Redis 第一阶段只作为后续基础设施，业务代码没有强行使用缓存。
+`compose.yaml` 默认提供 MySQL 8.4 和 Redis 7；`middleware` Profile 另提供 Nacos、RabbitMQ 和 Elasticsearch。
 
 ```powershell
 docker compose up -d
+docker compose --profile middleware up -d
 ```
 
 默认端口为 MySQL `3306`、Redis `6379`，容器密码可通过 `OPSAGENT_DB_USERNAME`、`OPSAGENT_DB_PASSWORD` 和 `OPSAGENT_DB_ROOT_PASSWORD` 覆盖。
@@ -104,15 +109,15 @@ docker compose up -d
 
 ```powershell
 .\mvnw.cmd clean package
-.\mvnw.cmd spring-boot:run
+.\mvnw.cmd clean package
 ```
 
-默认运行方式：只启动 `OpsagentApplication`，然后访问 `http://localhost:8080/login`。Spring Boot 会直接提供已构建的 Vue 页面，不需要再启动5173端口。
+后端是六个独立进程，分别运行各模块 `target` 下的可执行 Jar。统一 API 入口为 `http://localhost:8080`。
 
 只有修改前端源码并需要热更新时，才单独启动 Vite：
 
 ```powershell
-cd opsagent-web
+cd ops-web
 pnpm install
 pnpm dev
 ```
@@ -126,7 +131,7 @@ cd opsagent-web
 pnpm build
 ```
 
-构建结果位于 `opsagent-web/dist`，Maven 会将其打入 Spring Boot 可执行 Jar。也可以改用 Nginx 单独发布前端；如果前后端使用不同域名，需要额外配置受控 CORS，并覆盖 `OPS_AGENT_LOGIN_PAGE_URL`。
+构建结果位于 `ops-web/dist`，前端应由 Nginx 或静态站点独立发布；当前 Maven 不会把它打入某个业务服务 Jar。
 
 项目默认启用 `local` Profile，也可以用 `SPRING_PROFILES_ACTIVE` 覆盖。接口访问日志只记录请求方法、路径、响应状态、耗时和 Trace ID，不记录请求体、密码或完整 JWT。
 

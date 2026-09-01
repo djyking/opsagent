@@ -2,6 +2,10 @@ HELP.md
 *.md
 !opsAgent使用文档.md
 target/
+.env
+!.env.example
+.pnpm-store/
+data/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

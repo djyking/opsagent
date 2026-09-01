@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+<parent><groupId>com.opsagent</groupId><artifactId>ops-agent</artifactId><version>1.0.0-SNAPSHOT</version></parent>
+<artifactId>ops-common</artifactId><packaging>pom</packaging><modules>
+<module>ops-common-core</module><module>ops-common-web</module><module>ops-common-security</module><module>ops-common-mybatis</module>
+<module>ops-common-redis</module><module>ops-common-mq</module><module>ops-common-observability</module>
+</modules></project>

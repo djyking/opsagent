@@ -1,0 +1,32 @@
+server:
+  port: 8101
+spring:
+  application:
+    name: ops-auth-service
+  config:
+    import: optional:nacos:${spring.application.name}.yaml
+  datasource:
+    url: ${OPS_AUTH_DB_URL:jdbc:mysql://localhost:3306/ops_auth?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${OPS_AUTH_DB_USERNAME:root}
+    password: ${OPS_AUTH_DB_PASSWORD:}
+  cloud:
+    nacos:
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+ops:
+  security:
+    secret: ${OPS_JWT_SECRET:}
+    access-token-ttl: 30m
+    permit-all: [/api/auth/login, /api/auth/refresh, /actuator/health, /actuator/info]
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

@@ -1,0 +1,2 @@
+<script setup lang="ts">import{onMounted,ref}from'vue';import{request}from'@/api/http';const status=ref('检查中…');onMounted(async()=>{try{await request({url:'/api/platform/info'});status.value='Gateway 与 Platform 服务可访问'}catch{status.value='服务不可访问，请检查启动顺序'}})</script>
+<template><section class="panel"><header class="panel-header"><div><span class="eyebrow">OBSERVABILITY</span><h3>系统监控</h3></div></header><div class="system-state"><i/>{{status}}</div><p>Prometheus 指标由各服务的 <code>/actuator/prometheus</code> 暴露；Grafana 接入后可在此配置外部仪表盘链接。</p></section></template>

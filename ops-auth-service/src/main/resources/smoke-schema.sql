@@ -1,0 +1,8 @@
+CREATE TABLE sys_user(id BIGINT AUTO_INCREMENT PRIMARY KEY,username VARCHAR(64) NOT NULL UNIQUE,password VARCHAR(128) NOT NULL,display_name VARCHAR(64) NOT NULL,status VARCHAR(16) NOT NULL,create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,deleted TINYINT DEFAULT 0);
+CREATE TABLE sys_role(id BIGINT AUTO_INCREMENT PRIMARY KEY,code VARCHAR(64) NOT NULL UNIQUE,name VARCHAR(64),status VARCHAR(16),deleted TINYINT DEFAULT 0);
+CREATE TABLE sys_permission(id BIGINT AUTO_INCREMENT PRIMARY KEY,code VARCHAR(128),name VARCHAR(128),status VARCHAR(16));
+CREATE TABLE sys_user_role(id BIGINT AUTO_INCREMENT PRIMARY KEY,user_id BIGINT,role_id BIGINT);
+CREATE TABLE sys_role_permission(id BIGINT AUTO_INCREMENT PRIMARY KEY,role_id BIGINT,permission_id BIGINT);
+CREATE TABLE auth_refresh_token(id BIGINT AUTO_INCREMENT PRIMARY KEY,token_id VARCHAR(36),user_id BIGINT,token_hash VARCHAR(64),expire_time TIMESTAMP,revoked TINYINT DEFAULT 0,revoke_time TIMESTAMP,create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO sys_user(id,username,password,display_name,status,deleted) VALUES(1,'admin','$2a$10$3R0PLn3EPrcr3JmIWz61M./ea71Q7Z849ICq0sKienFN0SWQ3rzde','系统管理员','enable',0),(2,'ops','$2a$10$d.yy0sNJpCM1XA7hSJxG0evNqKUZpUzd2v2faPiqAR80ht0CTj.ee','运维人员','enable',0),(3,'user','$2a$10$d1mFiRIhZZFozM6MfYYoXePkXR1tCBxYt/YyO5s.1cn1oHDolGRQS','普通用户','enable',0);
+INSERT INTO sys_role VALUES(1,'ADMIN','管理员','enable',0),(2,'OPS','运维人员','enable',0),(3,'USER','普通用户','enable',0);INSERT INTO sys_permission VALUES(1,'ticket:read','查看工单','enable');INSERT INTO sys_user_role(user_id,role_id) VALUES(1,1),(2,2),(3,3);INSERT INTO sys_role_permission(role_id,permission_id) VALUES(1,1),(2,1),(3,1);

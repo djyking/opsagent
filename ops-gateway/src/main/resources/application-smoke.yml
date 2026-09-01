@@ -1,0 +1,11 @@
+spring:
+  cloud:
+    discovery:
+      client:
+        simple:
+          instances:
+            ops-auth-service: [{ uri: 'http://localhost:8101' }]
+            ops-ticket-service: [{ uri: 'http://localhost:8102' }]
+            ops-knowledge-service: [{ uri: 'http://localhost:8103' }]
+            ops-rag-service: [{ uri: 'http://localhost:8104' }]
+            ops-platform-service: [{ uri: 'http://localhost:8105' }]

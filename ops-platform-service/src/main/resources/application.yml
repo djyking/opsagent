@@ -1,0 +1,4 @@
+server: { port: 8105 }
+spring: { application: { name: ops-platform-service }, config: { import: 'optional:nacos:${spring.application.name}.yaml' }, cloud: { nacos: { config: { enabled: '${NACOS_CONFIG_ENABLED:false}', server-addr: '${NACOS_SERVER_ADDR:localhost:8848}' }, discovery: { enabled: '${NACOS_ENABLED:false}', server-addr: '${NACOS_SERVER_ADDR:localhost:8848}' } } } }
+ops: { security: { secret: '${OPS_JWT_SECRET:}', permit-all: [/actuator/health, /actuator/info] } }
+management: { endpoints: { web: { exposure: { include: 'health,info,prometheus' } } } }

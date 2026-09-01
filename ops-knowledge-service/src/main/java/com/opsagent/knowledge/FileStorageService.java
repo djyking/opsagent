@@ -1,0 +1,1 @@
+package com.opsagent.knowledge;import java.io.IOException;import java.nio.file.Path;import org.springframework.web.multipart.MultipartFile;public interface FileStorageService{StoredFile store(MultipartFile file)throws IOException;Path resolve(String relativePath);record StoredFile(String originalName,String relativePath,String extension,long size,String sha256){}}

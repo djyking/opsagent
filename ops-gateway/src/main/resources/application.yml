@@ -1,0 +1,43 @@
+server:
+  port: 8080
+spring:
+  application:
+    name: ops-gateway
+  config:
+    import: optional:nacos:${spring.application.name}.yaml
+  cloud:
+    nacos:
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+    gateway:
+      server:
+        webflux:
+          routes:
+            - id: auth
+              uri: lb://ops-auth-service
+              predicates: [ Path=/api/auth/** ]
+            - id: ticket
+              uri: lb://ops-ticket-service
+              predicates: [ Path=/api/tickets/** ]
+            - id: knowledge
+              uri: lb://ops-knowledge-service
+              predicates: [ Path=/api/knowledge/** ]
+            - id: rag
+              uri: lb://ops-rag-service
+              predicates: [ Path=/api/rag/** ]
+            - id: platform
+              uri: lb://ops-platform-service
+              predicates: [ Path=/api/platform/** ]
+ops:
+  gateway:
+    security:
+      jwt-secret: ${OPS_JWT_SECRET:}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
