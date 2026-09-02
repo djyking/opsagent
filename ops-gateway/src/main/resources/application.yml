@@ -19,19 +19,24 @@ spring:
           routes:
             - id: auth
               uri: lb://ops-auth-service
-              predicates: [ Path=/api/auth/** ]
+              predicates:
+                - Path=/api/auth/**
             - id: ticket
               uri: lb://ops-ticket-service
-              predicates: [ Path=/api/tickets/** ]
+              predicates:
+                - Path=/api/tickets/**
             - id: knowledge
               uri: lb://ops-knowledge-service
-              predicates: [ Path=/api/knowledge/** ]
+              predicates:
+                - Path=/api/knowledge/**
             - id: rag
               uri: lb://ops-rag-service
-              predicates: [ Path=/api/rag/** ]
+              predicates:
+                - Path=/api/rag/**
             - id: platform
               uri: lb://ops-platform-service
-              predicates: [ Path=/api/platform/** ]
+              predicates:
+                - Path=/api/platform/**
 ops:
   gateway:
     security:

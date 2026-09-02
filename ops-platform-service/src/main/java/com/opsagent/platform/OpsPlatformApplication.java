@@ -1,1 +1,12 @@
-package com.opsagent.platform;import org.springframework.boot.SpringApplication;import org.springframework.boot.autoconfigure.SpringBootApplication;@SpringBootApplication public class OpsPlatformApplication{public static void main(String[]a){SpringApplication.run(OpsPlatformApplication.class,a);}}
+package com.opsagent.platform;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+/** 平台管理服务启动入口。 */
+@SpringBootApplication
+public class OpsPlatformApplication {
+    public static void main(String[] a) {
+        SpringApplication.run(OpsPlatformApplication.class, a);
+    }
+}

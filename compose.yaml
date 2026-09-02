@@ -10,18 +10,41 @@ services:
       - mysql-data:/var/lib/mysql
       - ./sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${OPS_MYSQL_ROOT_PASSWORD:-opsagent_local}"]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-uroot",
+          "-p${OPS_MYSQL_ROOT_PASSWORD:-opsagent_local}",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
 
   redis:
     image: redis:7.4-alpine
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${OPS_REDIS_PASSWORD:-opsagent_local}"]
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${OPS_REDIS_PASSWORD:-opsagent_local}",
+      ]
     ports: ["6379:6379"]
     volumes: ["redis-data:/data"]
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${OPS_REDIS_PASSWORD:-opsagent_local}", "ping"]
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${OPS_REDIS_PASSWORD:-opsagent_local}",
+          "ping",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -58,7 +81,11 @@ services:
     ports: ["9200:9200"]
     volumes: ["elasticsearch-data:/usr/share/elasticsearch/data"]
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://localhost:9200/_cluster/health || exit 1",
+        ]
       interval: 15s
       timeout: 5s
       retries: 20

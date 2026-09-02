@@ -1,4 +1,108 @@
 package com.opsagent.ticket;
-import java.time.LocalDateTime;import com.baomidou.mybatisplus.annotation.*;
-@TableName("ticket") public class Ticket {@TableId(type=IdType.AUTO)private Long id;private String ticketNo;private String title;private String description;private String priority;private String status;private Long creatorId;private Long assigneeId;@Version private Integer version;private LocalDateTime createTime;private LocalDateTime updateTime;@TableLogic private Integer deleted;
- public Long getId(){return id;}public void setId(Long v){id=v;}public String getTicketNo(){return ticketNo;}public void setTicketNo(String v){ticketNo=v;}public String getTitle(){return title;}public void setTitle(String v){title=v;}public String getDescription(){return description;}public void setDescription(String v){description=v;}public String getPriority(){return priority;}public void setPriority(String v){priority=v;}public String getStatus(){return status;}public void setStatus(String v){status=v;}public Long getCreatorId(){return creatorId;}public void setCreatorId(Long v){creatorId=v;}public Long getAssigneeId(){return assigneeId;}public void setAssigneeId(Long v){assigneeId=v;}public Integer getVersion(){return version;}public void setVersion(Integer v){version=v;}public LocalDateTime getCreateTime(){return createTime;}public LocalDateTime getUpdateTime(){return updateTime;}public void setDeleted(Integer v){deleted=v;}}
+
+import com.baomidou.mybatisplus.annotation.*;
+
+import java.time.LocalDateTime;
+
+/** 工单聚合的核心持久化实体。 */
+@TableName("ticket")
+public class Ticket {
+    @TableId(type = IdType.AUTO)
+    private Long id;
+
+    private String ticketNo;
+    private String title;
+    private String description;
+    private String priority;
+    private String status;
+    private Long creatorId;
+    private Long assigneeId;
+    @Version private Integer version;
+    private LocalDateTime createTime;
+    private LocalDateTime updateTime;
+    @TableLogic private Integer deleted;
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long v) {
+        id = v;
+    }
+
+    public String getTicketNo() {
+        return ticketNo;
+    }
+
+    public void setTicketNo(String v) {
+        ticketNo = v;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String v) {
+        title = v;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String v) {
+        description = v;
+    }
+
+    public String getPriority() {
+        return priority;
+    }
+
+    public void setPriority(String v) {
+        priority = v;
+    }
+
+    public String getStatus() {
+        return status;
+    }
+
+    public void setStatus(String v) {
+        status = v;
+    }
+
+    public Long getCreatorId() {
+        return creatorId;
+    }
+
+    public void setCreatorId(Long v) {
+        creatorId = v;
+    }
+
+    public Long getAssigneeId() {
+        return assigneeId;
+    }
+
+    public void setAssigneeId(Long v) {
+        assigneeId = v;
+    }
+
+    public Integer getVersion() {
+        return version;
+    }
+
+    public void setVersion(Integer v) {
+        version = v;
+    }
+
+    public LocalDateTime getCreateTime() {
+        return createTime;
+    }
+
+    public LocalDateTime getUpdateTime() {
+        return updateTime;
+    }
+
+    public void setDeleted(Integer v) {
+        deleted = v;
+    }
+}

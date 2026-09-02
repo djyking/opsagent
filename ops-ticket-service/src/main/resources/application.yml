@@ -1,11 +1,30 @@
-server: { port: 8102 }
+server:
+  port: 8102
 spring:
-  application: { name: ops-ticket-service }
-  config: { import: 'optional:nacos:${spring.application.name}.yaml' }
+  application:
+    name: ops-ticket-service
+  config:
+    import: optional:nacos:${spring.application.name}.yaml
   datasource:
     url: ${OPS_TICKET_DB_URL:jdbc:mysql://localhost:3306/ops_ticket?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${OPS_TICKET_DB_USERNAME:root}
     password: ${OPS_TICKET_DB_PASSWORD:}
-  cloud: { nacos: { config: { enabled: '${NACOS_CONFIG_ENABLED:false}', server-addr: '${NACOS_SERVER_ADDR:localhost:8848}' }, discovery: { enabled: '${NACOS_ENABLED:false}', server-addr: '${NACOS_SERVER_ADDR:localhost:8848}' } } }
-ops: { security: { secret: '${OPS_JWT_SECRET:}', permit-all: [/actuator/health, /actuator/info] } }
-management: { endpoints: { web: { exposure: { include: 'health,info,prometheus' } } } }
+  cloud:
+    nacos:
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+ops:
+  security:
+    secret: ${OPS_JWT_SECRET:}
+    permit-all:
+      - /actuator/health
+      - /actuator/info
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

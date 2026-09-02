@@ -1,2 +1,27 @@
-package com.opsagent.rag;import com.opsagent.common.core.ApiResponse;import jakarta.validation.Valid;import jakarta.validation.constraints.*;import org.springframework.web.bind.annotation.*;
-@RestController @RequestMapping("/api/rag") public class RagController{private final RagService service;RagController(RagService s){service=s;}record ChatRequest(@NotBlank @Size(max=2000)String question,@Min(1)@Max(20)Integer topK){}@PostMapping("/chat")ApiResponse<RagService.Answer> chat(@Valid @RequestBody ChatRequest r){return ApiResponse.success(service.ask(r.question(),r.topK()==null?5:r.topK()));}}
+package com.opsagent.rag;
+
+import com.opsagent.common.core.ApiResponse;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
+
+import org.springframework.web.bind.annotation.*;
+
+/** 提供基于知识库引用的问答接口。 */
+@RestController
+@RequestMapping("/api/rag")
+public class RagController {
+    private final RagService service;
+
+    RagController(RagService s) {
+        service = s;
+    }
+
+    record ChatRequest(
+            @NotBlank @Size(max = 2000) String question, @Min(1) @Max(20) Integer topK) {}
+
+    @PostMapping("/chat")
+    ApiResponse<RagService.Answer> chat(@Valid @RequestBody ChatRequest r) {
+        return ApiResponse.success(service.ask(r.question(), r.topK() == null ? 5 : r.topK()));
+    }
+}

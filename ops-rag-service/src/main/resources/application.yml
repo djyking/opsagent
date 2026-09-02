@@ -1,4 +1,33 @@
-server: { port: 8104 }
-spring: { application: { name: ops-rag-service }, config: { import: 'optional:nacos:${spring.application.name}.yaml' }, cloud: { nacos: { config: { enabled: '${NACOS_CONFIG_ENABLED:false}', server-addr: '${NACOS_SERVER_ADDR:localhost:8848}' }, discovery: { enabled: '${NACOS_ENABLED:false}', server-addr: '${NACOS_SERVER_ADDR:localhost:8848}' } } } }
-ops: { security: { secret: '${OPS_JWT_SECRET:}', permit-all: [/actuator/health, /actuator/info] }, rag: { knowledge-url: '${OPS_KNOWLEDGE_URL:}', elasticsearch-enabled: '${OPS_ES_ENABLED:false}', llm-enabled: '${OPS_LLM_ENABLED:false}', llm-base-url: '${OPS_LLM_BASE_URL:}', llm-api-key: '${OPS_LLM_API_KEY:}', llm-model: '${OPS_LLM_MODEL:}' } }
-management: { endpoints: { web: { exposure: { include: 'health,info,prometheus' } } } }
+server:
+  port: 8104
+spring:
+  application:
+    name: ops-rag-service
+  config:
+    import: optional:nacos:${spring.application.name}.yaml
+  cloud:
+    nacos:
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+ops:
+  security:
+    secret: ${OPS_JWT_SECRET:}
+    permit-all:
+      - /actuator/health
+      - /actuator/info
+  rag:
+    knowledge-url: ${OPS_KNOWLEDGE_URL:}
+    elasticsearch-enabled: ${OPS_ES_ENABLED:false}
+    llm-enabled: ${OPS_LLM_ENABLED:false}
+    llm-base-url: ${OPS_LLM_BASE_URL:}
+    llm-api-key: ${OPS_LLM_API_KEY:}
+    llm-model: ${OPS_LLM_MODEL:}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

@@ -3,9 +3,10 @@ package com.opsagent.common.security;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import org.junit.jupiter.api.Test;
+
 import java.time.Duration;
 import java.util.List;
-import org.junit.jupiter.api.Test;
 
 class JwtServiceTest {
     @Test

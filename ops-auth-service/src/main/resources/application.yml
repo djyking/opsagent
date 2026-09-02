@@ -21,7 +21,11 @@ ops:
   security:
     secret: ${OPS_JWT_SECRET:}
     access-token-ttl: 30m
-    permit-all: [/api/auth/login, /api/auth/refresh, /actuator/health, /actuator/info]
+    permit-all:
+      - /api/auth/login
+      - /api/auth/refresh
+      - /actuator/health
+      - /actuator/info
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

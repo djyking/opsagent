@@ -1,9 +1,120 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { Activity, ArrowLeft, UserPlus, Eye, EyeOff } from '@lucide/vue'
-import { authApi } from '@/api/modules'
-const router=useRouter(); const form=ref({username:'',displayName:'',password:'',confirm:''}); const showPassword=ref(false); const showConfirmPassword=ref(false); const error=ref(''); const busy=ref(false)
-async function submit(){ if(form.value.password!==form.value.confirm){error.value='两次输入的密码不一致';return} busy.value=true;error.value='';try{await authApi.register({username:form.value.username,password:form.value.password,displayName:form.value.displayName||undefined});await router.push({path:'/login',query:{registered:'1'}})}catch(e){error.value=e instanceof Error?e.message:'注册失败'}finally{busy.value=false}}
+import { ref } from "vue";
+import { useRouter } from "vue-router";
+import { Activity, ArrowLeft, UserPlus, Eye, EyeOff } from "@lucide/vue";
+import { authApi } from "@/api/modules";
+const router = useRouter();
+const form = ref({ username: "", displayName: "", password: "", confirm: "" });
+const showPassword = ref(false);
+const showConfirmPassword = ref(false);
+const error = ref("");
+const busy = ref(false);
+async function submit() {
+  if (form.value.password !== form.value.confirm) {
+    error.value = "两次输入的密码不一致";
+    return;
+  }
+  busy.value = true;
+  error.value = "";
+  try {
+    await authApi.register({
+      username: form.value.username,
+      password: form.value.password,
+      displayName: form.value.displayName || undefined,
+    });
+    await router.push({ path: "/login", query: { registered: "1" } });
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "注册失败";
+  } finally {
+    busy.value = false;
+  }
+}
 </script>
-<template><main class="auth-page compact"><section class="auth-story"><div class="auth-brand"><span><Activity :size="22" /></span> OpsAgent</div><div class="story-copy"><span class="eyebrow light">START HERE</span><h1>加入运维协作，<br><em>从一个工单开始。</em></h1><p>新注册账号默认获得普通用户权限。运维和管理员角色由数据库管理员分配。</p></div></section><section class="auth-panel"><form class="auth-card" @submit.prevent="submit"><div><button type="button" class="text-button" @click="router.push('/login')"><ArrowLeft :size="16" /> 返回登录</button><h2>创建账号</h2><p>密码长度为 6～72 位</p></div><label>用户名<input v-model.trim="form.username" required maxlength="64" placeholder="用于登录" /></label><label>显示名称<input v-model.trim="form.displayName" maxlength="64" placeholder="选填" /></label><label>密码<div class="password-field"><input v-model="form.password" required minlength="6" maxlength="72" :type="showPassword?'text':'password'" autocomplete="new-password"/><button type="button" class="password-toggle" :aria-label="showPassword?'隐藏密码':'显示密码'" :title="showPassword?'隐藏密码':'显示密码'" @click="showPassword=!showPassword"><EyeOff v-if="showPassword" :size="18"/><Eye v-else :size="18"/></button></div></label><label>确认密码<div class="password-field"><input v-model="form.confirm" required :type="showConfirmPassword?'text':'password'" autocomplete="new-password"/><button type="button" class="password-toggle" :aria-label="showConfirmPassword?'隐藏确认密码':'显示确认密码'" :title="showConfirmPassword?'隐藏确认密码':'显示确认密码'" @click="showConfirmPassword=!showConfirmPassword"><EyeOff v-if="showConfirmPassword" :size="18"/><Eye v-else :size="18"/></button></div></label><p v-if="error" class="form-error">{{ error }}</p><button class="button primary auth-submit" :disabled="busy"><UserPlus :size="18" />{{busy?'创建中…':'创建账号'}}</button></form></section></main></template>
+<template>
+  <main class="auth-page compact">
+    <section class="auth-story">
+      <div class="auth-brand">
+        <span><Activity :size="22" /></span> OpsAgent
+      </div>
+      <div class="story-copy">
+        <span class="eyebrow light">START HERE</span>
+        <h1>加入运维协作，<br /><em>从一个工单开始。</em></h1>
+        <p>
+          新注册账号默认获得普通用户权限。运维和管理员角色由数据库管理员分配。
+        </p>
+      </div>
+    </section>
+    <section class="auth-panel">
+      <form class="auth-card" @submit.prevent="submit">
+        <div>
+          <button
+            type="button"
+            class="text-button"
+            @click="router.push('/login')"
+          >
+            <ArrowLeft :size="16" /> 返回登录
+          </button>
+          <h2>创建账号</h2>
+          <p>密码长度为 6～72 位</p>
+        </div>
+        <label
+          >用户名<input
+            v-model.trim="form.username"
+            required
+            maxlength="64"
+            placeholder="用于登录" /></label
+        ><label
+          >显示名称<input
+            v-model.trim="form.displayName"
+            maxlength="64"
+            placeholder="选填" /></label
+        ><label
+          >密码
+          <div class="password-field">
+            <input
+              v-model="form.password"
+              required
+              minlength="6"
+              maxlength="72"
+              :type="showPassword ? 'text' : 'password'"
+              autocomplete="new-password"
+            /><button
+              type="button"
+              class="password-toggle"
+              :aria-label="showPassword ? '隐藏密码' : '显示密码'"
+              :title="showPassword ? '隐藏密码' : '显示密码'"
+              @click="showPassword = !showPassword"
+            >
+              <EyeOff v-if="showPassword" :size="18" /><Eye v-else :size="18" />
+            </button></div></label
+        ><label
+          >确认密码
+          <div class="password-field">
+            <input
+              v-model="form.confirm"
+              required
+              :type="showConfirmPassword ? 'text' : 'password'"
+              autocomplete="new-password"
+            /><button
+              type="button"
+              class="password-toggle"
+              :aria-label="
+                showConfirmPassword ? '隐藏确认密码' : '显示确认密码'
+              "
+              :title="showConfirmPassword ? '隐藏确认密码' : '显示确认密码'"
+              @click="showConfirmPassword = !showConfirmPassword"
+            >
+              <EyeOff v-if="showConfirmPassword" :size="18" /><Eye
+                v-else
+                :size="18"
+              />
+            </button></div
+        ></label>
+        <p v-if="error" class="form-error">{{ error }}</p>
+        <button class="button primary auth-submit" :disabled="busy">
+          <UserPlus :size="18" />{{ busy ? "创建中…" : "创建账号" }}
+        </button>
+      </form>
+    </section>
+  </main>
+</template>
