@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Bean;
  * 自动注册通用 Web 过滤器和异常处理组件。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/7/27
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)

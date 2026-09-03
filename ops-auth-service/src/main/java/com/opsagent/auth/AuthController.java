@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.*;
  * 提供登录、令牌刷新、退出和当前用户查询接口。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/7/31
  */
 @RestController
 @RequestMapping("/api/auth")

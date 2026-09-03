@@ -13,7 +13,7 @@ import javax.crypto.SecretKey;
  * 负责 JWT 的签发、签名验证和声明解析。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/7/21
  */
 public class JwtService {
     private final JwtProperties properties;

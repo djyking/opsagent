@@ -22,7 +22,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * 为 Servlet 业务服务提供统一的无状态 JWT 安全链。
  *
  * @author heyu
- * @since 2026/9/1
+ * @since 2026/7/22
  */
 @AutoConfiguration
 @EnableMethodSecurity

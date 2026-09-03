@@ -312,3 +312,80 @@ opsagent-web/dist
 ### 数据库表字段不匹配
 
 说明数据库仍是旧结构。不要直接运行全量脚本覆盖已有数据，应先备份并审核 `phase1_v2_migration.sql`。
+
+## 13. 当前微服务本地环境
+
+当前根 POM 是 `pom` 聚合工程，实际运行的是 Gateway、Auth、Ticket、Knowledge、RAG 和
+Platform 六个进程。推荐使用统一脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\start-opsagent.ps1 -Build
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\status-opsagent.ps1
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
+```
+
+本地演示账号为 `admin / Admin@123`、`ops / Ops@123`、`user / User@123`。这些密码只允许
+在本地环境使用。
+
+## 14. 业务演示场景和数据
+
+`sql/06_scenario_data.sql` 是可重复执行的演示数据脚本，固定使用 `1000` 以上的主键，避免与
+接口实时创建的数据冲突。脚本提供以下场景：
+
+| 场景 | 演示目标 | 相关数据或接口 |
+|---|---|---|
+| 多人并发接单 | 多个运维人员同时提交相同版本，条件更新只允许一个请求成功 | `OPS-SCENE-1001`、`POST /api/tickets/{id}/claim` |
+| Redis 命中率下降 | 从缓存命中率、过期集中、淘汰和数据库回源分析故障 | `OPS-SCENE-1002`、知识切片 `1003` |
+| Nacos 配置漂移 | 对比 dataId、group、namespace 和实例配置状态 | `OPS-SCENE-1003`、知识切片 `1004` |
+| 磁盘容量告警 | 处理上传目录增长，并规划对象存储迁移 | `OPS-SCENE-1004` |
+| Sentinel 限流异常 | 分析 429、调用峰值和热点规则 | `OPS-SCENE-1005` |
+| 线程池队列积压 | 通过有界线程池、错峰和下游限流恢复 CPU | `OPS-SCENE-1006`、知识切片 `1005` |
+| Refresh Token 失效 | 区分令牌过期、撤销和客户端重试问题 | `OPS-SCENE-1007` |
+| RAG 降级检索 | 未接 Elasticsearch/LLM 时仍能用 MySQL 文本检索返回引用 | 知识库 `101`—`103`、切片 `1001`—`1006` |
+
+执行方式：
+
+```powershell
+D:\middleware\runtime\mysql-8.0.46\bin\mysql.exe -uroot -p2491125 `
+  --default-character-set=utf8mb4 < D:\myselfProject\opsagent\sql\06_scenario_data.sql
+```
+
+`TicketClaimConcurrencyTest` 使用 Java 17 的固定大小线程池，让 8 个工作线程同时更新同一条
+工单，并断言只有一个线程成功。这个测试覆盖数据库原子条件更新和乐观锁，而不是仅演示线程 API。
+
+Java 17 没有正式版虚拟线程。虚拟线程在 Java 21 正式发布，因此当前代码不能使用
+`Executors.newVirtualThreadPerTaskExecutor()`。升级到 Java 21 后，可将文档解析等 I/O 密集任务
+迁移到虚拟线程；数据库连接池、外部模型并发和上传带宽仍必须使用信号量或限流器设置上限。
+
+## 15. SQL 组织方式
+
+Auth 和 Ticket 服务当前只有少量固定 CRUD 与原子更新，MyBatis 注解 SQL 短且没有动态条件，
+继续保留注解比增加 XML 更容易阅读。Knowledge 服务当前使用参数化 `JdbcTemplate`，不是 MyBatis。
+
+出现以下任一情况时应迁移到 `src/main/resources/mapper/*.xml`：
+
+- 多表查询持续增长、单条 SQL 超过约 10—15 行；
+- 使用多个动态条件、`foreach`、`choose` 或可复用 SQL 片段；
+- 需要复杂 `resultMap`、嵌套映射或由 DBA 独立审查 SQL；
+- Java 字符串拼接已经妨碍格式化和执行计划分析。
+
+迁移时设置 `mybatis-plus.mapper-locations=classpath*:/mapper/**/*.xml`。当前 SQL 规模尚未达到
+迁移阈值，因此没有为了形式统一而创建空的 XML 映射文件。
+
+## 16. 中间件实际状态
+
+| 组件 | 当前状态 | 说明 |
+|---|---|---|
+| MySQL | 已运行 | 四个业务库和演示数据均已初始化 |
+| Redis | 已运行并接入 | Auth 使用配置化连接，带密码探针 |
+| Nacos | 已运行并接入 | 服务注册和六份配置均可验证 |
+| Sentinel | 已运行并接入 | 六个应用已注册到 Dashboard |
+| Prometheus Server | 已下载并接入 | 抓取 Gateway 与五个业务服务的 `/actuator/prometheus` |
+| Grafana | 配置已准备，程序包待补齐 | 官方 CDN 下载速度异常；放入指定目录后启动脚本会自动启用 |
+| RabbitMQ | 未接入 | 只有 Outbox 表和事件模型，没有 Publisher、Consumer、重试和死信链路 |
+| Elasticsearch | 未接入 | 没有索引映射、写入或查询适配器；Java 客户端应作为 Maven 依赖引入 |
+| 外部 LLM | 未接入 | 缺少供应商、模型地址和 API Key，当前使用检索降级回答 |
+
+Prometheus 页面为 `http://127.0.0.1:9090/`，Grafana 默认页面为
+`http://127.0.0.1:3000/`。本地 Grafana 初始账号由启动脚本设置为 `admin / opsagent_local`，
+实际部署必须修改。

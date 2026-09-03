@@ -11,7 +11,7 @@ import java.util.*;
  * 编排知识检索与回答生成；外部模型关闭时返回可解释的本地降级结果。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/27
  */
 @Service
 public class RagService {
@@ -45,7 +45,7 @@ public class RagService {
      * 检索增强问答结果。
      *
      * @author heyu
-     * @since 2026/9/2
+     * @since 2026/8/27
      */
     record Answer(String answer, List<Map<String, Object>> references, String model) {}
 }

@@ -7,7 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * OpsAgent 统一 API 网关启动入口。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/9/3
  */
 @SpringBootApplication
 public class OpsGatewayApplication {

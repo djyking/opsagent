@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Bean;
  * 注册 MyBatis-Plus 的通用插件和数据库访问约束。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/7/28
  */
 @AutoConfiguration
 public class MybatisAutoConfiguration {

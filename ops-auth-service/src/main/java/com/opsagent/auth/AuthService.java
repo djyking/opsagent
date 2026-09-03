@@ -19,7 +19,7 @@ import java.util.*;
  * 认证领域服务，负责凭据校验和 Access/Refresh Token 生命周期。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/2
  */
 @Service
 public class AuthService {

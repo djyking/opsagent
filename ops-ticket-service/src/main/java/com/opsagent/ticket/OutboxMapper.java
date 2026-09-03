@@ -6,7 +6,7 @@ import org.apache.ibatis.annotations.Insert;
  * 在业务事务内写入待发布事件，供后续 Outbox Publisher 投递。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/7
  */
 public interface OutboxMapper {
     @Insert(

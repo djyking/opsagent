@@ -28,6 +28,7 @@ ops:
     permit-all:
       - /actuator/health
       - /actuator/info
+      - /actuator/prometheus
 management:
   endpoints:
     web:

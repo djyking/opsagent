@@ -6,7 +6,7 @@ import java.util.Set;
  * 工单状态及其允许的单步流转关系。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/13
  */
 public enum TicketStatus {
     CREATED(Set.of("ASSIGNED", "REJECTED")),

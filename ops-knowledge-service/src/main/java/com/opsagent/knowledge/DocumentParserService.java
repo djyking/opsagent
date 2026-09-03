@@ -14,7 +14,7 @@ import java.util.*;
  * 解析受支持的文档，并按固定窗口和重叠长度生成文本切片。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/16
  */
 @Service
 public class DocumentParserService {

@@ -20,7 +20,7 @@ import javax.crypto.SecretKey;
  * Gateway 全局过滤器，统一生成 Trace ID 并在转发前校验 JWT 签名。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/9/1
  */
 @Component
 public class GatewaySecurityFilter implements GlobalFilter, Ordered {

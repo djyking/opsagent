@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  * Refresh Token 持久化操作，数据库中只保存不可逆摘要。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/4
  */
 public interface RefreshTokenMapper {
     @Insert(

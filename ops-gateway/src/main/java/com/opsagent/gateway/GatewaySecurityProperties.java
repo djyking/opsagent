@@ -8,7 +8,7 @@ import java.util.List;
  * Gateway 的 JWT 密钥和匿名访问路径配置。
  *
  * @author heyu
- * @since 2026/9/3
+ * @since 2026/9/2
  */
 @ConfigurationProperties("ops.gateway.security")
 public class GatewaySecurityProperties {

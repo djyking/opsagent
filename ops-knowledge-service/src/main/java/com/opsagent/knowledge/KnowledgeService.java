@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  * 知识库领域服务，编排文件存储、文档解析和本地检索降级。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/20
  */
 @Service
 public class KnowledgeService {

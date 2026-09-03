@@ -9,7 +9,7 @@ import java.util.*;
  * RAG 服务访问知识检索接口的声明式客户端。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/24
  */
 @FeignClient(name = "ops-knowledge-service", url = "${ops.rag.knowledge-url:}")
 interface KnowledgeClient {
@@ -20,7 +20,7 @@ interface KnowledgeClient {
      * 知识服务统一响应包装。
      *
      * @author heyu
-     * @since 2026/9/2
+     * @since 2026/8/24
      */
     record Envelope<T>(int code, String message, T data, String traceId) {}
 }

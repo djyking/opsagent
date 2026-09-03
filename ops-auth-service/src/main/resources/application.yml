@@ -39,6 +39,7 @@ ops:
       - /api/auth/refresh
       - /actuator/health
       - /actuator/info
+      - /actuator/prometheus
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

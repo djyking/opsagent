@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * 认证与权限服务启动入口。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/3
  */
 @SpringBootApplication
 @MapperScan("com.opsagent.auth")

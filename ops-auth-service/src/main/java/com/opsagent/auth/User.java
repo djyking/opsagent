@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.*;
  * 系统用户持久化实体。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/5
  */
 @TableName("sys_user")
 public class User {

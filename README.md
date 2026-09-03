@@ -2,7 +2,7 @@
 
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-当前已形成“登录 → 工单 → 文档 → 解析 → 切片 → 检索 → 问答 → 引用 → 状态事件”的本地最小闭环。Redis、RabbitMQ、Elasticsearch、Nacos Config 和外部 LLM 默认关闭，属于可接入项，不能视为生产链路已经联调。原根目录 `src` 保存重构前未提交的单体代码作为迁移参照，不参与新的聚合构建。
+当前已形成“登录 → 工单 → 文档 → 解析 → 切片 → 检索 → 问答 → 引用 → 状态事件”的本地最小闭环。Redis、Nacos Config、Sentinel 和 Prometheus 已完成本地联调；RabbitMQ、Elasticsearch 和外部 LLM 仍属于可接入项，不能视为生产链路已经联调。重构前且不参与构建的根目录单体 `src` 已移除，避免 Sonar 和 IDE 重复分析两套实现。
 
 ## 项目结构
 

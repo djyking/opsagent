@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  * 工单聚合的核心持久化实体。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/8
  */
 @TableName("ticket")
 public class Ticket {

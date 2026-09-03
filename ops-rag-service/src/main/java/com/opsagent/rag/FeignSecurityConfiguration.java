@@ -12,7 +12,7 @@ import org.springframework.web.context.request.*;
  * 将当前请求的认证信息和 Trace ID 透传给知识服务。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/23
  */
 @Configuration
 public class FeignSecurityConfiguration {

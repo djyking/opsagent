@@ -11,7 +11,7 @@ import java.util.*;
  * 使用 JdbcTemplate 管理知识库、文档元数据和文本切片。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/19
  */
 @Repository
 public class KnowledgeRepository {
@@ -139,7 +139,7 @@ public class KnowledgeRepository {
      * 文档存储路径与原始名称。
      *
      * @author heyu
-     * @since 2026/9/2
+     * @since 2026/8/19
      */
     private static final class PathName {
         static String file(String path) {

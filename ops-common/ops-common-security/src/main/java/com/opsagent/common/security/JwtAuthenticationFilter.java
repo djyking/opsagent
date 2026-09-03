@@ -14,7 +14,7 @@ import java.io.IOException;
  * 从 Bearer Token 恢复当前请求的认证主体。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/7/19
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwt;

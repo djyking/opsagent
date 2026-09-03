@@ -10,7 +10,7 @@ import java.util.List;
  * 用户、角色和权限关联查询。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/6
  */
 public interface UserMapper extends BaseMapper<User> {
     @Select(

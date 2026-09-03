@@ -24,6 +24,7 @@ ops:
     permit-all:
       - /actuator/health
       - /actuator/info
+      - /actuator/prometheus
   rag:
     knowledge-url: ${OPS_KNOWLEDGE_URL:}
     elasticsearch-enabled: ${OPS_ES_ENABLED:false}

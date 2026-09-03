@@ -9,7 +9,7 @@ import java.util.List;
  * 工单评论和状态流转历史的数据访问接口。
  *
  * @author heyu
- * @since 2026/9/2
+ * @since 2026/8/9
  */
 public interface TicketAuditMapper {
     @Insert(
@@ -44,7 +44,7 @@ public interface TicketAuditMapper {
      * 工单状态流转历史数据。
      *
      * @author heyu
-     * @since 2026/9/2
+     * @since 2026/8/9
      */
     record History(
             long id,
@@ -60,7 +60,7 @@ public interface TicketAuditMapper {
      * 工单评论数据。
      *
      * @author heyu
-     * @since 2026/9/2
+     * @since 2026/8/9
      */
     record Comment(long id, long ticketId, long userId, String content, LocalDateTime createTime) {}
 }
