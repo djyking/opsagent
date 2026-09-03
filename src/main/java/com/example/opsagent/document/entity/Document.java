@@ -1,14 +1,15 @@
 package com.example.opsagent.document.entity;
 
-import java.time.LocalDateTime;
-
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * 映射工单文档的存储、安全校验与解析状态元数据。
@@ -51,6 +52,5 @@ public class Document {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 
-    @TableLogic
-    private Integer deleted;
+    @TableLogic private Integer deleted;
 }

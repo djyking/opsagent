@@ -2,6 +2,12 @@ package com.example.opsagent.common.exception;
 
 import lombok.Getter;
 
+/**
+ * 封装可预期业务错误的业务异常。
+ *
+ * @author heyu
+ * @since 2026/7/22
+ */
 @Getter
 public class BusinessException extends RuntimeException {
 

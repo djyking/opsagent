@@ -1,12 +1,13 @@
 package com.example.opsagent.security.authentication.user;
 
-import java.util.Collection;
-import java.util.List;
-
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.example.opsagent.common.enums.AuthRegisterStatusEnum;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
+
+import java.util.Collection;
+import java.util.List;
 
 /**
  * 将系统用户适配为 Spring Security 使用的认证主体。
@@ -20,8 +21,7 @@ public class OpsUserPrincipal implements UserDetails {
 
     private final String username;
 
-    @JsonIgnore
-    private final String password;
+    @JsonIgnore private final String password;
 
     private final String displayName;
 
@@ -29,8 +29,13 @@ public class OpsUserPrincipal implements UserDetails {
 
     private final List<GrantedAuthority> authorities;
 
-    public OpsUserPrincipal(Long userId, String username, String password, String displayName,
-        String status, Collection<? extends GrantedAuthority> authorities) {
+    public OpsUserPrincipal(
+            Long userId,
+            String username,
+            String password,
+            String displayName,
+            String status,
+            Collection<? extends GrantedAuthority> authorities) {
         this.userId = userId;
         this.username = username;
         this.password = password;

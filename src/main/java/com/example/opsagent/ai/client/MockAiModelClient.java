@@ -10,7 +10,11 @@ import org.springframework.stereotype.Component;
  * @since 2026/8/16
  */
 @Component
-@ConditionalOnProperty(prefix = "ops-agent.ai", name = "enabled", havingValue = "false", matchIfMissing = true)
+@ConditionalOnProperty(
+        prefix = "ops-agent.ai",
+        name = "enabled",
+        havingValue = "false",
+        matchIfMissing = true)
 public class MockAiModelClient implements AiModelClient {
 
     @Override

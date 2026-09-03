@@ -1,6 +1,11 @@
 package com.opsagent.common.core;
 
-/** 跨服务共享的业务错误码。 */
+/**
+ * 跨服务共享的业务错误码。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 public enum ErrorCode {
     VALIDATION(40000),
     UNAUTHENTICATED(40100),

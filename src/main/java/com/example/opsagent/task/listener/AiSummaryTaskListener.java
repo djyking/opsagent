@@ -3,8 +3,10 @@ package com.example.opsagent.task.listener;
 import com.example.opsagent.task.entity.AiTask;
 import com.example.opsagent.task.service.AiTaskService;
 import com.example.opsagent.ticket.event.TicketStatusChangedEvent;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -33,8 +35,11 @@ public class AiSummaryTaskListener {
             task.setBizId(event.ticketId());
             task.setTaskType("TICKET_SUMMARY");
             task.setStatus("PENDING");
-            task.setRequestPayload("工单标题：" + event.title() + "；处理备注："
-                + (event.remark() == null ? "未填写" : event.remark()));
+            task.setRequestPayload(
+                    "工单标题："
+                            + event.title()
+                            + "；处理备注："
+                            + (event.remark() == null ? "未填写" : event.remark()));
             if (!aiTaskService.save(task)) {
                 throw new IllegalStateException("AI 总结任务保存失败");
             }

@@ -2,7 +2,12 @@ package com.opsagent.auth;
 
 import com.baomidou.mybatisplus.annotation.*;
 
-/** 系统用户持久化实体。 */
+/**
+ * 系统用户持久化实体。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @TableName("sys_user")
 public class User {
     @TableId(type = IdType.AUTO)

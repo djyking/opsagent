@@ -2,6 +2,7 @@ package com.example.opsagent.ticket.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+
 import lombok.Data;
 
 /**
@@ -21,6 +22,5 @@ public class TicketCreateRequest {
     @Size(max = 10000)
     private String description;
 
-    @NotBlank
-    private String priority;
+    @NotBlank private String priority;
 }

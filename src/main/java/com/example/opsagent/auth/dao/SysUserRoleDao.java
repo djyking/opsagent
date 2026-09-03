@@ -2,6 +2,7 @@ package com.example.opsagent.auth.dao;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.example.opsagent.auth.entity.SysUserRole;
+
 import org.apache.ibatis.annotations.Mapper;
 
 /**
@@ -11,5 +12,4 @@ import org.apache.ibatis.annotations.Mapper;
  * @since 2026/8/16
  */
 @Mapper
-public interface SysUserRoleDao extends BaseMapper<SysUserRole> {
-}
+public interface SysUserRoleDao extends BaseMapper<SysUserRole> {}

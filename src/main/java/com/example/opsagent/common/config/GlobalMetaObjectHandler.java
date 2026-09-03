@@ -1,15 +1,16 @@
 package com.example.opsagent.common.config;
 
-import java.time.LocalDateTime;
-
 import com.baomidou.mybatisplus.core.handlers.MetaObjectHandler;
+
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
 
 /**
  * 统一填充实体的创建时间和更新时间。
  *
- * @author heyu 
+ * @author heyu
  * @since 2026/7/19
  */
 @Component

@@ -8,6 +8,12 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 
+/**
+ * JWT 签发、解析与失效规则测试。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 class JwtServiceTest {
     @Test
     void issuesAndParsesAllRequiredClaims() {

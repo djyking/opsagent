@@ -1,10 +1,14 @@
 package com.example.opsagent.security.authentication.provider;
 
-import java.util.List;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.example.opsagent.security.authentication.token.OpsAuthenticationToken;
 import com.example.opsagent.security.authentication.user.OpsUserDetailsService;
 import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -14,10 +18,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import java.util.List;
 
 /**
  * 验证用户名密码 Provider 的认证状态转换和异常边界。
@@ -37,7 +38,8 @@ class OpsUsernamePasswordAuthenticationProviderTest {
     void setUp() {
         userDetailsService = mock(OpsUserDetailsService.class);
         passwordEncoder = mock(PasswordEncoder.class);
-        provider = new OpsUsernamePasswordAuthenticationProvider(userDetailsService, passwordEncoder);
+        provider =
+                new OpsUsernamePasswordAuthenticationProvider(userDetailsService, passwordEncoder);
     }
 
     @Test
@@ -59,30 +61,37 @@ class OpsUsernamePasswordAuthenticationProviderTest {
         when(userDetailsService.loadUserByUsername("alice")).thenReturn(principal("enable"));
         when(passwordEncoder.matches("wrong", "encoded-password")).thenReturn(false);
 
-        assertThatThrownBy(() -> provider.authenticate(
-            OpsAuthenticationToken.unauthenticated("alice", "wrong")))
-            .isInstanceOf(BadCredentialsException.class)
-            .hasMessage("用户名或密码错误");
+        assertThatThrownBy(
+                        () ->
+                                provider.authenticate(
+                                        OpsAuthenticationToken.unauthenticated("alice", "wrong")))
+                .isInstanceOf(BadCredentialsException.class)
+                .hasMessage("用户名或密码错误");
     }
 
     @Test
     void shouldHideWhetherUserExists() {
         when(userDetailsService.loadUserByUsername("missing"))
-            .thenThrow(new UsernameNotFoundException("不存在"));
+                .thenThrow(new UsernameNotFoundException("不存在"));
 
-        assertThatThrownBy(() -> provider.authenticate(
-            OpsAuthenticationToken.unauthenticated("missing", "secret")))
-            .isInstanceOf(BadCredentialsException.class)
-            .hasMessage("用户名或密码错误");
+        assertThatThrownBy(
+                        () ->
+                                provider.authenticate(
+                                        OpsAuthenticationToken.unauthenticated(
+                                                "missing", "secret")))
+                .isInstanceOf(BadCredentialsException.class)
+                .hasMessage("用户名或密码错误");
     }
 
     @Test
     void shouldRejectDisabledUser() {
         when(userDetailsService.loadUserByUsername("alice")).thenReturn(principal("disable"));
 
-        assertThatThrownBy(() -> provider.authenticate(
-            OpsAuthenticationToken.unauthenticated("alice", "correct")))
-            .isInstanceOf(DisabledException.class);
+        assertThatThrownBy(
+                        () ->
+                                provider.authenticate(
+                                        OpsAuthenticationToken.unauthenticated("alice", "correct")))
+                .isInstanceOf(DisabledException.class);
     }
 
     @Test
@@ -92,7 +101,12 @@ class OpsUsernamePasswordAuthenticationProviderTest {
     }
 
     private OpsUserPrincipal principal(String status) {
-        return new OpsUserPrincipal(1L, "alice", "encoded-password", "Alice", status,
-            List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        return new OpsUserPrincipal(
+                1L,
+                "alice",
+                "encoded-password",
+                "Alice",
+                status,
+                List.of(new SimpleGrantedAuthority("ROLE_USER")));
     }
 }

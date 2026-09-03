@@ -1,7 +1,5 @@
 package com.example.opsagent.ticket.service;
 
-import java.util.List;
-
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.opsagent.common.api.PageResponse;
 import com.example.opsagent.ticket.dto.TicketActionRequest;
@@ -11,6 +9,8 @@ import com.example.opsagent.ticket.dto.TicketUpdateRequest;
 import com.example.opsagent.ticket.entity.Ticket;
 import com.example.opsagent.ticket.vo.TicketStatusLogVO;
 import com.example.opsagent.ticket.vo.TicketVO;
+
+import java.util.List;
 
 /**
  * 定义工单数据权限、基础修改和业务状态动作。

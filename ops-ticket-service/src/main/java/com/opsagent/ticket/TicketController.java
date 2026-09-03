@@ -10,7 +10,12 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/** 提供工单创建、查询、接单、流转、评论和历史接口。 */
+/**
+ * 提供工单创建、查询、接单、流转、评论和历史接口。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @RestController
 @RequestMapping("/api/tickets")
 public class TicketController {

@@ -2,8 +2,15 @@ package com.example.opsagent.ticket.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+
 import lombok.Data;
 
+/**
+ * 工单分页查询请求参数。
+ *
+ * @author heyu
+ * @since 2026/8/15
+ */
 @Data
 public class TicketQueryRequest {
 

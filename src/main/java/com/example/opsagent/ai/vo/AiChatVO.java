@@ -1,8 +1,8 @@
 package com.example.opsagent.ai.vo;
 
-import java.util.List;
-
 import lombok.Data;
+
+import java.util.List;
 
 /**
  * 返回 AI 回答、处理记录与结构化引用。

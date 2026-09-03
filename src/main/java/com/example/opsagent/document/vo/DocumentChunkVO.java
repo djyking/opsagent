@@ -1,8 +1,8 @@
 package com.example.opsagent.document.vo;
 
-import java.time.LocalDateTime;
-
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * 返回文档切片的顺序、内容和引用元数据。

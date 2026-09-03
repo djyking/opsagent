@@ -8,5 +8,4 @@ import org.springframework.security.authentication.AuthenticationProvider;
  * @author heyu
  * @since 2026/8/15
  */
-public interface OpsAuthenticationProvider extends AuthenticationProvider {
-}
+public interface OpsAuthenticationProvider extends AuthenticationProvider {}

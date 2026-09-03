@@ -11,7 +11,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.UUID;
 
-/** 为请求建立 Trace ID，并在响应结束后清理日志上下文。 */
+/**
+ * 为请求建立 Trace ID，并在响应结束后清理日志上下文。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 public class TraceIdFilter extends OncePerRequestFilter {
     public static final String HEADER = "X-Trace-Id";
 

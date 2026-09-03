@@ -1,9 +1,9 @@
 package com.example.opsagent.ai.vo;
 
+import lombok.Data;
+
 import java.time.LocalDateTime;
 import java.util.List;
-
-import lombok.Data;
 
 /**
  * 返回 AI 问答处理记录和可选引用详情。

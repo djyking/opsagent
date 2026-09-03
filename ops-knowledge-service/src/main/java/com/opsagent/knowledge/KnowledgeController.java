@@ -9,7 +9,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.*;
 
-/** 提供知识库、文档上传、解析、切片和内部检索接口。 */
+/**
+ * 提供知识库、文档上传、解析、切片和内部检索接口。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @RestController
 @RequestMapping("/api/knowledge")
 public class KnowledgeController {
@@ -19,6 +24,12 @@ public class KnowledgeController {
         service = s;
     }
 
+    /**
+     * 知识库标识请求参数。
+     *
+     * @author heyu
+     * @since 2026/9/2
+     */
     record BaseRequest(@NotBlank String name, String description) {}
 
     @PostMapping("/bases")

@@ -1,5 +1,13 @@
 package com.example.opsagent.ai.retrieval;
 
+import com.example.opsagent.ai.config.AiProperties;
+import com.example.opsagent.document.dao.DocumentChunkDao;
+import com.example.opsagent.document.entity.DocumentChunk;
+
+import lombok.RequiredArgsConstructor;
+
+import org.springframework.stereotype.Service;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -8,12 +16,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import com.example.opsagent.ai.config.AiProperties;
-import com.example.opsagent.document.dao.DocumentChunkDao;
-import com.example.opsagent.document.entity.DocumentChunk;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
 
 /**
  * 在有限工单候选 Chunk 中执行中英文关键词评分并返回 Top K。
@@ -33,7 +35,8 @@ public class ChunkRetrievalService {
 
     private final AiProperties properties;
 
-    public List<ScoredChunk> retrieve(Long ticketId, Long documentId, String question, Integer requestedTopK) {
+    public List<ScoredChunk> retrieve(
+            Long ticketId, Long documentId, String question, Integer requestedTopK) {
         int topK = requestedTopK == null ? properties.getTopK() : requestedTopK;
         if (topK < 1 || topK > 10) {
             throw new IllegalArgumentException("topK 必须在 1 到 10 之间");
@@ -42,16 +45,18 @@ public class ChunkRetrievalService {
             throw new IllegalStateException("AI candidate-limit 配置不合法");
         }
         Set<String> terms = terms(question);
-        List<DocumentChunk> candidates = chunkDao.selectCandidates(ticketId, documentId,
-            properties.getCandidateLimit());
+        List<DocumentChunk> candidates =
+                chunkDao.selectCandidates(ticketId, documentId, properties.getCandidateLimit());
         return candidates.stream()
-            .map(chunk -> new ScoredChunk(chunk, score(chunk.getContent(), terms)))
-            .filter(candidate -> candidate.score() > 0)
-            .sorted(Comparator.comparingDouble(ScoredChunk::score).reversed()
-                .thenComparing(candidate -> candidate.chunk().getDocumentId())
-                .thenComparing(candidate -> candidate.chunk().getChunkIndex()))
-            .limit(topK)
-            .toList();
+                .map(chunk -> new ScoredChunk(chunk, score(chunk.getContent(), terms)))
+                .filter(candidate -> candidate.score() > 0)
+                .sorted(
+                        Comparator.comparingDouble(ScoredChunk::score)
+                                .reversed()
+                                .thenComparing(candidate -> candidate.chunk().getDocumentId())
+                                .thenComparing(candidate -> candidate.chunk().getChunkIndex()))
+                .limit(topK)
+                .toList();
     }
 
     private Set<String> terms(String question) {

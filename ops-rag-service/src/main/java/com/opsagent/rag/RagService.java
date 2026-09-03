@@ -7,7 +7,12 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 
-/** 编排知识检索与回答生成；外部模型关闭时返回可解释的本地降级结果。 */
+/**
+ * 编排知识检索与回答生成；外部模型关闭时返回可解释的本地降级结果。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @Service
 public class RagService {
     private final KnowledgeClient knowledge;
@@ -31,10 +36,16 @@ public class RagService {
         else if (llmEnabled)
             answer =
                     "已完成知识检索；LLM 调用适配器需要通过 OPS_LLM_BASE_URL、OPS_LLM_API_KEY 和 OPS_LLM_MODEL"
-                        + " 配置后生成综合答案。";
+                            + " 配置后生成综合答案。";
         else answer = "根据已检索的运维知识，建议先核对引用片段，按影响面、资源使用率、连接/线程池和上下游依赖逐项排查。当前未启用外部 LLM，因此返回基础检索结论。";
         return new Answer(answer, refs, llmEnabled ? "configured-llm" : "retrieval-fallback");
     }
 
+    /**
+     * 检索增强问答结果。
+     *
+     * @author heyu
+     * @since 2026/9/2
+     */
     record Answer(String answer, List<Map<String, Object>> references, String model) {}
 }

@@ -1,18 +1,19 @@
 package com.example.opsagent.notification.service.impl;
 
-import java.util.Locale;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.example.opsagent.common.api.PageResponse;
 import com.example.opsagent.common.exception.BusinessException;
 import com.example.opsagent.common.exception.ErrorCode;
-import com.example.opsagent.common.api.PageResponse;
-import com.example.opsagent.notification.entity.NotificationRecord;
 import com.example.opsagent.notification.dao.NotificationRecordDao;
+import com.example.opsagent.notification.entity.NotificationRecord;
 import com.example.opsagent.notification.service.NotificationRecordService;
 import com.example.opsagent.notification.vo.NotificationRecordVO;
+
 import org.springframework.stereotype.Service;
+
+import java.util.Locale;
 
 /**
  * 提供通知记录分页、详情及状态更新。
@@ -28,8 +29,11 @@ public class NotificationRecordServiceImpl
     @Override
     public PageResponse<NotificationRecordVO> pageRecords(Long pageNum, Long pageSize) {
         validatePage(pageNum, pageSize);
-        Page<NotificationRecord> page = page(new Page<>(pageNum, pageSize),
-            new LambdaQueryWrapper<NotificationRecord>().orderByDesc(NotificationRecord::getCreateTime));
+        Page<NotificationRecord> page =
+                page(
+                        new Page<>(pageNum, pageSize),
+                        new LambdaQueryWrapper<NotificationRecord>()
+                                .orderByDesc(NotificationRecord::getCreateTime));
         return PageResponse.from(page, this::toVO);
     }
 

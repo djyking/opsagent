@@ -5,11 +5,22 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
-/** RAG 服务访问知识检索接口的声明式客户端。 */
+/**
+ * RAG 服务访问知识检索接口的声明式客户端。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @FeignClient(name = "ops-knowledge-service", url = "${ops.rag.knowledge-url:}")
 interface KnowledgeClient {
     @GetMapping("/api/knowledge/internal/search")
     Envelope<List<Map<String, Object>>> search(@RequestParam String query, @RequestParam int topK);
 
+    /**
+     * 知识服务统一响应包装。
+     *
+     * @author heyu
+     * @since 2026/9/2
+     */
     record Envelope<T>(int code, String message, T data, String traceId) {}
 }

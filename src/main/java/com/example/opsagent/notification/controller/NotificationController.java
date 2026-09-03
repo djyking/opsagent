@@ -4,7 +4,9 @@ import com.example.opsagent.common.api.ApiResponse;
 import com.example.opsagent.common.api.PageResponse;
 import com.example.opsagent.notification.service.NotificationRecordService;
 import com.example.opsagent.notification.vo.NotificationRecordVO;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -12,6 +14,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 提供当前用户通知记录查询与处理接口。
+ *
+ * @author heyu
+ * @since 2026/7/15
+ */
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/notifications")
@@ -33,8 +41,7 @@ public class NotificationController {
 
     @PutMapping("/{id}/status")
     public ApiResponse<NotificationRecordVO> updateStatus(
-            @PathVariable Long id,
-            @RequestParam String status) {
+            @PathVariable Long id, @RequestParam String status) {
         return ApiResponse.success(notificationRecordService.updateStatus(id, status));
     }
 }

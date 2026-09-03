@@ -10,7 +10,12 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
-/** 从 Bearer Token 恢复当前请求的认证主体。 */
+/**
+ * 从 Bearer Token 恢复当前请求的认证主体。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwt;
 

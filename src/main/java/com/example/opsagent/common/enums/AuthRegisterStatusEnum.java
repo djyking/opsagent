@@ -3,11 +3,10 @@ package com.example.opsagent.common.enums;
 /**
  * 系统用户启用状态枚举。
  *
- * @author heyu 
+ * @author heyu
  * @since 2026/7/19
  */
 public enum AuthRegisterStatusEnum {
-
     ENABLE("enable"),
 
     DISABLE("disable");

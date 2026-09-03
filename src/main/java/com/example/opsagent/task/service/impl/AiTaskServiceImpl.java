@@ -1,18 +1,19 @@
 package com.example.opsagent.task.service.impl;
 
-import java.util.Locale;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.example.opsagent.common.api.PageResponse;
 import com.example.opsagent.common.exception.BusinessException;
 import com.example.opsagent.common.exception.ErrorCode;
-import com.example.opsagent.common.api.PageResponse;
-import com.example.opsagent.task.entity.AiTask;
 import com.example.opsagent.task.dao.AiTaskDao;
+import com.example.opsagent.task.entity.AiTask;
 import com.example.opsagent.task.service.AiTaskService;
 import com.example.opsagent.task.vo.AiTaskVO;
+
 import org.springframework.stereotype.Service;
+
+import java.util.Locale;
 
 /**
  * 提供 AI 任务分页、详情和受控状态更新。
@@ -26,8 +27,10 @@ public class AiTaskServiceImpl extends ServiceImpl<AiTaskDao, AiTask> implements
     @Override
     public PageResponse<AiTaskVO> pageTasks(Long pageNum, Long pageSize) {
         validatePage(pageNum, pageSize);
-        Page<AiTask> page = page(new Page<>(pageNum, pageSize),
-            new LambdaQueryWrapper<AiTask>().orderByDesc(AiTask::getCreateTime));
+        Page<AiTask> page =
+                page(
+                        new Page<>(pageNum, pageSize),
+                        new LambdaQueryWrapper<AiTask>().orderByDesc(AiTask::getCreateTime));
         return PageResponse.from(page, this::toVO);
     }
 
@@ -41,8 +44,9 @@ public class AiTaskServiceImpl extends ServiceImpl<AiTaskDao, AiTask> implements
         AiTask task = requireTask(id);
         String targetStatus = normalizeStatus(status);
         if (!canTransition(task.getStatus(), targetStatus)) {
-            throw new BusinessException(ErrorCode.CONFLICT,
-                "不允许将 AI 任务状态从 " + task.getStatus() + " 修改为 " + targetStatus);
+            throw new BusinessException(
+                    ErrorCode.CONFLICT,
+                    "不允许将 AI 任务状态从 " + task.getStatus() + " 修改为 " + targetStatus);
         }
         task.setStatus(targetStatus);
         if (!updateById(task)) {

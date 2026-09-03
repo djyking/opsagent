@@ -7,7 +7,12 @@ import jakarta.validation.constraints.*;
 
 import org.springframework.web.bind.annotation.*;
 
-/** 提供基于知识库引用的问答接口。 */
+/**
+ * 提供基于知识库引用的问答接口。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @RestController
 @RequestMapping("/api/rag")
 public class RagController {
@@ -17,6 +22,12 @@ public class RagController {
         service = s;
     }
 
+    /**
+     * 检索增强问答请求参数。
+     *
+     * @author heyu
+     * @since 2026/9/2
+     */
     record ChatRequest(
             @NotBlank @Size(max = 2000) String question, @Min(1) @Max(20) Integer topK) {}
 

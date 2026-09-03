@@ -3,7 +3,9 @@ package com.example.opsagent.security.authentication.provider;
 import com.example.opsagent.security.authentication.token.OpsAuthenticationToken;
 import com.example.opsagent.security.authentication.user.OpsUserDetailsService;
 import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.core.Authentication;
@@ -25,7 +27,8 @@ public class OpsUsernamePasswordAuthenticationProvider implements OpsAuthenticat
     private final PasswordEncoder passwordEncoder;
 
     @Override
-    public Authentication authenticate(Authentication authentication) throws AuthenticationException {
+    public Authentication authenticate(Authentication authentication)
+            throws AuthenticationException {
         String username = authentication.getName();
         String password = String.valueOf(authentication.getCredentials());
         OpsUserPrincipal principal;

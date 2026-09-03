@@ -10,7 +10,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 
-/** 解析受支持的文档，并按固定窗口和重叠长度生成文本切片。 */
+/**
+ * 解析受支持的文档，并按固定窗口和重叠长度生成文本切片。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @Service
 public class DocumentParserService {
     private final KnowledgeProperties p;

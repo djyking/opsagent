@@ -3,8 +3,10 @@ package com.example.opsagent.audit.listener;
 import com.example.opsagent.audit.entity.OperationLog;
 import com.example.opsagent.audit.service.OperationLogService;
 import com.example.opsagent.ticket.event.TicketStatusChangedEvent;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -30,9 +32,14 @@ public class AuditLogListener {
             operationLog.setBizId(event.ticketId());
             operationLog.setOperationType("STATUS_CHANGE");
             operationLog.setOperator(String.valueOf(event.operatorId()));
-            operationLog.setContent("工单 #" + event.ticketId() + " 状态从 " + event.fromStatus()
-                + " 修改为 " + event.toStatus()
-                + (event.remark() == null ? "" : "，备注：" + event.remark()));
+            operationLog.setContent(
+                    "工单 #"
+                            + event.ticketId()
+                            + " 状态从 "
+                            + event.fromStatus()
+                            + " 修改为 "
+                            + event.toStatus()
+                            + (event.remark() == null ? "" : "，备注：" + event.remark()));
             if (!operationLogService.save(operationLog)) {
                 throw new IllegalStateException("操作审计日志保存失败");
             }

@@ -1,10 +1,11 @@
 package com.example.opsagent.ai.config;
 
-import java.time.Duration;
-
 import lombok.Data;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+
+import java.time.Duration;
 
 /**
  * 配置简单检索范围和 OpenAI 兼容模型调用参数。

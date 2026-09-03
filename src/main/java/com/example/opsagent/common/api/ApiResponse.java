@@ -1,6 +1,7 @@
 package com.example.opsagent.common.api;
 
 import com.example.opsagent.common.exception.ErrorCode;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -37,5 +38,4 @@ public class ApiResponse<T> {
     public static <T> ApiResponse<T> fail(Integer code, String message) {
         return new ApiResponse<>(code, message, null);
     }
-
 }

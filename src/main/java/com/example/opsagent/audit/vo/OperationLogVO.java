@@ -1,8 +1,15 @@
 package com.example.opsagent.audit.vo;
 
-import java.time.LocalDateTime;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
+/**
+ * 系统操作日志响应模型。
+ *
+ * @author heyu
+ * @since 2026/7/16
+ */
 @Data
 public class OperationLogVO {
 

@@ -4,7 +4,12 @@ import com.baomidou.mybatisplus.annotation.*;
 
 import java.time.LocalDateTime;
 
-/** 工单聚合的核心持久化实体。 */
+/**
+ * 工单聚合的核心持久化实体。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @TableName("ticket")
 public class Ticket {
     @TableId(type = IdType.AUTO)

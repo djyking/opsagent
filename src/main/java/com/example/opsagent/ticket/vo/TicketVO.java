@@ -1,8 +1,8 @@
 package com.example.opsagent.ticket.vo;
 
-import java.time.LocalDateTime;
-
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * 返回工单编号、状态及用户归属信息。

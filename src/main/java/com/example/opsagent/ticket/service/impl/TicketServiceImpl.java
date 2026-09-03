@@ -1,12 +1,5 @@
 package com.example.opsagent.ticket.service.impl;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.Objects;
-import java.util.UUID;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -28,11 +21,20 @@ import com.example.opsagent.ticket.service.TicketService;
 import com.example.opsagent.ticket.service.TicketStatusLogService;
 import com.example.opsagent.ticket.vo.TicketStatusLogVO;
 import com.example.opsagent.ticket.vo.TicketVO;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 实现基于当前认证用户的工单数据权限、状态机和核心操作记录。
@@ -83,8 +85,11 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
         if (currentUser.hasRole("ADMIN")) {
             // 管理员查看全部工单。
         } else if (currentUser.hasRole("OPS")) {
-            query.and(wrapper -> wrapper.eq(Ticket::getStatus, TicketStatus.CREATED.name())
-                .or().eq(Ticket::getAssigneeId, userId));
+            query.and(
+                    wrapper ->
+                            wrapper.eq(Ticket::getStatus, TicketStatus.CREATED.name())
+                                    .or()
+                                    .eq(Ticket::getAssigneeId, userId));
         } else {
             query.eq(Ticket::getCreatorId, userId);
         }
@@ -96,9 +101,13 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
         }
         if (StringUtils.hasText(request.getKeyword())) {
             String keyword = request.getKeyword().trim();
-            query.and(wrapper -> wrapper.like(Ticket::getTicketNo, keyword)
-                .or().like(Ticket::getTitle, keyword)
-                .or().like(Ticket::getDescription, keyword));
+            query.and(
+                    wrapper ->
+                            wrapper.like(Ticket::getTicketNo, keyword)
+                                    .or()
+                                    .like(Ticket::getTitle, keyword)
+                                    .or()
+                                    .like(Ticket::getDescription, keyword));
         }
         query.orderByDesc(Ticket::getCreateTime);
         Page<Ticket> page = page(new Page<>(request.getPageNum(), request.getPageSize()), query);
@@ -168,22 +177,26 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
     @Override
     public List<TicketStatusLogVO> listStatusLogs(Long id) {
         requireAccessibleTicket(id);
-        return statusLogService.list(new LambdaQueryWrapper<TicketStatusLog>()
-                .eq(TicketStatusLog::getTicketId, id)
-                .orderByAsc(TicketStatusLog::getCreateTime))
-            .stream()
-            .map(this::toStatusLogVO)
-            .toList();
+        return statusLogService
+                .list(
+                        new LambdaQueryWrapper<TicketStatusLog>()
+                                .eq(TicketStatusLog::getTicketId, id)
+                                .orderByAsc(TicketStatusLog::getCreateTime))
+                .stream()
+                .map(this::toStatusLogVO)
+                .toList();
     }
 
     @Override
     public Ticket requireAccessibleTicket(Long id) {
         Ticket ticket = requireTicket(id);
         Long userId = currentUser.userId();
-        boolean accessible = currentUser.hasRole("ADMIN")
-            || Objects.equals(ticket.getCreatorId(), userId)
-            || Objects.equals(ticket.getAssigneeId(), userId)
-            || (currentUser.hasRole("OPS") && TicketStatus.CREATED.name().equals(ticket.getStatus()));
+        boolean accessible =
+                currentUser.hasRole("ADMIN")
+                        || Objects.equals(ticket.getCreatorId(), userId)
+                        || Objects.equals(ticket.getAssigneeId(), userId)
+                        || (currentUser.hasRole("OPS")
+                                && TicketStatus.CREATED.name().equals(ticket.getStatus()));
         if (!accessible) {
             throw forbidden();
         }
@@ -194,8 +207,9 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
     public void requireDocumentPermission(Long id) {
         Ticket ticket = requireTicket(id);
         Long userId = currentUser.userId();
-        if (!currentUser.hasRole("ADMIN") && !Objects.equals(ticket.getCreatorId(), userId)
-            && !Objects.equals(ticket.getAssigneeId(), userId)) {
+        if (!currentUser.hasRole("ADMIN")
+                && !Objects.equals(ticket.getCreatorId(), userId)
+                && !Objects.equals(ticket.getAssigneeId(), userId)) {
             throw forbidden();
         }
     }
@@ -210,11 +224,12 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
         }
     }
 
-    private TicketVO transition(Ticket ticket, TicketStatus target, String operationType, String remark) {
+    private TicketVO transition(
+            Ticket ticket, TicketStatus target, String operationType, String remark) {
         TicketStatus current = TicketStatus.parse(ticket.getStatus());
         if (!current.canTransitionTo(target)) {
-            throw new BusinessException(ErrorCode.CONFLICT,
-                "不允许将工单状态从 " + current + " 修改为 " + target);
+            throw new BusinessException(
+                    ErrorCode.CONFLICT, "不允许将工单状态从 " + current + " 修改为 " + target);
         }
         ticket.setStatus(target.name());
         if (!updateById(ticket)) {
@@ -223,14 +238,27 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
         Long operatorId = currentUser.userId();
         String normalizedRemark = trimToNull(remark);
         saveOperation(ticket.getId(), operatorId, operationType, current, target, normalizedRemark);
-        eventPublisher.publishEvent(new TicketStatusChangedEvent(ticket.getId(), ticket.getTitle(), current.name(),
-            target.name(), operatorId, ticket.getCreatorId(), ticket.getAssigneeId(), normalizedRemark,
-            LocalDateTime.now()));
+        eventPublisher.publishEvent(
+                new TicketStatusChangedEvent(
+                        ticket.getId(),
+                        ticket.getTitle(),
+                        current.name(),
+                        target.name(),
+                        operatorId,
+                        ticket.getCreatorId(),
+                        ticket.getAssigneeId(),
+                        normalizedRemark,
+                        LocalDateTime.now()));
         return toVO(requireTicket(ticket.getId()));
     }
 
-    private void saveOperation(Long ticketId, Long operatorId, String operationType, TicketStatus from,
-        TicketStatus to, String remark) {
+    private void saveOperation(
+            Long ticketId,
+            Long operatorId,
+            String operationType,
+            TicketStatus from,
+            TicketStatus to,
+            String remark) {
         TicketStatusLog operation = new TicketStatusLog();
         operation.setTicketId(ticketId);
         operation.setOperatorId(operatorId);
@@ -254,8 +282,8 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
     private void requireStatus(Ticket ticket, TicketStatus expected) {
         TicketStatus actual = TicketStatus.parse(ticket.getStatus());
         if (actual != expected) {
-            throw new BusinessException(ErrorCode.CONFLICT,
-                "当前工单状态为 " + actual + "，要求状态为 " + expected);
+            throw new BusinessException(
+                    ErrorCode.CONFLICT, "当前工单状态为 " + actual + "，要求状态为 " + expected);
         }
     }
 
@@ -306,8 +334,10 @@ public class TicketServiceImpl extends ServiceImpl<TicketDao, Ticket> implements
     }
 
     private String generateTicketNo() {
-        return "OPS-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-"
-            + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        return "OPS-"
+                + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+                + "-"
+                + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
     private void requireText(String value, String message) {

@@ -1,14 +1,15 @@
 package com.example.opsagent.document.entity;
 
-import java.time.LocalDateTime;
-
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * 映射可检索、可排序和可引用的文档切片。
@@ -40,6 +41,5 @@ public class DocumentChunk {
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
-    @TableLogic
-    private Integer deleted;
+    @TableLogic private Integer deleted;
 }

@@ -11,9 +11,11 @@ import com.example.opsagent.auth.enums.AuthErrorCode;
 import com.example.opsagent.auth.service.AuthService;
 import com.example.opsagent.common.enums.AuthRegisterStatusEnum;
 import com.example.opsagent.common.exception.BusinessException;
+
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.crypto.password.PasswordEncoder;
+
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -77,5 +79,4 @@ public class AuthServiceImpl implements AuthService {
         queryWrapper.eq(SysUser::getUsername, request.getUsername().trim());
         return sysUserDao.selectOne(queryWrapper);
     }
-
 }

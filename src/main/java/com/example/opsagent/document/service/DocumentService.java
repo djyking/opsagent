@@ -1,12 +1,13 @@
 package com.example.opsagent.document.service;
 
-import java.util.List;
-
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.example.opsagent.document.entity.Document;
 import com.example.opsagent.document.vo.DocumentChunkVO;
 import com.example.opsagent.document.vo.DocumentVO;
+
 import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 /**
  * 定义工单文档上传、查询、解析和删除能力。

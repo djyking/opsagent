@@ -3,13 +3,14 @@ package com.example.opsagent.audit.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.example.opsagent.common.exception.BusinessException;
-import com.example.opsagent.common.exception.ErrorCode;
-import com.example.opsagent.audit.entity.OperationLog;
 import com.example.opsagent.audit.dao.OperationLogDao;
+import com.example.opsagent.audit.entity.OperationLog;
 import com.example.opsagent.audit.service.OperationLogService;
 import com.example.opsagent.audit.vo.OperationLogVO;
 import com.example.opsagent.common.api.PageResponse;
+import com.example.opsagent.common.exception.BusinessException;
+import com.example.opsagent.common.exception.ErrorCode;
+
 import org.springframework.stereotype.Service;
 
 /**
@@ -25,8 +26,11 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogDao, Operat
     @Override
     public PageResponse<OperationLogVO> pageLogs(Long pageNum, Long pageSize) {
         validatePage(pageNum, pageSize);
-        Page<OperationLog> page = page(new Page<>(pageNum, pageSize),
-            new LambdaQueryWrapper<OperationLog>().orderByDesc(OperationLog::getCreateTime));
+        Page<OperationLog> page =
+                page(
+                        new Page<>(pageNum, pageSize),
+                        new LambdaQueryWrapper<OperationLog>()
+                                .orderByDesc(OperationLog::getCreateTime));
         return PageResponse.from(page, this::toVO);
     }
 

@@ -18,7 +18,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-/** 为 Servlet 业务服务提供统一的无状态 JWT 安全链。 */
+/**
+ * 为 Servlet 业务服务提供统一的无状态 JWT 安全链。
+ *
+ * @author heyu
+ * @since 2026/9/1
+ */
 @AutoConfiguration
 @EnableMethodSecurity
 @EnableConfigurationProperties(JwtProperties.class)

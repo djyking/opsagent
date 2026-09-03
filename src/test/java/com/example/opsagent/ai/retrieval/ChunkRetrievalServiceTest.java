@@ -1,16 +1,17 @@
 package com.example.opsagent.ai.retrieval;
 
-import java.util.List;
-
-import com.example.opsagent.ai.config.AiProperties;
-import com.example.opsagent.document.dao.DocumentChunkDao;
-import com.example.opsagent.document.entity.DocumentChunk;
-import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import com.example.opsagent.ai.config.AiProperties;
+import com.example.opsagent.document.dao.DocumentChunkDao;
+import com.example.opsagent.document.entity.DocumentChunk;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 /**
  * 验证关键词检索限定候选数量、相关性排序和 Top K 截断。
@@ -31,10 +32,13 @@ class ChunkRetrievalServiceTest {
         DocumentChunk unrelated = chunk(3L, 10L, 2, "检查网络连接");
         when(dao.selectCandidates(100L, null, 20)).thenReturn(List.of(weak, unrelated, strong));
 
-        List<ScoredChunk> result = new ChunkRetrievalService(dao, properties)
-            .retrieve(100L, null, "磁盘使用率超过90%怎么处理", 2);
+        List<ScoredChunk> result =
+                new ChunkRetrievalService(dao, properties)
+                        .retrieve(100L, null, "磁盘使用率超过90%怎么处理", 2);
 
-        assertThat(result).extracting(candidate -> candidate.chunk().getId()).containsExactly(2L, 1L);
+        assertThat(result)
+                .extracting(candidate -> candidate.chunk().getId())
+                .containsExactly(2L, 1L);
         verify(dao).selectCandidates(100L, null, 20);
     }
 

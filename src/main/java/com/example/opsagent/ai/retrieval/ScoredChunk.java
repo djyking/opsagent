@@ -8,5 +8,4 @@ import com.example.opsagent.document.entity.DocumentChunk;
  * @author heyu
  * @since 2026/8/16
  */
-public record ScoredChunk(DocumentChunk chunk, double score) {
-}
+public record ScoredChunk(DocumentChunk chunk, double score) {}

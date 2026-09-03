@@ -8,7 +8,12 @@ import jakarta.validation.Valid;
 
 import org.springframework.web.bind.annotation.*;
 
-/** 提供登录、令牌刷新、退出和当前用户查询接口。 */
+/**
+ * 提供登录、令牌刷新、退出和当前用户查询接口。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {

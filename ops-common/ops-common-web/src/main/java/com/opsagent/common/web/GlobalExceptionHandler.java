@@ -9,7 +9,12 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
 
-/** 将校验异常、业务异常和系统异常转换为统一 API 响应。 */
+/**
+ * 将校验异常、业务异常和系统异常转换为统一 API 响应。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);

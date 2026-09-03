@@ -1,9 +1,10 @@
 package com.example.opsagent.auth.vo;
 
-import java.util.List;
-
 import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
+
 import lombok.Data;
+
+import java.util.List;
 
 /**
  * 返回当前认证用户的公开身份与权限信息。
@@ -27,9 +28,10 @@ public class AuthUserVO {
         result.setUserId(principal.getUserId());
         result.setUsername(principal.getUsername());
         result.setDisplayName(principal.getDisplayName());
-        result.setAuthorities(principal.getAuthorities().stream()
-            .map(authority -> authority.getAuthority())
-            .toList());
+        result.setAuthorities(
+                principal.getAuthorities().stream()
+                        .map(authority -> authority.getAuthority())
+                        .toList());
         return result;
     }
 }

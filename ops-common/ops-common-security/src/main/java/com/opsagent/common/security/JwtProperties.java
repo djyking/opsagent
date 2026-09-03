@@ -6,7 +6,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-/** JWT 密钥、有效期和匿名访问路径配置。 */
+/**
+ * JWT 密钥、有效期和匿名访问路径配置。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @ConfigurationProperties("ops.security")
 public class JwtProperties {
     private String secret = "";

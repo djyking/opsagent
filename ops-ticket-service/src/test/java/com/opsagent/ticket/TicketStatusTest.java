@@ -4,6 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 
+/**
+ * 工单状态流转规则测试。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 class TicketStatusTest {
     @Test
     void supportsMainLifecycleAndRejectsIllegalJumps() {

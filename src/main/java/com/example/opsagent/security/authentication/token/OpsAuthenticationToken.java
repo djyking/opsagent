@@ -1,6 +1,7 @@
 package com.example.opsagent.security.authentication.token;
 
 import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
+
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 
 /**

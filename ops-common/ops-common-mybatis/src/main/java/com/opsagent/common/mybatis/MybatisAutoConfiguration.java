@@ -7,7 +7,12 @@ import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerIntercept
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
 
-/** 注册 MyBatis-Plus 的通用插件和数据库访问约束。 */
+/**
+ * 注册 MyBatis-Plus 的通用插件和数据库访问约束。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @AutoConfiguration
 public class MybatisAutoConfiguration {
     @Bean

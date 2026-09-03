@@ -4,7 +4,9 @@ import com.example.opsagent.common.api.ApiResponse;
 import com.example.opsagent.common.api.PageResponse;
 import com.example.opsagent.task.service.AiTaskService;
 import com.example.opsagent.task.vo.AiTaskVO;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -12,6 +14,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 提供 AI 异步任务查询与管理接口。
+ *
+ * @author heyu
+ * @since 2026/7/15
+ */
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/tasks/ai")

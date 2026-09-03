@@ -1,11 +1,5 @@
 package com.example.opsagent.ai.service.impl;
 
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -33,11 +27,19 @@ import com.example.opsagent.document.service.DocumentChunkService;
 import com.example.opsagent.document.service.DocumentService;
 import com.example.opsagent.security.current.CurrentUserContext;
 import com.example.opsagent.ticket.service.TicketService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 实现事务外模型调用、限定工单的 Top K 检索以及问答与引用短事务保存。
@@ -48,15 +50,17 @@ import org.springframework.util.StringUtils;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog> implements AiChatService {
+public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog>
+        implements AiChatService {
 
-    private static final String SYSTEM_PROMPT = """
-        你是运维文档问答助手。
-        优先并仅根据提供的文档上下文回答。
-        如果上下文中无法确认答案，明确说明“无法从当前文档中确认”。
-        不要编造命令执行结果、服务器状态、未提供的配置或不存在的引用。
-        回答应尽量使用 [chunk-id] 指出引用片段。
-        """;
+    private static final String SYSTEM_PROMPT =
+            """
+            你是运维文档问答助手。
+            优先并仅根据提供的文档上下文回答。
+            如果上下文中无法确认答案，明确说明“无法从当前文档中确认”。
+            不要编造命令执行结果、服务器状态、未提供的配置或不存在的引用。
+            回答应尽量使用 [chunk-id] 指出引用片段。
+            """;
 
     private final ChunkRetrievalService retrievalService;
     private final AiModelClient aiModelClient;
@@ -72,14 +76,21 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog> impl
         ticketService.requireAccessibleTicket(ticketId);
         validateDocumentScope(ticketId, request.getDocumentId());
         String question = request.getQuestion().trim();
-        List<ScoredChunk> chunks = retrievalService.retrieve(ticketId, request.getDocumentId(), question,
-            request.getTopK());
+        List<ScoredChunk> chunks =
+                retrievalService.retrieve(
+                        ticketId, request.getDocumentId(), question, request.getTopK());
         if (chunks.isEmpty()) {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "没有检索到可用的文档上下文");
         }
-        String context = chunks.stream()
-            .map(candidate -> "[chunk-" + candidate.chunk().getId() + "] " + candidate.chunk().getContent())
-            .collect(Collectors.joining("\n\n"));
+        String context =
+                chunks.stream()
+                        .map(
+                                candidate ->
+                                        "[chunk-"
+                                                + candidate.chunk().getId()
+                                                + "] "
+                                                + candidate.chunk().getContent())
+                        .collect(Collectors.joining("\n\n"));
         String userPrompt = "文档上下文：\n" + context + "\n\n问题：" + question;
         long start = System.nanoTime();
         AiModelResponse modelResponse;
@@ -92,8 +103,14 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog> impl
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "AI 模型调用失败");
         }
         long costTimeMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-        AiChatLog record = saveSuccess(ticketId, request.getDocumentId(), question, modelResponse, costTimeMs,
-            chunks);
+        AiChatLog record =
+                saveSuccess(
+                        ticketId,
+                        request.getDocumentId(),
+                        question,
+                        modelResponse,
+                        costTimeMs,
+                        chunks);
         return toChatVO(record, chunks);
     }
 
@@ -101,10 +118,14 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog> impl
     public PageResponse<AiChatLogVO> pageQuestions(Long ticketId, AiChatLogQueryRequest request) {
         ticketService.requireAccessibleTicket(ticketId);
         validatePage(request.getPageNum(), request.getPageSize());
-        LambdaQueryWrapper<AiChatLog> query = new LambdaQueryWrapper<AiChatLog>()
-            .eq(AiChatLog::getTicketId, ticketId)
-            .eq(request.getDocumentId() != null, AiChatLog::getDocumentId, request.getDocumentId())
-            .orderByDesc(AiChatLog::getCreateTime);
+        LambdaQueryWrapper<AiChatLog> query =
+                new LambdaQueryWrapper<AiChatLog>()
+                        .eq(AiChatLog::getTicketId, ticketId)
+                        .eq(
+                                request.getDocumentId() != null,
+                                AiChatLog::getDocumentId,
+                                request.getDocumentId())
+                        .orderByDesc(AiChatLog::getCreateTime);
         Page<AiChatLog> page = page(new Page<>(request.getPageNum(), request.getPageSize()), query);
         return PageResponse.from(page, record -> toLogVO(record, List.of()));
     }
@@ -132,75 +153,103 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog> impl
         }
     }
 
-    private AiChatLog saveSuccess(Long ticketId, Long documentId, String question, AiModelResponse modelResponse,
-        long costTimeMs, List<ScoredChunk> chunks) {
-        AiChatLog saved = transactionTemplate.execute(status -> {
-            AiChatLog record = new AiChatLog();
-            record.setTicketId(ticketId);
-            record.setDocumentId(documentId);
-            record.setUserId(currentUser.userId());
-            record.setQuestion(question);
-            record.setAnswer(modelResponse.answer());
-            record.setModelName(modelResponse.modelName());
-            record.setPromptTokens(modelResponse.promptTokens());
-            record.setCompletionTokens(modelResponse.completionTokens());
-            record.setStatus("SUCCESS");
-            record.setCostTimeMs(costTimeMs);
-            if (!save(record)) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存问答记录失败");
-            }
-            List<AiQaReference> references = chunks.stream().map(candidate -> {
-                AiQaReference reference = new AiQaReference();
-                reference.setQaRecordId(record.getId());
-                reference.setChunkId(candidate.chunk().getId());
-                reference.setRelevanceScore(candidate.score());
-                return reference;
-            }).toList();
-            if (!referenceService.saveBatch(references)) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存问答引用失败");
-            }
-            return record;
-        });
+    private AiChatLog saveSuccess(
+            Long ticketId,
+            Long documentId,
+            String question,
+            AiModelResponse modelResponse,
+            long costTimeMs,
+            List<ScoredChunk> chunks) {
+        AiChatLog saved =
+                transactionTemplate.execute(
+                        status -> {
+                            AiChatLog record = new AiChatLog();
+                            record.setTicketId(ticketId);
+                            record.setDocumentId(documentId);
+                            record.setUserId(currentUser.userId());
+                            record.setQuestion(question);
+                            record.setAnswer(modelResponse.answer());
+                            record.setModelName(modelResponse.modelName());
+                            record.setPromptTokens(modelResponse.promptTokens());
+                            record.setCompletionTokens(modelResponse.completionTokens());
+                            record.setStatus("SUCCESS");
+                            record.setCostTimeMs(costTimeMs);
+                            if (!save(record)) {
+                                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存问答记录失败");
+                            }
+                            List<AiQaReference> references =
+                                    chunks.stream()
+                                            .map(
+                                                    candidate -> {
+                                                        AiQaReference reference =
+                                                                new AiQaReference();
+                                                        reference.setQaRecordId(record.getId());
+                                                        reference.setChunkId(
+                                                                candidate.chunk().getId());
+                                                        reference.setRelevanceScore(
+                                                                candidate.score());
+                                                        return reference;
+                                                    })
+                                            .toList();
+                            if (!referenceService.saveBatch(references)) {
+                                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存问答引用失败");
+                            }
+                            return record;
+                        });
         if (saved == null) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存问答记录失败");
         }
         return saved;
     }
 
-    private void saveFailed(Long ticketId, Long documentId, String question, long costTimeMs,
-        RuntimeException exception) {
+    private void saveFailed(
+            Long ticketId,
+            Long documentId,
+            String question,
+            long costTimeMs,
+            RuntimeException exception) {
         try {
-            transactionTemplate.executeWithoutResult(status -> {
-                AiChatLog record = new AiChatLog();
-                record.setTicketId(ticketId);
-                record.setDocumentId(documentId);
-                record.setUserId(currentUser.userId());
-                record.setQuestion(question);
-                record.setStatus("FAILED");
-                record.setErrorMessage(conciseError(exception));
-                record.setCostTimeMs(costTimeMs);
-                if (!save(record)) {
-                    throw new IllegalStateException("保存失败问答记录失败");
-                }
-            });
+            transactionTemplate.executeWithoutResult(
+                    status -> {
+                        AiChatLog record = new AiChatLog();
+                        record.setTicketId(ticketId);
+                        record.setDocumentId(documentId);
+                        record.setUserId(currentUser.userId());
+                        record.setQuestion(question);
+                        record.setStatus("FAILED");
+                        record.setErrorMessage(conciseError(exception));
+                        record.setCostTimeMs(costTimeMs);
+                        if (!save(record)) {
+                            throw new IllegalStateException("保存失败问答记录失败");
+                        }
+                    });
         } catch (RuntimeException saveException) {
             log.error("保存失败问答记录失败，ticketId={}", ticketId, saveException);
         }
     }
 
     private List<AiReferenceVO> loadReferences(Long recordId) {
-        List<AiQaReference> references = referenceService.list(new LambdaQueryWrapper<AiQaReference>()
-            .eq(AiQaReference::getQaRecordId, recordId).orderByDesc(AiQaReference::getRelevanceScore));
+        List<AiQaReference> references =
+                referenceService.list(
+                        new LambdaQueryWrapper<AiQaReference>()
+                                .eq(AiQaReference::getQaRecordId, recordId)
+                                .orderByDesc(AiQaReference::getRelevanceScore));
         if (references.isEmpty()) {
             return List.of();
         }
-        Map<Long, DocumentChunk> chunks = chunkService.listByIds(references.stream()
-                .map(AiQaReference::getChunkId).toList()).stream()
-            .collect(Collectors.toMap(DocumentChunk::getId, Function.identity()));
+        Map<Long, DocumentChunk> chunks =
+                chunkService
+                        .listByIds(references.stream().map(AiQaReference::getChunkId).toList())
+                        .stream()
+                        .collect(Collectors.toMap(DocumentChunk::getId, Function.identity()));
         return references.stream()
-            .filter(reference -> chunks.containsKey(reference.getChunkId()))
-            .map(reference -> toReference(chunks.get(reference.getChunkId()), reference.getRelevanceScore()))
-            .toList();
+                .filter(reference -> chunks.containsKey(reference.getChunkId()))
+                .map(
+                        reference ->
+                                toReference(
+                                        chunks.get(reference.getChunkId()),
+                                        reference.getRelevanceScore()))
+                .toList();
     }
 
     private AiChatVO toChatVO(AiChatLog record, List<ScoredChunk> chunks) {
@@ -211,8 +260,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog> impl
         result.setAnswer(record.getAnswer());
         result.setModelName(record.getModelName());
         result.setCostTimeMs(record.getCostTimeMs());
-        result.setReferences(chunks.stream()
-            .map(candidate -> toReference(candidate.chunk(), candidate.score())).toList());
+        result.setReferences(
+                chunks.stream()
+                        .map(candidate -> toReference(candidate.chunk(), candidate.score()))
+                        .toList());
         return result;
     }
 
@@ -248,7 +299,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatLogDao, AiChatLog> impl
     }
 
     private String conciseError(RuntimeException exception) {
-        String message = StringUtils.hasText(exception.getMessage()) ? exception.getMessage() : "未知模型调用错误";
+        String message =
+                StringUtils.hasText(exception.getMessage()) ? exception.getMessage() : "未知模型调用错误";
         return message.substring(0, Math.min(message.length(), 512));
     }
 

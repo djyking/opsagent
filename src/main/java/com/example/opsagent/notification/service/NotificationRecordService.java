@@ -5,6 +5,12 @@ import com.example.opsagent.common.api.PageResponse;
 import com.example.opsagent.notification.entity.NotificationRecord;
 import com.example.opsagent.notification.vo.NotificationRecordVO;
 
+/**
+ * 通知记录业务服务接口。
+ *
+ * @author heyu
+ * @since 2026/7/15
+ */
 public interface NotificationRecordService extends IService<NotificationRecord> {
 
     PageResponse<NotificationRecordVO> pageRecords(Long pageNum, Long pageSize);

@@ -5,7 +5,12 @@ import com.opsagent.common.core.*;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-/** 安全上下文访问工具，统一取得经过认证的 OpsAgent 用户。 */
+/**
+ * 安全上下文访问工具，统一取得经过认证的 OpsAgent 用户。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 public final class SecurityUsers {
     private SecurityUsers() {}
 

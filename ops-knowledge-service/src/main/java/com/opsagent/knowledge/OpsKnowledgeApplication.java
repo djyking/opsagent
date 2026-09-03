@@ -4,7 +4,12 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
-/** 知识库与文档处理服务启动入口。 */
+/**
+ * 知识库与文档处理服务启动入口。
+ *
+ * @author heyu
+ * @since 2026/9/1
+ */
 @SpringBootApplication
 @EnableConfigurationProperties(KnowledgeProperties.class)
 public class OpsKnowledgeApplication {

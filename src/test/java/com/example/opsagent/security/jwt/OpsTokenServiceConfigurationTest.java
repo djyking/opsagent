@@ -1,9 +1,9 @@
 package com.example.opsagent.security.jwt;
 
-import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import org.junit.jupiter.api.Test;
 
 /**
  * 验证 JWT 密钥配置在应用初始化阶段即可发现错误。
@@ -19,8 +19,8 @@ class OpsTokenServiceConfigurationTest {
         properties.setSecret("too-short");
 
         assertThatThrownBy(() -> new OpsTokenService(properties).validateConfiguration())
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("至少包含 32 个 UTF-8 字节");
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("至少包含 32 个 UTF-8 字节");
     }
 
     @Test
@@ -30,8 +30,8 @@ class OpsTokenServiceConfigurationTest {
         properties.setExpireMinutes(0);
 
         assertThatThrownBy(() -> new OpsTokenService(properties).validateConfiguration())
-            .isInstanceOf(IllegalStateException.class)
-            .hasMessageContaining("expire-minutes 必须大于 0");
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("expire-minutes 必须大于 0");
     }
 
     @Test

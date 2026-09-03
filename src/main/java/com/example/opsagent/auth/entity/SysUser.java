@@ -1,14 +1,15 @@
 package com.example.opsagent.auth.entity;
 
-import java.time.LocalDateTime;
-
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * 映射系统用户表中的账号、密码和状态数据。
@@ -27,9 +28,7 @@ public class SysUser {
 
     private String password;
 
-    /**
-     * 昵称
-     */
+    /** 昵称 */
     private String displayName;
 
     private String status;
@@ -40,9 +39,6 @@ public class SysUser {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 
-    /**
-     * 删除标识，0未删除，1已删除
-     */
-    @TableLogic
-    private Integer deleted;
+    /** 删除标识，0未删除，1已删除 */
+    @TableLogic private Integer deleted;
 }

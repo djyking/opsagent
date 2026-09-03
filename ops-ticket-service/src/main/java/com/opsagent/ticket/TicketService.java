@@ -13,7 +13,12 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/** 工单领域服务，集中处理数据权限、并发接单和状态机约束。 */
+/**
+ * 工单领域服务，集中处理数据权限、并发接单和状态机约束。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @Service
 public class TicketService {
     private final TicketMapper tickets;

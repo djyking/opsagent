@@ -1,9 +1,9 @@
 package com.example.opsagent.ticket.enums;
 
-import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import org.junit.jupiter.api.Test;
 
 /**
  * 验证工单状态标准化和状态机流转规则。
@@ -27,6 +27,6 @@ class TicketStatusTest {
     void shouldNormalizeInputAndRejectUnknownStatus() {
         assertThat(TicketStatus.parse(" processing ")).isEqualTo(TicketStatus.PROCESSING);
         assertThatThrownBy(() -> TicketStatus.parse("unknown"))
-            .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

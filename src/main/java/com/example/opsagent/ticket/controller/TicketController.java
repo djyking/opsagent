@@ -1,7 +1,5 @@
 package com.example.opsagent.ticket.controller;
 
-import java.util.List;
-
 import com.example.opsagent.common.api.ApiResponse;
 import com.example.opsagent.common.api.PageResponse;
 import com.example.opsagent.ticket.dto.TicketActionRequest;
@@ -11,8 +9,11 @@ import com.example.opsagent.ticket.dto.TicketUpdateRequest;
 import com.example.opsagent.ticket.service.TicketService;
 import com.example.opsagent.ticket.vo.TicketStatusLogVO;
 import com.example.opsagent.ticket.vo.TicketVO;
+
 import jakarta.validation.Valid;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +24,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 提供当前用户数据范围内的工单查询和状态动作接口。
@@ -49,27 +52,32 @@ public class TicketController {
     }
 
     @GetMapping
-    public ApiResponse<PageResponse<TicketVO>> page(@Valid @ModelAttribute TicketQueryRequest request) {
+    public ApiResponse<PageResponse<TicketVO>> page(
+            @Valid @ModelAttribute TicketQueryRequest request) {
         return ApiResponse.success(ticketService.pageTickets(request));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<TicketVO> update(@PathVariable Long id, @Valid @RequestBody TicketUpdateRequest request) {
+    public ApiResponse<TicketVO> update(
+            @PathVariable Long id, @Valid @RequestBody TicketUpdateRequest request) {
         return ApiResponse.success(ticketService.updateTicket(id, request));
     }
 
     @PostMapping("/{id}/accept")
-    public ApiResponse<TicketVO> accept(@PathVariable Long id, @Valid @RequestBody TicketActionRequest request) {
+    public ApiResponse<TicketVO> accept(
+            @PathVariable Long id, @Valid @RequestBody TicketActionRequest request) {
         return ApiResponse.success(ticketService.accept(id, request));
     }
 
     @PostMapping("/{id}/resolve")
-    public ApiResponse<TicketVO> resolve(@PathVariable Long id, @Valid @RequestBody TicketActionRequest request) {
+    public ApiResponse<TicketVO> resolve(
+            @PathVariable Long id, @Valid @RequestBody TicketActionRequest request) {
         return ApiResponse.success(ticketService.resolve(id, request));
     }
 
     @PostMapping("/{id}/close")
-    public ApiResponse<TicketVO> close(@PathVariable Long id, @Valid @RequestBody TicketActionRequest request) {
+    public ApiResponse<TicketVO> close(
+            @PathVariable Long id, @Valid @RequestBody TicketActionRequest request) {
         return ApiResponse.success(ticketService.close(id, request));
     }
 

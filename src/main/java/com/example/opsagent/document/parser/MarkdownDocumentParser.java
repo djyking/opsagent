@@ -1,10 +1,11 @@
 package com.example.opsagent.document.parser;
 
+import org.springframework.stereotype.Component;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import org.springframework.stereotype.Component;
 
 /**
  * 以 UTF-8 读取 Markdown 文档内容。

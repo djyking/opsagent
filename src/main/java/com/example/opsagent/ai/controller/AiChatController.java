@@ -7,8 +7,11 @@ import com.example.opsagent.ai.vo.AiChatLogVO;
 import com.example.opsagent.ai.vo.AiChatVO;
 import com.example.opsagent.common.api.ApiResponse;
 import com.example.opsagent.common.api.PageResponse;
+
 import jakarta.validation.Valid;
+
 import lombok.RequiredArgsConstructor;
+
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -33,13 +36,14 @@ public class AiChatController {
     private final AiChatService aiChatService;
 
     @PostMapping("/tickets/{ticketId}/questions")
-    public ApiResponse<AiChatVO> ask(@PathVariable Long ticketId, @Valid @RequestBody AiChatRequest request) {
+    public ApiResponse<AiChatVO> ask(
+            @PathVariable Long ticketId, @Valid @RequestBody AiChatRequest request) {
         return ApiResponse.success(aiChatService.ask(ticketId, request));
     }
 
     @GetMapping("/tickets/{ticketId}/questions")
-    public ApiResponse<PageResponse<AiChatLogVO>> questions(@PathVariable Long ticketId,
-        @Valid @ModelAttribute AiChatLogQueryRequest request) {
+    public ApiResponse<PageResponse<AiChatLogVO>> questions(
+            @PathVariable Long ticketId, @Valid @ModelAttribute AiChatLogQueryRequest request) {
         return ApiResponse.success(aiChatService.pageQuestions(ticketId, request));
     }
 

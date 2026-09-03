@@ -1,22 +1,5 @@
 package com.example.opsagent.document.service.impl;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.DigestInputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -34,13 +17,32 @@ import com.example.opsagent.document.vo.DocumentChunkVO;
 import com.example.opsagent.document.vo.DocumentVO;
 import com.example.opsagent.security.current.CurrentUserContext;
 import com.example.opsagent.ticket.service.TicketService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
 import org.apache.tika.Tika;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * 实现工单文档安全上传、本地存储补偿、非长事务解析和可引用切片。
@@ -51,16 +53,19 @@ import org.springframework.web.multipart.MultipartFile;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> implements DocumentService {
+public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document>
+        implements DocumentService {
 
-    private static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES = Map.of(
-        "txt", Set.of("text/plain"),
-        "md", Set.of("text/plain", "text/markdown", "text/x-markdown"),
-        "markdown", Set.of("text/plain", "text/markdown", "text/x-markdown"),
-        "pdf", Set.of("application/pdf"),
-        "docx", Set.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/x-tika-ooxml")
-    );
+    private static final Map<String, Set<String>> ALLOWED_CONTENT_TYPES =
+            Map.of(
+                    "txt", Set.of("text/plain"),
+                    "md", Set.of("text/plain", "text/markdown", "text/x-markdown"),
+                    "markdown", Set.of("text/plain", "text/markdown", "text/x-markdown"),
+                    "pdf", Set.of("application/pdf"),
+                    "docx",
+                            Set.of(
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    "application/x-tika-ooxml"));
 
     private final DocumentChunkService chunkService;
     private final List<DocumentParser> parsers;
@@ -78,8 +83,11 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
         requireSupportedParser(extension);
         LocalDate today = LocalDate.now();
         String storageName = UUID.randomUUID() + "." + extension;
-        Path relativePath = Path.of(String.valueOf(today.getYear()), String.format("%02d", today.getMonthValue()),
-            storageName);
+        Path relativePath =
+                Path.of(
+                        String.valueOf(today.getYear()),
+                        String.format("%02d", today.getMonthValue()),
+                        storageName);
         Path target = resolveStoragePath(relativePath.toString());
         try {
             String detectedContentType = detectContentType(file, originalName);
@@ -98,11 +106,12 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
             document.setParseStatus(DocumentParseStatus.PENDING.name());
             document.setCreateBy(currentUser.userId());
             document.setDeleted(0);
-            transactionTemplate.executeWithoutResult(status -> {
-                if (!save(document)) {
-                    throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存文档元数据失败");
-                }
-            });
+            transactionTemplate.executeWithoutResult(
+                    status -> {
+                        if (!save(document)) {
+                            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存文档元数据失败");
+                        }
+                    });
             return toVO(requireDocument(document.getId()));
         } catch (RuntimeException | IOException exception) {
             deleteFileQuietly(target);
@@ -120,8 +129,13 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
     @Override
     public List<DocumentVO> listByTicket(Long ticketId) {
         ticketService.requireAccessibleTicket(ticketId);
-        return list(new LambdaQueryWrapper<Document>().eq(Document::getTicketId, ticketId)
-                .orderByDesc(Document::getCreateTime)).stream().map(this::toVO).toList();
+        return list(
+                        new LambdaQueryWrapper<Document>()
+                                .eq(Document::getTicketId, ticketId)
+                                .orderByDesc(Document::getCreateTime))
+                .stream()
+                .map(this::toVO)
+                .toList();
     }
 
     @Override
@@ -150,8 +164,14 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
     @Override
     public List<DocumentChunkVO> listChunks(Long id) {
         requireAccessibleDocument(id);
-        return chunkService.list(new LambdaQueryWrapper<DocumentChunk>().eq(DocumentChunk::getDocumentId, id)
-                .orderByAsc(DocumentChunk::getChunkIndex)).stream().map(this::toChunkVO).toList();
+        return chunkService
+                .list(
+                        new LambdaQueryWrapper<DocumentChunk>()
+                                .eq(DocumentChunk::getDocumentId, id)
+                                .orderByAsc(DocumentChunk::getChunkIndex))
+                .stream()
+                .map(this::toChunkVO)
+                .toList();
     }
 
     @Override
@@ -167,68 +187,89 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
         if (!currentUser.hasRole("ADMIN") && !currentUser.userId().equals(document.getCreateBy())) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "无权删除该文档");
         }
-        transactionTemplate.executeWithoutResult(status -> {
-            chunkService.remove(new LambdaQueryWrapper<DocumentChunk>().eq(DocumentChunk::getDocumentId, id));
-            if (!removeById(id)) {
-                throw new BusinessException(ErrorCode.CONFLICT, "删除文档失败");
-            }
-        });
+        transactionTemplate.executeWithoutResult(
+                status -> {
+                    chunkService.remove(
+                            new LambdaQueryWrapper<DocumentChunk>()
+                                    .eq(DocumentChunk::getDocumentId, id));
+                    if (!removeById(id)) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "删除文档失败");
+                    }
+                });
         deleteFileQuietly(resolveStoragePath(document.getStoragePath()));
     }
 
     private void markParsing(Long id) {
-        transactionTemplate.executeWithoutResult(status -> {
-            requireDocument(id);
-            boolean updated = update(new LambdaUpdateWrapper<Document>()
-                .eq(Document::getId, id)
-                .ne(Document::getParseStatus, DocumentParseStatus.PARSING.name())
-                .set(Document::getParseStatus, DocumentParseStatus.PARSING.name())
-                .set(Document::getParseError, null));
-            if (!updated) {
-                throw new BusinessException(ErrorCode.CONFLICT, "文档正在解析或状态已变化");
-            }
-        });
+        transactionTemplate.executeWithoutResult(
+                status -> {
+                    requireDocument(id);
+                    boolean updated =
+                            update(
+                                    new LambdaUpdateWrapper<Document>()
+                                            .eq(Document::getId, id)
+                                            .ne(
+                                                    Document::getParseStatus,
+                                                    DocumentParseStatus.PARSING.name())
+                                            .set(
+                                                    Document::getParseStatus,
+                                                    DocumentParseStatus.PARSING.name())
+                                            .set(Document::getParseError, null));
+                    if (!updated) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "文档正在解析或状态已变化");
+                    }
+                });
     }
 
     private void markSuccess(Long id, List<String> contents) {
-        transactionTemplate.executeWithoutResult(status -> {
-            Document document = requireDocument(id);
-            chunkService.remove(new LambdaQueryWrapper<DocumentChunk>().eq(DocumentChunk::getDocumentId, id));
-            List<DocumentChunk> chunks = new ArrayList<>(contents.size());
-            for (int index = 0; index < contents.size(); index++) {
-                DocumentChunk chunk = new DocumentChunk();
-                chunk.setDocumentId(id);
-                chunk.setChunkIndex(index);
-                chunk.setContent(contents.get(index));
-                chunk.setTokenCount(Math.max(1, contents.get(index).length() / 4));
-                chunk.setMetadataJson("{\"source\":\"" + escapeJson(document.getOriginalName()) + "\"}");
-                chunk.setDeleted(0);
-                chunks.add(chunk);
-            }
-            if (!chunkService.saveBatch(chunks)) {
-                throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存文档切片失败");
-            }
-            boolean updated = update(new LambdaUpdateWrapper<Document>()
-                .eq(Document::getId, id)
-                .eq(Document::getParseStatus, DocumentParseStatus.PARSING.name())
-                .set(Document::getParseStatus, DocumentParseStatus.SUCCESS.name())
-                .set(Document::getParseError, null));
-            if (!updated) {
-                throw new BusinessException(ErrorCode.CONFLICT, "更新文档解析结果失败");
-            }
-        });
+        transactionTemplate.executeWithoutResult(
+                status -> {
+                    Document document = requireDocument(id);
+                    chunkService.remove(
+                            new LambdaQueryWrapper<DocumentChunk>()
+                                    .eq(DocumentChunk::getDocumentId, id));
+                    List<DocumentChunk> chunks = new ArrayList<>(contents.size());
+                    for (int index = 0; index < contents.size(); index++) {
+                        DocumentChunk chunk = new DocumentChunk();
+                        chunk.setDocumentId(id);
+                        chunk.setChunkIndex(index);
+                        chunk.setContent(contents.get(index));
+                        chunk.setTokenCount(Math.max(1, contents.get(index).length() / 4));
+                        chunk.setMetadataJson(
+                                "{\"source\":\"" + escapeJson(document.getOriginalName()) + "\"}");
+                        chunk.setDeleted(0);
+                        chunks.add(chunk);
+                    }
+                    if (!chunkService.saveBatch(chunks)) {
+                        throw new BusinessException(ErrorCode.INTERNAL_ERROR, "保存文档切片失败");
+                    }
+                    boolean updated =
+                            update(
+                                    new LambdaUpdateWrapper<Document>()
+                                            .eq(Document::getId, id)
+                                            .eq(
+                                                    Document::getParseStatus,
+                                                    DocumentParseStatus.PARSING.name())
+                                            .set(
+                                                    Document::getParseStatus,
+                                                    DocumentParseStatus.SUCCESS.name())
+                                            .set(Document::getParseError, null));
+                    if (!updated) {
+                        throw new BusinessException(ErrorCode.CONFLICT, "更新文档解析结果失败");
+                    }
+                });
     }
 
     private void markFailed(Long id, String error) {
         try {
-            transactionTemplate.executeWithoutResult(status -> {
-                Document document = requireDocument(id);
-                document.setParseStatus(DocumentParseStatus.FAILED.name());
-                document.setParseError(error);
-                if (!updateById(document)) {
-                    throw new IllegalStateException("更新文档失败状态失败");
-                }
-            });
+            transactionTemplate.executeWithoutResult(
+                    status -> {
+                        Document document = requireDocument(id);
+                        document.setParseStatus(DocumentParseStatus.FAILED.name());
+                        document.setParseError(error);
+                        if (!updateById(document)) {
+                            throw new IllegalStateException("更新文档失败状态失败");
+                        }
+                    });
         } catch (RuntimeException statusException) {
             log.error("保存文档解析失败状态失败，documentId={}", id, statusException);
         }
@@ -239,7 +280,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
             throw new IllegalArgumentException("上传文件不能为空");
         }
         if (file.getSize() > storageProperties.getMaxFileSize()) {
-            throw new IllegalArgumentException("文件大小不能超过 " + storageProperties.getMaxFileSize() + " 字节");
+            throw new IllegalArgumentException(
+                    "文件大小不能超过 " + storageProperties.getMaxFileSize() + " 字节");
         }
         if (!StringUtils.hasText(file.getOriginalFilename())) {
             throw new IllegalArgumentException("文件名不能为空且长度不能超过 255 个字符");
@@ -262,8 +304,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
     private String safeOriginalName(String filename) {
         String normalized = filename.replace('\\', '/');
         String safeName = normalized.substring(normalized.lastIndexOf('/') + 1).trim();
-        if (!StringUtils.hasText(safeName) || safeName.length() > 255 || ".".equals(safeName)
-            || "..".equals(safeName)) {
+        if (!StringUtils.hasText(safeName)
+                || safeName.length() > 255
+                || ".".equals(safeName)
+                || "..".equals(safeName)) {
             throw new IllegalArgumentException("文件名不能为空且长度不能超过 255 个字符");
         }
         if (safeName.chars().anyMatch(Character::isISOControl)) {
@@ -273,8 +317,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
     }
 
     private DocumentParser requireSupportedParser(String extension) {
-        return parsers.stream().filter(parser -> parser.supports(extension)).findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("不支持的文档类型：" + extension));
+        return parsers.stream()
+                .filter(parser -> parser.supports(extension))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("不支持的文档类型：" + extension));
     }
 
     private String detectContentType(MultipartFile file, String originalName) throws IOException {
@@ -288,8 +334,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
         if (!allowed.contains(detectedType)) {
             throw new IllegalArgumentException("文件内容与扩展名不匹配");
         }
-        if (StringUtils.hasText(declaredType) && !"application/octet-stream".equalsIgnoreCase(declaredType)
-            && !allowed.contains(declaredType.toLowerCase(Locale.ROOT))) {
+        if (StringUtils.hasText(declaredType)
+                && !"application/octet-stream".equalsIgnoreCase(declaredType)
+                && !allowed.contains(declaredType.toLowerCase(Locale.ROOT))) {
             throw new IllegalArgumentException("文件 Content-Type 与扩展名不匹配");
         }
     }
@@ -302,7 +349,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
             throw new IllegalStateException("当前 JDK 不支持 SHA-256", exception);
         }
         try (InputStream inputStream = file.getInputStream();
-             DigestInputStream digestInputStream = new DigestInputStream(inputStream, digest)) {
+                DigestInputStream digestInputStream = new DigestInputStream(inputStream, digest)) {
             Files.copy(digestInputStream, target, StandardCopyOption.REPLACE_EXISTING);
         }
         return HexFormat.of().formatHex(digest.digest());
@@ -344,7 +391,10 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
                 cleaned.append(character);
             }
         }
-        return cleaned.toString().replaceAll("[ \\t]+\\n", "\n").replaceAll("\\n{3,}", "\n\n").trim();
+        return cleaned.toString()
+                .replaceAll("[ \\t]+\\n", "\n")
+                .replaceAll("\\n{3,}", "\n\n")
+                .trim();
     }
 
     private List<String> splitText(String text) {
@@ -397,7 +447,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentDao, Document> impl
     }
 
     private String conciseError(Exception exception) {
-        String message = StringUtils.hasText(exception.getMessage()) ? exception.getMessage() : "未知解析错误";
+        String message =
+                StringUtils.hasText(exception.getMessage()) ? exception.getMessage() : "未知解析错误";
         return message.substring(0, Math.min(message.length(), 512));
     }
 

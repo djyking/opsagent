@@ -6,5 +6,5 @@ package com.example.opsagent.ai.client;
  * @author heyu
  * @since 2026/8/16
  */
-public record AiModelResponse(String answer, String modelName, Integer promptTokens, Integer completionTokens) {
-}
+public record AiModelResponse(
+        String answer, String modelName, Integer promptTokens, Integer completionTokens) {}

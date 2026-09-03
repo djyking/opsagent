@@ -9,7 +9,12 @@ import java.util.*;
 
 import javax.crypto.SecretKey;
 
-/** 负责 JWT 的签发、签名验证和声明解析。 */
+/**
+ * 负责 JWT 的签发、签名验证和声明解析。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 public class JwtService {
     private final JwtProperties properties;
     private final SecretKey key;
@@ -23,7 +28,8 @@ public class JwtService {
     }
 
     public IssuedToken issue(long userId, String username, List<String> roles) {
-        Instant now = Instant.now(), expires = now.plus(properties.getAccessTokenTtl());
+        Instant now = Instant.now();
+        Instant expires = now.plus(properties.getAccessTokenTtl());
         String id = UUID.randomUUID().toString();
         String token =
                 Jwts.builder()

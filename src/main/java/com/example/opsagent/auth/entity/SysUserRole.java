@@ -1,13 +1,14 @@
 package com.example.opsagent.auth.entity;
 
-import java.time.LocalDateTime;
-
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 /**
  * 映射用户与角色的关联关系。

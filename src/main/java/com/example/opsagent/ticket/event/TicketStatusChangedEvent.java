@@ -9,14 +9,12 @@ import java.time.LocalDateTime;
  * @since 2026/8/16
  */
 public record TicketStatusChangedEvent(
-    Long ticketId,
-    String title,
-    String fromStatus,
-    String toStatus,
-    Long operatorId,
-    Long creatorId,
-    Long assigneeId,
-    String remark,
-    LocalDateTime occurredAt
-) {
-}
+        Long ticketId,
+        String title,
+        String fromStatus,
+        String toStatus,
+        Long operatorId,
+        Long creatorId,
+        Long assigneeId,
+        String remark,
+        LocalDateTime occurredAt) {}

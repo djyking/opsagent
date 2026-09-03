@@ -1,21 +1,25 @@
 package com.example.opsagent.security.jwt;
 
+import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
+
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+
+import jakarta.annotation.PostConstruct;
+
+import lombok.RequiredArgsConstructor;
+
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Date;
 
 import javax.crypto.SecretKey;
-
-import com.example.opsagent.security.authentication.user.OpsUserPrincipal;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.JwtException;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
-import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 /**
  * 负责 JWT 的签发、签名校验和声明解析。
@@ -43,20 +47,16 @@ public class OpsTokenService {
         Instant issuedAt = Instant.now();
         Instant expiration = issuedAt.plus(properties.getExpireMinutes(), ChronoUnit.MINUTES);
         return Jwts.builder()
-            .subject(String.valueOf(principal.getUserId()))
-            .claim(USERNAME_CLAIM, principal.getUsername())
-            .issuedAt(Date.from(issuedAt))
-            .expiration(Date.from(expiration))
-            .signWith(signingKey())
-            .compact();
+                .subject(String.valueOf(principal.getUserId()))
+                .claim(USERNAME_CLAIM, principal.getUsername())
+                .issuedAt(Date.from(issuedAt))
+                .expiration(Date.from(expiration))
+                .signWith(signingKey())
+                .compact();
     }
 
     public Claims extractTokenClaims(String token) {
-        return Jwts.parser()
-            .verifyWith(signingKey())
-            .build()
-            .parseSignedClaims(token)
-            .getPayload();
+        return Jwts.parser().verifyWith(signingKey()).build().parseSignedClaims(token).getPayload();
     }
 
     public boolean validateToken(String token) {

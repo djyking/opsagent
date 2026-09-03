@@ -3,9 +3,9 @@ package com.example.opsagent.auth.enums;
 import com.example.opsagent.common.exception.IErrorCode;
 
 /**
- * 登录错误枚举
+ * 登录错误枚举。
  *
- * @author heyu 
+ * @author heyu
  * @since 2026/7/19
  */
 public enum AuthErrorCode implements IErrorCode {

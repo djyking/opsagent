@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.example.opsagent.ai.dao.AiQaReferenceDao;
 import com.example.opsagent.ai.entity.AiQaReference;
 import com.example.opsagent.ai.service.AiQaReferenceService;
+
 import org.springframework.stereotype.Service;
 
 /**
@@ -14,5 +15,4 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AiQaReferenceServiceImpl extends ServiceImpl<AiQaReferenceDao, AiQaReference>
-    implements AiQaReferenceService {
-}
+        implements AiQaReferenceService {}

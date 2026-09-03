@@ -1,12 +1,14 @@
 package com.example.opsagent.common.api;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.function.Function;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Function;
 
 /**
  * 统一分页响应对象。

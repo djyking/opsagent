@@ -5,7 +5,12 @@ import org.apache.ibatis.annotations.*;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** 工单评论和状态流转历史的数据访问接口。 */
+/**
+ * 工单评论和状态流转历史的数据访问接口。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 public interface TicketAuditMapper {
     @Insert(
             "INSERT INTO"
@@ -21,8 +26,8 @@ public interface TicketAuditMapper {
 
     @Select(
             "SELECT id,ticket_id ticketId,operator_id operatorId,operation_type"
-                + " operationType,from_status fromStatus,to_status toStatus,remark,create_time"
-                + " createTime FROM ticket_history WHERE ticket_id=#{ticketId} ORDER BY id")
+                    + " operationType,from_status fromStatus,to_status toStatus,remark,create_time"
+                    + " createTime FROM ticket_history WHERE ticket_id=#{ticketId} ORDER BY id")
     List<History> historyList(long ticketId);
 
     @Insert(
@@ -35,6 +40,12 @@ public interface TicketAuditMapper {
                     + " ticket_comment WHERE ticket_id=#{ticketId} AND deleted=0 ORDER BY id")
     List<Comment> comments(long ticketId);
 
+    /**
+     * 工单状态流转历史数据。
+     *
+     * @author heyu
+     * @since 2026/9/2
+     */
     record History(
             long id,
             long ticketId,
@@ -45,5 +56,11 @@ public interface TicketAuditMapper {
             String remark,
             LocalDateTime createTime) {}
 
+    /**
+     * 工单评论数据。
+     *
+     * @author heyu
+     * @since 2026/9/2
+     */
     record Comment(long id, long ticketId, long userId, String content, LocalDateTime createTime) {}
 }

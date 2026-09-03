@@ -9,7 +9,12 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.util.Map;
 
-/** 提供平台运行信息和管理员配置视图。 */
+/**
+ * 提供平台运行信息和管理员配置视图。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @RestController
 @RequestMapping("/api/platform")
 public class PlatformController {

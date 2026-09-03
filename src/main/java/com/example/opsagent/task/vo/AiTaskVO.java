@@ -1,8 +1,15 @@
 package com.example.opsagent.task.vo;
 
-import java.time.LocalDateTime;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
+/**
+ * AI 异步任务响应模型。
+ *
+ * @author heyu
+ * @since 2026/7/16
+ */
 @Data
 public class AiTaskVO {
 

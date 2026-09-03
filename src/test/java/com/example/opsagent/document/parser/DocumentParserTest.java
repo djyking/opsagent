@@ -1,8 +1,6 @@
 package com.example.opsagent.document.parser;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -13,7 +11,9 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * 验证 TXT 和 Markdown 解析策略的文件类型判断及 UTF-8 读取。
@@ -23,8 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class DocumentParserTest {
 
-    @TempDir
-    private Path tempDirectory;
+    @TempDir private Path tempDirectory;
 
     @Test
     void shouldParseTxtAndMarkdownFiles() throws Exception {

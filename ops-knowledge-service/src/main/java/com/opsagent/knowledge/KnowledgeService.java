@@ -15,7 +15,12 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** 知识库领域服务，编排文件存储、文档解析和本地检索降级。 */
+/**
+ * 知识库领域服务，编排文件存储、文档解析和本地检索降级。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @Service
 public class KnowledgeService {
     private static final Pattern LATIN_TERM = Pattern.compile("[A-Za-z0-9_]{2,}");

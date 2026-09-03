@@ -7,7 +7,12 @@ import org.springframework.stereotype.Repository;
 import java.sql.*;
 import java.util.*;
 
-/** 使用 JdbcTemplate 管理知识库、文档元数据和文本切片。 */
+/**
+ * 使用 JdbcTemplate 管理知识库、文档元数据和文本切片。
+ *
+ * @author heyu
+ * @since 2026/9/2
+ */
 @Repository
 public class KnowledgeRepository {
     private final JdbcTemplate jdbc;
@@ -22,9 +27,9 @@ public class KnowledgeRepository {
                 c -> {
                     PreparedStatement p =
                             c.prepareStatement(
-                                    "INSERT INTO"
-                                        + " knowledge_base(name,description,status,create_by,create_time,update_time,deleted)"
-                                        + " VALUES(?,?,'enable',?,NOW(),NOW(),0)",
+                                    "INSERT INTO knowledge_base(name, description, status,"
+                                            + " create_by, create_time, update_time, deleted)"
+                                            + " VALUES(?,?,'enable',?,NOW(),NOW(),0)",
                                     Statement.RETURN_GENERATED_KEYS);
                     p.setString(1, name);
                     p.setString(2, description);
@@ -38,7 +43,7 @@ public class KnowledgeRepository {
     List<Map<String, Object>> bases() {
         return jdbc.queryForList(
                 "SELECT id,name,description,status,create_by,create_time,update_time FROM"
-                    + " knowledge_base WHERE deleted=0 ORDER BY id DESC");
+                        + " knowledge_base WHERE deleted=0 ORDER BY id DESC");
     }
 
     long addDocument(long base, FileStorageService.StoredFile f, long user) {
@@ -47,8 +52,10 @@ public class KnowledgeRepository {
                 c -> {
                     PreparedStatement p =
                             c.prepareStatement(
-                                    "INSERT INTO"
-                                        + " knowledge_document(knowledge_base_id,file_name,original_name,file_type,file_size,storage_path,status,content_hash,version,create_by,create_time,update_time,deleted)"
+                                    "INSERT INTO knowledge_document(knowledge_base_id, file_name,"
+                                        + " original_name, file_type, file_size, storage_path,"
+                                        + " status, content_hash, version, create_by, create_time,"
+                                        + " update_time, deleted)"
                                         + " VALUES(?,?,?,?,?,?,'UPLOADED',?,1,?,NOW(),NOW(),0)",
                                     Statement.RETURN_GENERATED_KEYS);
                     p.setLong(1, base);
@@ -67,10 +74,10 @@ public class KnowledgeRepository {
 
     List<Map<String, Object>> documents(long base) {
         return jdbc.queryForList(
-                "SELECT"
-                    + " id,knowledge_base_id,original_name,file_type,file_size,status,content_hash,parse_error,create_by,create_time,update_time"
-                    + " FROM knowledge_document WHERE knowledge_base_id=? AND deleted=0 ORDER BY id"
-                    + " DESC",
+                "SELECT id, knowledge_base_id, original_name, file_type, file_size, status,"
+                        + " content_hash, parse_error, create_by, create_time, update_time FROM"
+                        + " knowledge_document WHERE knowledge_base_id=? AND deleted=0 ORDER BY id"
+                        + " DESC",
                 base);
     }
 
@@ -83,7 +90,7 @@ public class KnowledgeRepository {
     void parsing(long id) {
         jdbc.update(
                 "UPDATE knowledge_document SET status='PARSING',parse_error=NULL WHERE id=? AND"
-                    + " status IN ('UPLOADED','FAILED','PARSED','INDEXED')",
+                        + " status IN ('UPLOADED','FAILED','PARSED','INDEXED')",
                 id);
     }
 
@@ -128,6 +135,12 @@ public class KnowledgeRepository {
                 limit);
     }
 
+    /**
+     * 文档存储路径与原始名称。
+     *
+     * @author heyu
+     * @since 2026/9/2
+     */
     private static final class PathName {
         static String file(String path) {
             int i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
