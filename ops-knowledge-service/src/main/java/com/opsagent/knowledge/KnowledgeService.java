@@ -27,12 +27,17 @@ public class KnowledgeService {
     private final KnowledgeRepository repo;
     private final FileStorageService storage;
     private final DocumentParserService parser;
+    private final DocumentParsePublisher publisher;
 
     KnowledgeService(
-            KnowledgeRepository repo, FileStorageService storage, DocumentParserService parser) {
+            KnowledgeRepository repo,
+            FileStorageService storage,
+            DocumentParserService parser,
+            DocumentParsePublisher publisher) {
         this.repo = repo;
         this.storage = storage;
         this.parser = parser;
+        this.publisher = publisher;
     }
 
     long createBase(String name, String description) {
@@ -55,19 +60,36 @@ public class KnowledgeService {
         }
     }
 
-    @Transactional
-    void parse(long id) {
+    long requestParse(long id) {
+        Map<String, Object> document = repo.document(id);
+        if (document == null) throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
+        long taskId = repo.createParseTask(id);
+        publisher.publish(id, taskId);
+        return taskId;
+    }
+
+    Map<String, Object> parseTask(long taskId) {
+        Map<String, Object> task = repo.parseTask(taskId);
+        if (task == null) throw new BusinessException(ErrorCode.NOT_FOUND, "解析任务不存在");
+        return task;
+    }
+
+    ParsedDocument parseFile(long id) throws Exception {
         Map<String, Object> document = repo.document(id);
         if (document == null) throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
         repo.parsing(id);
-        try {
-            String extension = String.valueOf(document.get("file_type"));
-            String path = String.valueOf(document.get("storage_path"));
-            repo.parsed(id, parser.chunks(parser.parse(storage.resolve(path), extension)));
-        } catch (Exception e) {
-            repo.failed(id, e.getMessage());
-            throw new BusinessException(ErrorCode.VALIDATION, "文档解析失败：" + e.getMessage());
-        }
+        String extension = String.valueOf(document.get("file_type"));
+        String path = String.valueOf(document.get("storage_path"));
+        return new ParsedDocument(id, parser.chunks(parser.parse(storage.resolve(path), extension)));
+    }
+
+    @Transactional
+    boolean completeParse(String eventId, long taskId, ParsedDocument parsed) {
+        if (repo.consumeOnce("knowledge-document-parser", eventId) == 0) return false;
+        repo.taskProcessing(taskId);
+        repo.parsed(parsed.documentId(), parsed.chunks());
+        repo.taskSuccess(taskId);
+        return true;
     }
 
     List<Map<String, Object>> chunks(long id) {
@@ -106,4 +128,12 @@ public class KnowledgeService {
         for (int i = 0; i + 3 <= han.length(); i++) terms.add(han.substring(i, i + 3));
         return terms;
     }
+
+    /**
+     * 已在事务外完成文件读取的文档切片结果。
+     *
+     * @author heyu
+     * @since 2026/8/23
+     */
+    record ParsedDocument(long documentId, List<String> chunks) {}
 }

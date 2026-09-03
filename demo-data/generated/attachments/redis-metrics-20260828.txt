@@ -1,0 +1,2 @@
+time=2026-08-28T20:15:00+08:00 keyspace_hits=184020 keyspace_misses=120381 hit_rate=60.45%
+used_memory_human=3.82G evicted_keys=18293 environment=demo

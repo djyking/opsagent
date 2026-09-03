@@ -2,7 +2,7 @@
 
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-当前已形成“登录 → 工单 → 文档 → 解析 → 切片 → 检索 → 问答 → 引用 → 状态事件”的本地最小闭环。Redis、Nacos Config、Sentinel 和 Prometheus 已完成本地联调；RabbitMQ、Elasticsearch 和外部 LLM 仍属于可接入项，不能视为生产链路已经联调。重构前且不参与构建的根目录单体 `src` 已移除，避免 Sonar 和 IDE 重复分析两套实现。
+当前已形成“登录 → 工单 → Outbox → RabbitMQ → 平台审计”和“文档上传 → RabbitMQ → 重试/DLQ → 切片 → 检索 → RAG 引用”两条业务闭环。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。Elasticsearch 已运行但尚未接入 Java 检索，外部 LLM 未配置时明确使用 MySQL 检索降级。
 
 ## 项目结构
 
@@ -16,8 +16,9 @@ opsagent
 ├─ ops-rag-service            RAG 服务（8104）
 ├─ ops-platform-service       平台服务（8105）
 ├─ ops-web                    Vue 3 前端项目
+├─ demo-data                  企业 Runbook、附件和一键初始化脚本
 ├─ sql                        分库初始化脚本
-├─ compose.yaml               MySQL、Redis 与可选中间件
+├─ compose.yaml               全部中间件容器（不包含 Java 应用）
 ├─ opsAgent使用文档.md          完整功能使用说明
 └─ pom.xml                     后端 Maven 配置
 ```
@@ -44,16 +45,12 @@ PUT  /api/tickets/{id}
 POST /api/tickets/{id}/claim
 POST /api/tickets/{id}/transition
 
-POST   /api/tickets/{ticketId}/documents
-GET    /api/tickets/{ticketId}/documents
-GET    /api/documents/{id}
-POST   /api/documents/{id}/parse
-GET    /api/documents/{id}/chunks
-DELETE /api/documents/{id}
-
-POST /api/tickets/{ticketId}/questions
-GET  /api/tickets/{ticketId}/questions
-GET  /api/questions/{id}
+POST /api/knowledge/bases/{id}/documents
+POST /api/knowledge/documents/{id}/parse
+GET  /api/knowledge/parse-tasks/{id}
+GET  /api/knowledge/documents/{id}/chunks
+POST /api/rag/chat
+GET  /api/platform/admin/audits
 ```
 
 各 MVC 服务启用 SpringDoc；经 Gateway 暴露 Swagger 聚合仍是后续项。
@@ -62,7 +59,7 @@ GET  /api/questions/{id}
 
 支持文本型 PDF、DOCX、TXT、MD/Markdown，默认单文件上限 50 MB。文件使用 UUID 服务端名称和相对路径保存，并校验扩展名、声明类型及 Tika 检测类型，同时记录 SHA-256。扫描版 PDF 不支持 OCR。
 
-解析状态为 `PENDING → PARSING → SUCCESS`，失败时为 `FAILED` 并保存简要原因。Tika 解析和模型调用均在数据库事务外完成，结果使用短事务保存。
+解析 API 创建 `QUEUED` 任务并发布到 RabbitMQ；消费者最多尝试三次，成功后文档为 `PARSED`、任务为 `SUCCESS`，最终失败时任务为 `FAILED` 且消息进入 DLQ。Tika 文件读取在数据库事务外执行，切片与幂等记录使用短事务保存。
 
 问答先在当前工单（可选限定单个文档）内读取有限候选切片，再进行中英文关键词评分并选取 Top K。默认不调用外部模型，会明确返回本地占位行为；配置 OpenAI 兼容服务后才会访问 `/chat/completions`。
 
@@ -74,8 +71,10 @@ GET  /api/questions/{id}
 OPS_AUTH_DB_URL / OPS_AUTH_DB_USERNAME / OPS_AUTH_DB_PASSWORD
 OPS_TICKET_DB_URL / OPS_TICKET_DB_USERNAME / OPS_TICKET_DB_PASSWORD
 OPS_KNOWLEDGE_DB_URL / OPS_KNOWLEDGE_DB_USERNAME / OPS_KNOWLEDGE_DB_PASSWORD
+OPS_PLATFORM_DB_URL / OPS_PLATFORM_DB_USERNAME / OPS_PLATFORM_DB_PASSWORD
 OPS_JWT_SECRET                 至少 32 个 UTF-8 字节
 OPS_UPLOAD_DIR                 默认 ./data/uploads
+OPS_RABBITMQ_HOST / OPS_RABBITMQ_PORT / OPS_RABBITMQ_USERNAME / OPS_RABBITMQ_PASSWORD
 NACOS_ENABLED                  默认 false
 OPS_ES_ENABLED                 默认 false
 OPS_LLM_ENABLED                默认 false
@@ -90,26 +89,26 @@ $env:OPS_JWT_SECRET = '请替换为至少32字节的随机开发密钥'
 
 ## 数据库与容器
 
-- 全新开发库：按顺序执行 `sql/01_ops_auth.sql` 至 `sql/05_ops_mq.sql`，最后执行 `sql/init_data.sql`。
+- 全新开发库：Compose 首次创建 MySQL 卷时按文件名自动执行 `sql/01` 至 `sql/07` 和 `sql/init_data.sql`。
 - Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
 - 本地初始管理员为 `admin / Admin@123`，仅用于开发，部署后必须替换。
 
-`compose.yaml` 默认提供 MySQL 8.4 和 Redis 7；`middleware` Profile 另提供 Nacos、RabbitMQ 和 Elasticsearch。
+`compose.yaml` 只包含中间件：MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana，不包含 Java 服务。
 
 ```powershell
 docker compose up -d
-docker compose --profile middleware up -d
+docker compose ps
 ```
 
-默认端口为 MySQL `3306`、Redis `6379`，容器密码可通过 `OPSAGENT_DB_USERNAME`、`OPSAGENT_DB_PASSWORD` 和 `OPSAGENT_DB_ROOT_PASSWORD` 覆盖。
+推荐使用 `D:\middleware\scripts\start-opsagent.ps1` 启动全部中间件和本机应用；只启动中间件时添加 `-MiddlewareOnly`。停止脚本不会删除 Docker named volumes。
 
 ## 构建和运行
 
-后端：
+完整构建与启动：
 
 ```powershell
-.\mvnw.cmd clean package
-.\mvnw.cmd clean package
+.\mvnw.cmd clean verify
+D:\middleware\scripts\start-opsagent.ps1
 ```
 
 后端是六个独立进程，分别运行各模块 `target` 下的可执行 Jar。统一 API 入口为 `http://localhost:8080`。
@@ -124,10 +123,10 @@ pnpm dev
 
 Vite 开发模式访问 `http://localhost:5173`，并把 `/api` 和 `/actuator` 请求代理到 `http://localhost:8080`。直接访问 `http://localhost:8080/api/auth/login` 时，后端会跳转到同一服务的 `/login`；Axios 等 API 请求未认证时仍返回标准401 JSON。
 
-生产构建：
+前端生产构建：
 
 ```powershell
-cd opsagent-web
+cd ops-web
 pnpm build
 ```
 

@@ -1,0 +1,2 @@
+queue=ops.knowledge.parse.queue messages_ready=126 messages_unacked=8 publish_rate=12.4 ack_rate=7.1
+queue=ops.knowledge.parse.dlq messages_ready=1

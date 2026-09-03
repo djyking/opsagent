@@ -2,6 +2,8 @@ package com.opsagent.ticket;
 
 import static com.opsagent.ticket.TicketDtos.*;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsagent.common.core.*;
 import com.opsagent.common.security.*;
@@ -24,11 +26,13 @@ public class TicketService {
     private final TicketMapper tickets;
     private final TicketAuditMapper audit;
     private final OutboxMapper outbox;
+    private final ObjectMapper json;
 
-    TicketService(TicketMapper t, TicketAuditMapper a, OutboxMapper o) {
+    TicketService(TicketMapper t, TicketAuditMapper a, OutboxMapper o, ObjectMapper json) {
         tickets = t;
         audit = a;
         outbox = o;
+        this.json = json;
     }
 
     @Transactional
@@ -49,11 +53,8 @@ public class TicketService {
         t.setDeleted(0);
         tickets.insert(t);
         audit.history(t.getId(), u.userId(), "CREATE", null, t.getStatus(), null);
-        outbox.add(
-                UUID.randomUUID().toString(),
-                t.getId(),
-                "ticket.created",
-                "{\"ticketId\":" + t.getId() + "}");
+        audit.operation(t.getId(), u.userId(), "CREATE", null, payload(t.getId(), u.userId()));
+        addEvent(t.getId(), "ticket.created", u.userId());
         return view(t);
     }
 
@@ -88,11 +89,9 @@ public class TicketService {
         if (tickets.claim(id, u.userId(), r.version()) != 1)
             throw new BusinessException(ErrorCode.CONFLICT, "工单已被他人接单或版本已变化");
         audit.history(id, u.userId(), "CLAIM", "CREATED", "ASSIGNED", null);
-        outbox.add(
-                UUID.randomUUID().toString(),
-                id,
-                "ticket.assigned",
-                "{\"ticketId\":" + id + ",\"assigneeId\":" + u.userId() + "}");
+        audit.assignment(id, u.userId(), u.userId(), "CLAIM");
+        audit.operation(id, u.userId(), "CLAIM", null, payload(id, u.userId()));
+        addEvent(id, "ticket.claimed", u.userId());
         return view(require(id));
     }
 
@@ -114,11 +113,13 @@ public class TicketService {
             throw new BusinessException(ErrorCode.CONFLICT, "工单版本已变化，请刷新后重试");
         audit.history(
                 id, u.userId(), r.target().name(), source.name(), r.target().name(), r.remark());
-        outbox.add(
-                UUID.randomUUID().toString(),
+        audit.operation(
                 id,
-                "ticket." + r.target().name().toLowerCase(),
-                "{\"ticketId\":" + id + "}");
+                u.userId(),
+                r.target().name(),
+                null,
+                payload(id, u.userId(), "fromStatus", source.name(), "toStatus", r.target().name()));
+        addEvent(id, "ticket." + r.target().name().toLowerCase(), u.userId());
         return view(require(id));
     }
 
@@ -176,5 +177,25 @@ public class TicketService {
                 t.getVersion(),
                 t.getCreateTime(),
                 t.getUpdateTime());
+    }
+
+    private void addEvent(long ticketId, String eventType, long actorId) {
+        outbox.add(
+                UUID.randomUUID().toString(),
+                ticketId,
+                eventType,
+                payload(ticketId, actorId));
+    }
+
+    private String payload(long ticketId, long actorId, String... entries) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("ticketId", ticketId);
+        data.put("actorId", actorId);
+        for (int i = 0; i + 1 < entries.length; i += 2) data.put(entries[i], entries[i + 1]);
+        try {
+            return json.writeValueAsString(data);
+        } catch (JsonProcessingException e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "工单事件序列化失败");
+        }
     }
 }

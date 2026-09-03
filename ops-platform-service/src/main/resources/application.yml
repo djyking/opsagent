@@ -5,6 +5,25 @@ spring:
     name: ops-platform-service
   config:
     import: optional:nacos:${spring.application.name}.yaml
+  datasource:
+    url: ${OPS_PLATFORM_DB_URL:jdbc:mysql://localhost:3306/ops_platform?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${OPS_PLATFORM_DB_USERNAME:root}
+    password: ${OPS_PLATFORM_DB_PASSWORD:}
+  rabbitmq:
+    host: ${OPS_RABBITMQ_HOST:localhost}
+    port: ${OPS_RABBITMQ_PORT:5672}
+    username: ${OPS_RABBITMQ_USERNAME:opsagent}
+    password: ${OPS_RABBITMQ_PASSWORD:opsagent_local}
+    connection-timeout: 3s
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 5s
   cloud:
     nacos:
       config:

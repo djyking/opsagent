@@ -7,6 +7,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -18,6 +19,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/platform")
 public class PlatformController {
+    private final PlatformAuditService auditService;
+
+    PlatformController(PlatformAuditService auditService) {
+        this.auditService = auditService;
+    }
+
     @Value("${spring.application.name}")
     String service;
 
@@ -36,5 +43,13 @@ public class PlatformController {
                         "敏感配置值不会通过接口返回",
                         "middlewareIntegration",
                         "configuration-driven"));
+    }
+
+    @GetMapping("/admin/audits")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<List<Map<String, Object>>> audits(
+            @RequestParam(required = false) String bizId,
+            @RequestParam(defaultValue = "50") int limit) {
+        return ApiResponse.success(auditService.audits(bizId, limit));
     }
 }

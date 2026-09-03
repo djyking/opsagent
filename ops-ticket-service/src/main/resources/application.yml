@@ -9,6 +9,14 @@ spring:
     url: ${OPS_TICKET_DB_URL:jdbc:mysql://localhost:3306/ops_ticket?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${OPS_TICKET_DB_USERNAME:root}
     password: ${OPS_TICKET_DB_PASSWORD:}
+  rabbitmq:
+    host: ${OPS_RABBITMQ_HOST:localhost}
+    port: ${OPS_RABBITMQ_PORT:5672}
+    username: ${OPS_RABBITMQ_USERNAME:opsagent}
+    password: ${OPS_RABBITMQ_PASSWORD:opsagent_local}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 3s
   cloud:
     nacos:
       config:
@@ -23,6 +31,12 @@ spring:
       transport:
         dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
 ops:
+  mq:
+    outbox:
+      batch-size: ${OPS_OUTBOX_BATCH_SIZE:50}
+      fixed-delay-ms: ${OPS_OUTBOX_FIXED_DELAY_MS:2000}
+    confirm-timeout-seconds: ${OPS_OUTBOX_CONFIRM_TIMEOUT_SECONDS:5}
+    stale-publishing-seconds: ${OPS_OUTBOX_STALE_PUBLISHING_SECONDS:30}
   security:
     secret: ${OPS_JWT_SECRET:}
     permit-all:

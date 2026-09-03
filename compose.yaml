@@ -3,98 +3,127 @@ name: opsagent
 services:
   mysql:
     image: mysql:8.4
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-opsagent_local}
-    ports: ["3306:3306"]
+      MYSQL_ROOT_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-2491125}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    ports:
+      - "3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
       - ./sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test:
-        [
-          "CMD",
-          "mysqladmin",
-          "ping",
-          "-h",
-          "localhost",
-          "-uroot",
-          "-p${OPS_MYSQL_ROOT_PASSWORD:-opsagent_local}",
-        ]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${OPS_MYSQL_ROOT_PASSWORD:-2491125}"]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 20
 
   redis:
     image: redis:7.4-alpine
-    command:
-      [
-        "redis-server",
-        "--appendonly",
-        "yes",
-        "--requirepass",
-        "${OPS_REDIS_PASSWORD:-opsagent_local}",
-      ]
-    ports: ["6379:6379"]
-    volumes: ["redis-data:/data"]
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${OPS_REDIS_PASSWORD:-opsagent_local}"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
-      test:
-        [
-          "CMD",
-          "redis-cli",
-          "-a",
-          "${OPS_REDIS_PASSWORD:-opsagent_local}",
-          "ping",
-        ]
+      test: ["CMD", "redis-cli", "-a", "${OPS_REDIS_PASSWORD:-opsagent_local}", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 20
 
   nacos:
     image: nacos/nacos-server:v3.0.3
-    profiles: ["middleware"]
+    restart: unless-stopped
     environment:
       MODE: standalone
       NACOS_AUTH_ENABLE: "false"
       NACOS_AUTH_TOKEN: ${NACOS_AUTH_TOKEN:-b3BzYWdlbnQtbG9jYWwtbmFjb3Mtc2VjcmV0LWtleS0yMDI2MDkwMw==}
       NACOS_AUTH_IDENTITY_KEY: ${NACOS_AUTH_IDENTITY_KEY:-opsagent-local}
       NACOS_AUTH_IDENTITY_VALUE: ${NACOS_AUTH_IDENTITY_VALUE:-opsagent-local-identity-2026}
-    ports: ["8848:8848", "9848:9848", "8849:8080"]
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "8849:8080"
+
+  sentinel:
+    image: eclipse-temurin:17-jre-jammy
+    restart: unless-stopped
+    command: ["java", "-Dserver.port=8858", "-Dcsp.sentinel.dashboard.server=localhost:8858", "-Dproject.name=sentinel-dashboard", "-jar", "/opt/sentinel/sentinel-dashboard.jar"]
+    ports:
+      - "8858:8858"
+    volumes:
+      - D:/middleware/runtime/sentinel-1.8.9/sentinel-dashboard-1.8.9.jar:/opt/sentinel/sentinel-dashboard.jar:ro
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
-    profiles: ["middleware"]
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${OPS_RABBITMQ_USERNAME:-opsagent}
       RABBITMQ_DEFAULT_PASS: ${OPS_RABBITMQ_PASSWORD:-opsagent_local}
-    ports: ["5672:5672", "15672:15672"]
-    volumes: ["rabbitmq-data:/var/lib/rabbitmq"]
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 20
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
-    profiles: ["middleware"]
+    restart: unless-stopped
     environment:
       discovery.type: single-node
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: ${OPS_ES_JAVA_OPTS:--Xms512m -Xmx512m}
-    ports: ["9200:9200"]
-    volumes: ["elasticsearch-data:/usr/share/elasticsearch/data"]
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -fsS http://localhost:9200/_cluster/health || exit 1",
-        ]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 20
+      retries: 30
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - D:/middleware/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  grafana:
+    image: grafana/grafana:13.2.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${OPS_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${OPS_GRAFANA_ADMIN_PASSWORD:-opsagent_local}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - D:/middleware/config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - D:/middleware/config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
 
 volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
   elasticsearch-data:
+  prometheus-data:
+  grafana-data:

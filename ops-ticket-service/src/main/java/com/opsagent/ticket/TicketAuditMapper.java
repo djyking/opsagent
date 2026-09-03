@@ -35,6 +35,21 @@ public interface TicketAuditMapper {
                     + " VALUES(#{ticketId},#{userId},#{content},NOW(),NOW())")
     int comment(long ticketId, long userId, String content);
 
+    @Insert(
+            "INSERT INTO ticket_assignment(ticket_id,assignee_id,assigned_by,assignment_type,create_time)"
+                    + " VALUES(#{ticketId},#{assigneeId},#{assignedBy},#{type},NOW())")
+    int assignment(long ticketId, long assigneeId, long assignedBy, String type);
+
+    @Insert(
+            "INSERT INTO ticket_operation_log(ticket_id,operator_id,operation,request_id,detail_json,create_time)"
+                    + " VALUES(#{ticketId},#{operatorId},#{operation},#{requestId},#{detail},NOW())")
+    int operation(
+            long ticketId,
+            long operatorId,
+            String operation,
+            String requestId,
+            String detail);
+
     @Select(
             "SELECT id,ticket_id ticketId,user_id userId,content,create_time createTime FROM"
                     + " ticket_comment WHERE ticket_id=#{ticketId} AND deleted=0 ORDER BY id")

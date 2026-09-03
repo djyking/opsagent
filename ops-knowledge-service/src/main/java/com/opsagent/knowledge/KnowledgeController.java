@@ -53,9 +53,13 @@ public class KnowledgeController {
     }
 
     @PostMapping("/documents/{id}/parse")
-    ApiResponse<Void> parse(@PathVariable long id) {
-        service.parse(id);
-        return ApiResponse.success();
+    ApiResponse<Long> parse(@PathVariable long id) {
+        return ApiResponse.success(service.requestParse(id));
+    }
+
+    @GetMapping("/parse-tasks/{id}")
+    ApiResponse<Map<String, Object>> parseTask(@PathVariable long id) {
+        return ApiResponse.success(service.parseTask(id));
     }
 
     @GetMapping("/documents/{id}/chunks")

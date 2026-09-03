@@ -1,0 +1,2 @@
+before: dataId=ops-gateway.yaml group=DEFAULT_GROUP order.rule.qps=800 md5=demo-old
+after: dataId=ops-gateway.yaml group=DEFAULT_GROUP order.rule.qps=1600 md5=demo-new

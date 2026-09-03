@@ -1,0 +1,2 @@
+2026-08-28 20:03:12 ERROR traceId=demo-a81f SQLTransientConnectionException: Connection is not available
+2026-08-28 20:03:12 WARN traceId=demo-a81f inventory-call elapsedMs=4812 result=timeout

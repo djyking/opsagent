@@ -380,10 +380,10 @@ Auth 和 Ticket 服务当前只有少量固定 CRUD 与原子更新，MyBatis �
 | Redis | 已运行并接入 | Auth 使用配置化连接，带密码探针 |
 | Nacos | 已运行并接入 | 服务注册和六份配置均可验证 |
 | Sentinel | 已运行并接入 | 六个应用已注册到 Dashboard |
-| Prometheus Server | 已下载并接入 | 抓取 Gateway 与五个业务服务的 `/actuator/prometheus` |
-| Grafana | 配置已准备，程序包待补齐 | 官方 CDN 下载速度异常；放入指定目录后启动脚本会自动启用 |
-| RabbitMQ | 未接入 | 只有 Outbox 表和事件模型，没有 Publisher、Consumer、重试和死信链路 |
-| Elasticsearch | 未接入 | 没有索引映射、写入或查询适配器；Java 客户端应作为 Maven 依赖引入 |
+| Prometheus Server | Docker 已运行并接入 | 6/6 Java targets UP，并采集 Outbox、MQ 和文档解析指标 |
+| Grafana | Docker 已运行并接入 | 数据源健康，OpsAgent Overview 已预置 MQ 面板 |
+| RabbitMQ | Docker 已运行并接入 | 工单 Outbox 审计与文档解析两条链路，包含确认、重试、幂等和 DLQ |
+| Elasticsearch | Docker 已运行，应用未接入 | 集群 green；当前仍使用 MySQL 文本检索，避免伪装成 ES 检索 |
 | 外部 LLM | 未接入 | 缺少供应商、模型地址和 API Key，当前使用检索降级回答 |
 
 Prometheus 页面为 `http://127.0.0.1:9090/`，Grafana 默认页面为

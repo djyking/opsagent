@@ -94,6 +94,72 @@ public class KnowledgeRepository {
                 id);
     }
 
+    long createParseTask(long documentId) {
+        KeyHolder holder = new GeneratedKeyHolder();
+        jdbc.update(
+                connection -> {
+                    PreparedStatement statement =
+                            connection.prepareStatement(
+                                    "INSERT INTO document_parse_task(document_id,status,retry_count,"
+                                            + "next_retry_time,create_time,update_time)"
+                                            + " VALUES(?,'QUEUED',0,NOW(),NOW(),NOW())",
+                                    Statement.RETURN_GENERATED_KEYS);
+                    statement.setLong(1, documentId);
+                    return statement;
+                },
+                holder);
+        return Objects.requireNonNull(holder.getKey()).longValue();
+    }
+
+    Map<String, Object> parseTask(long taskId) {
+        List<Map<String, Object>> rows =
+                jdbc.queryForList("SELECT * FROM document_parse_task WHERE id=?", taskId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    int consumeOnce(String consumer, String eventId) {
+        return jdbc.update(
+                "INSERT IGNORE INTO mq_consumed_event(consumer_name,event_id,consume_time)"
+                        + " VALUES(?,?,NOW())",
+                consumer,
+                eventId);
+    }
+
+    void taskProcessing(long taskId) {
+        jdbc.update(
+                "UPDATE document_parse_task SET status='PROCESSING',error_message=NULL,"
+                        + "update_time=NOW() WHERE id=?",
+                taskId);
+    }
+
+    void taskSuccess(long taskId) {
+        jdbc.update(
+                "UPDATE document_parse_task SET status='SUCCESS',next_retry_time=NULL,"
+                        + "error_message=NULL,update_time=NOW() WHERE id=?",
+                taskId);
+    }
+
+    void taskPublishFailed(long taskId, String message) {
+        jdbc.update(
+                "UPDATE document_parse_task SET status='PUBLISH_FAILED',error_message=?,"
+                        + "update_time=NOW() WHERE id=?",
+                safeMessage(message),
+                taskId);
+    }
+
+    void taskAttemptFailed(long taskId, long documentId, String message, int maximumAttempts) {
+        String safe = safeMessage(message);
+        jdbc.update(
+                "UPDATE document_parse_task SET retry_count=retry_count+1,"
+                        + "status=IF(retry_count+1>=?,'FAILED','RETRYING'),"
+                        + "next_retry_time=DATE_ADD(NOW(), INTERVAL POW(2,retry_count+1) SECOND),"
+                        + "error_message=?,update_time=NOW() WHERE id=?",
+                maximumAttempts,
+                safe,
+                taskId);
+        failed(documentId, safe);
+    }
+
     void parsed(long id, List<String> chunks) {
         jdbc.update("DELETE FROM knowledge_chunk WHERE document_id=?", id);
         for (int i = 0; i < chunks.size(); i++)
@@ -146,5 +212,10 @@ public class KnowledgeRepository {
             int i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
             return path.substring(i + 1);
         }
+    }
+
+    private String safeMessage(String message) {
+        String value = message == null || message.isBlank() ? "未知解析错误" : message;
+        return value.substring(0, Math.min(value.length(), 1000));
     }
 }

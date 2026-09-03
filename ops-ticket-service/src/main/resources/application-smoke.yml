@@ -1,4 +1,9 @@
 spring:
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+    dynamic: false
   datasource:
     url: jdbc:h2:mem:opsticket;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
     driver-class-name: org.h2.Driver
@@ -8,3 +13,7 @@ spring:
     init:
       mode: always
       schema-locations: classpath:smoke-schema.sql
+ops:
+  mq:
+    outbox:
+      enabled: false
