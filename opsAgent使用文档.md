@@ -1,391 +1,277 @@
-# OpsAgent 使用文档
+# OpsAgent 操作手册
 
-## 1. 系统用途
+## 1. 当前系统说明
 
-OpsAgent 用于完成运维问题的最小业务闭环：
+OpsAgent 当前是一个 Java 17 / Spring Boot 3.5 微服务项目，用于演示企业内部运维工单、知识库、异步消息、审计和检索问答场景。
 
 ```text
-普通用户创建工单
-→ 运维人员接单
-→ 上传并解析故障文档
-→ 基于文档进行智能问答
-→ 运维人员解决工单
-→ 创建人确认关闭
-→ 系统生成操作、通知和 AI 任务记录
+浏览器（5173）
+  → Gateway（8080）
+    → Auth（8101）
+    → Ticket（8102）
+    → Knowledge（8103）
+    → RAG（8104）
+    → Platform（8105）
 ```
 
-系统采用前后端分离结构：
+Java 服务和 Vue 前端运行在 Windows 宿主机。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus、Grafana 由 Docker Compose 运行。
 
-- 后端：当前仓库根目录，默认端口 `8080`。
-- 前端：`opsagent-web`，开发端口 `5173`。
-- 数据库：MySQL 8.4。
-- Redis：开发环境已准备，但第一阶段业务尚未使用。
+当前两条主要闭环是：
+
+```text
+工单操作 → 事务内 Outbox → RabbitMQ → Platform 消费幂等 → 操作审计
+文档上传 → RabbitMQ 异步解析 → 重试/DLQ → 文本切片 → RAG 检索引用
+```
+
+本地地址、账号和密码统一保存在仓库外的 `D:\middleware\docs\OpsAgent本地地址与密码.md`。不要把该文件复制到项目或提交到 GitHub。
 
 ## 2. 运行前准备
 
-需要安装：
+- Windows 已启用 WSL2；
+- Docker Desktop 已安装并启动；
+- JDK 17 位于 `D:\jdk17.0.19\jdk-17.0.19`；
+- 项目位于 `D:\myselfProject\opsagent`；
+- 中间件目录位于 `D:\middleware`。
 
-- JDK 17；
-- Docker Desktop，或可用的 MySQL 8；
-- Node.js 20.19 或更高版本；
-- pnpm 9 或更高版本。
+启动前确保端口 `3000`、`3306`、`5173`、`5672`、`6379`、`8080`、`8101`—`8105`、`8848`、`8849`、`8858`、`9090`、`9200`、`9848`、`15672` 未被其他程序占用。
 
-首次运行应先确认端口 `3306`、`6379`、`8080` 和 `5173` 没有被其他程序占用。
+## 3. 启动、查看状态和停止
 
-## 3. 初始化基础设施和数据库
-
-在项目根目录启动 MySQL 和 Redis：
-
-```powershell
-docker compose up -d
-```
-
-默认开发配置：
-
-```text
-数据库：opsagent
-用户名：opsagent
-密码：opsagent_local
-MySQL 端口：3306
-Redis 端口：6379
-```
-
-全新数据库执行：
-
-```text
-src/main/resources/db/schema.sql
-```
-
-该脚本会删除并重建 OpsAgent 相关表，只能用于允许重建的数据库。
-
-`schema.sql` 已包含项目全部表结构和基础角色数据，可以重复执行。每次执行都会删除并重建项目表，不能用于需要保留数据的数据库。
-
-## 4. 启动后端
-
-PowerShell 中配置数据库和 JWT：
+首次启动或 Java 代码修改后，先停止旧进程，再构建并启动：
 
 ```powershell
-$env:OPSAGENT_DB_URL = 'jdbc:mysql://localhost:3306/opsagent?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true'
-$env:OPSAGENT_DB_USERNAME = 'opsagent'
-$env:OPSAGENT_DB_PASSWORD = 'opsagent_local'
-$env:OPS_AGENT_JWT_SECRET = '请替换成至少32字节的随机开发密钥'
-.\mvnw.cmd spring-boot:run
-```
-
-启动成功后：
-
-- 后端地址：`http://localhost:8080`
-- 登录页面：`http://localhost:8080/login`
-- Swagger：`http://localhost:8080/swagger-ui.html`
-- 健康检查：`http://localhost:8080/actuator/health`
-
-JWT 默认有效期为 120 分钟。每次业务请求仍会由后端验证 JWT 的签名、有效期和对应用户状态，并不是登录一次后永久放行。
-
-## 5. 访问前端
-
-默认情况下不需要单独启动前端。IDEA 运行 `OpsagentApplication` 后，Spring Boot 会直接提供 Vue 页面：
-
-```text
-http://localhost:8080/login
-```
-
-只有修改 Vue 源码并需要热更新时，才打开另一个终端启动 Vite：
-
-打开另一个终端：
-
-```powershell
-cd opsagent-web
-pnpm install
-pnpm dev
-```
-
-访问：
-
-```text
-http://localhost:5173
-```
-
-开发环境已经配置 Vite 代理，前端 `/api` 请求会转发至 `http://localhost:8080`，本地开发不需要额外配置 CORS。
-浏览器直接访问后端登录地址或未认证的受保护地址时，会自动跳转到同一后端服务的 `/login`。API 客户端不进行页面跳转，仍通过401 JSON通知前端处理登录状态。
-
-如需让前端直接访问其他后端地址，可以复制 `.env.example` 为 `.env.local`：
-
-```text
-VITE_API_BASE_URL=http://目标后端地址:8080
-```
-
-此时属于跨域访问，后端或统一反向代理必须配置允许的来源；不要在生产环境使用无限制的 `*` CORS。
-
-## 6. 账号和角色
-
-在登录页选择“创建账号”进行注册。新用户默认获得 `USER` 角色。
-
-角色能力：
-
-| 角色 | 权限 |
-|---|---|
-| USER | 创建和查看自己的工单、上传文档、提问、关闭自己的已解决工单 |
-| OPS | 查看待接工单和自己负责的工单、接单、上传文档、提问、解决工单 |
-| ADMIN | 查看全部工单、执行全部状态动作、查看通知、审计和 AI 任务 |
-
-第一阶段没有角色管理页面。需要由数据库管理员分配 `OPS` 或 `ADMIN`，示例：
-
-```sql
-INSERT IGNORE INTO sys_user_role (user_id, role_id)
-SELECT u.id, r.id
-FROM sys_user u
-JOIN sys_role r ON r.code = 'OPS'
-WHERE u.username = 'ops_user';
-```
-
-将 `OPS` 改为 `ADMIN` 即可分配管理员角色。角色变更后，用户应重新登录，以确保前端重新读取当前权限。
-
-建议准备三个测试账号：
-
-```text
-requester   USER
-operator    OPS
-admin       ADMIN
-```
-
-## 7. 工单完整操作流程
-
-### 7.1 创建工单
-
-1. 使用 USER 账号登录。
-2. 进入“工单中心”。
-3. 点击“新建工单”。
-4. 填写标题、问题描述和优先级。
-5. 创建后状态为“待接单（CREATED）”。
-
-USER 只能查看自己创建的工单；OPS 可以看到所有待接工单和自己负责的工单；ADMIN 可以查看全部工单。
-
-### 7.2 接收工单
-
-1. 退出 USER 账号，使用 OPS 账号登录。
-2. 打开待接单工单。
-3. 点击“接收工单”。
-4. 可填写处理备注并确认。
-
-工单进入 `PROCESSING`，当前 OPS 成为处理人。其他 OPS 不再拥有该工单的数据访问权，ADMIN 除外。
-
-### 7.3 解决工单
-
-当前处理人或 ADMIN 在处理完成后点击“标记已解决”，工单进入 `RESOLVED`。
-
-状态提交后系统会：
-
-- 在主事务中写入工单状态操作记录；
-- 事务提交后生成通知记录；
-- 生成待处理的工单总结 AI 任务；
-- 写入附加审计日志。
-
-### 7.4 关闭工单
-
-使用最初创建工单的 USER 账号登录，打开 `RESOLVED` 工单并点击“确认关闭”。工单进入 `CLOSED`，业务闭环完成。
-
-工单状态是单向流转，不支持从已关闭、已解决状态退回。
-
-## 8. 文档上传与解析
-
-在工单详情的“关联文档”区域：
-
-1. 选择 PDF、DOCX、TXT、MD 或 Markdown 文件。
-2. 点击“上传”。
-3. 上传成功后状态为 `PENDING`。
-4. 点击文档右侧的播放按钮开始解析。
-5. 成功后状态变为 `SUCCESS`，可以点击切片按钮查看 Chunk。
-
-限制：
-
-- 单文件默认不超过 50 MB；
-- PDF 必须是文本型 PDF；
-- 扫描图片 PDF 第一阶段不支持 OCR；
-- 不支持 DOC、压缩包和可执行文件；
-- 系统会组合校验扩展名、声明 Content-Type 和 Tika 检测结果；
-- 本地文件使用 UUID 保存，数据库只记录相对路径和 SHA-256。
-
-解析失败时状态为 `FAILED`，页面会显示简要原因。修正文档后可以重新上传；对于可重试错误，也可以再次点击解析。
-
-## 9. 文档智能问答
-
-问答前至少需要一个状态为 `SUCCESS` 的文档。
-
-1. 在工单详情的“文档智能问答”区域选择检索范围。
-2. 可以限定单个文档，也可以检索当前工单的全部已解析文档。
-3. 输入问题并点击“提交问题”。
-4. 后端读取有限候选 Chunk，执行关键词评分并选择 Top K。
-5. 返回答案和引用的文档、Chunk、页码及相关性分数。
-
-默认 `OPS_AGENT_AI_ENABLED=false`，此时不会访问外部模型，只会返回明确的本地占位结果。启用 OpenAI-compatible 服务：
-
-```powershell
-$env:OPS_AGENT_AI_ENABLED = 'true'
-$env:OPS_AGENT_AI_BASE_URL = 'https://api.openai.com/v1'
-$env:OPS_AGENT_AI_API_KEY = '你的API Key'
-$env:OPS_AGENT_AI_MODEL = 'gpt-4.1-mini'
-.\mvnw.cmd spring-boot:run
-```
-
-也可以配置：
-
-```text
-OPS_AGENT_AI_TOP_K
-OPS_AGENT_AI_CANDIDATE_LIMIT
-OPS_AGENT_AI_CONNECT_TIMEOUT
-OPS_AGENT_AI_READ_TIMEOUT
-```
-
-API Key 只能通过环境变量或安全配置中心提供，不要提交到 Git。
-
-## 10. 管理员功能
-
-ADMIN 登录后左侧会增加：
-
-- 通知中心：查看状态事件生成的通知，并将待处理通知标记为已发送或失败；
-- 系统管理 / 操作审计：查看工单状态变化的审计记录；
-- 系统管理 / AI 任务：将任务从 `PENDING` 更新到 `PROCESSING`，再更新为 `SUCCESS` 或 `FAILED`。
-
-这些接口同时由 Spring Security 在服务端限制为 ADMIN。隐藏前端菜单不是安全边界，最终权限始终以后端校验为准。
-
-## 11. 构建和生产部署
-
-后端构建：
-
-```powershell
-.\mvnw.cmd clean package
-```
-
-产物位于：
-
-```text
-target/opsagent-0.0.1-SNAPSHOT.jar
-```
-
-前端构建：
-
-```powershell
-cd opsagent-web
-pnpm build
-```
-
-产物位于：
-
-```text
-opsagent-web/dist
-```
-
-生产环境推荐：
-
-```text
-浏览器
-→ Nginx 提供前端 dist
-→ /api 反向代理至 Spring Boot:8080
-→ Spring Boot 访问 MySQL
-```
-
-前端使用 History 路由，Nginx 对非静态文件路径应回退到 `index.html`。
-
-## 12. 常见问题
-
-### JWT Secret 报错
-
-`OPS_AGENT_JWT_SECRET` 必须至少包含 32 个 UTF-8 字节。生产环境应使用随机生成的高强度密钥。
-
-### 前端提示网络错误
-
-依次检查：
-
-1. 后端是否运行在 `8080`；
-2. `http://localhost:8080/actuator/health` 是否可访问；
-3. 前端是否通过 `pnpm dev` 启动；
-4. 自定义 `VITE_API_BASE_URL` 时是否存在跨域问题。
-
-### 登录后返回 401
-
-可能原因包括 JWT 已过期、签名密钥变化、用户已被禁用或旧 Token 对应用户不存在。退出后重新登录；如果仍失败，检查后端日志。
-
-### 文档没有检索结果
-
-确认文档状态为 `SUCCESS`，并且问题中的关键词确实出现在文档切片中。第一阶段使用关键词评分，不是向量检索。
-
-### 数据库表字段不匹配
-
-说明数据库仍是旧结构。不要直接运行全量脚本覆盖已有数据，应先备份并审核 `phase1_v2_migration.sql`。
-
-## 13. 当前微服务本地环境
-
-当前根 POM 是 `pom` 聚合工程，实际运行的是 Gateway、Auth、Ticket、Knowledge、RAG 和
-Platform 六个进程。推荐使用统一脚本：
-
-```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
 powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\start-opsagent.ps1 -Build
+```
+
+必须先停止旧 Java 进程，因为 Windows 会锁定正在运行的 JAR，直接重新打包可能失败。
+
+代码没有变化时直接启动：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\start-opsagent.ps1
+```
+
+只启动中间件：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\start-opsagent.ps1 -MiddlewareOnly
+```
+
+查看状态或停止全部本地进程和容器：
+
+```powershell
 powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\status-opsagent.ps1
 powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
 ```
 
-本地演示账号为 `admin / Admin@123`、`ops / Ops@123`、`user / User@123`。这些密码只允许
-在本地环境使用。
+停止脚本不会执行 `docker compose down -v`，因此不会删除数据库和其他 named volume。
 
-## 14. 业务演示场景和数据
+## 4. 初始化数据库和企业演示数据
 
-`sql/06_scenario_data.sql` 是可重复执行的演示数据脚本，固定使用 `1000` 以上的主键，避免与
-接口实时创建的数据冲突。脚本提供以下场景：
+Compose 第一次创建 MySQL volume 时，会按文件名执行 `sql` 目录中的初始化脚本。已有 volume 再次启动时不会重新执行，也不会清空数据库。
 
-| 场景 | 演示目标 | 相关数据或接口 |
-|---|---|---|
-| 多人并发接单 | 多个运维人员同时提交相同版本，条件更新只允许一个请求成功 | `OPS-SCENE-1001`、`POST /api/tickets/{id}/claim` |
-| Redis 命中率下降 | 从缓存命中率、过期集中、淘汰和数据库回源分析故障 | `OPS-SCENE-1002`、知识切片 `1003` |
-| Nacos 配置漂移 | 对比 dataId、group、namespace 和实例配置状态 | `OPS-SCENE-1003`、知识切片 `1004` |
-| 磁盘容量告警 | 处理上传目录增长，并规划对象存储迁移 | `OPS-SCENE-1004` |
-| Sentinel 限流异常 | 分析 429、调用峰值和热点规则 | `OPS-SCENE-1005` |
-| 线程池队列积压 | 通过有界线程池、错峰和下游限流恢复 CPU | `OPS-SCENE-1006`、知识切片 `1005` |
-| Refresh Token 失效 | 区分令牌过期、撤销和客户端重试问题 | `OPS-SCENE-1007` |
-| RAG 降级检索 | 未接 Elasticsearch/LLM 时仍能用 MySQL 文本检索返回引用 | 知识库 `101`—`103`、切片 `1001`—`1006` |
-
-执行方式：
+需要重新生成企业演示文件、导入约定 ID 区间的数据并通过 HTTP 上传 18 篇 Runbook 时，在项目根目录执行：
 
 ```powershell
-D:\middleware\runtime\mysql-8.0.46\bin\mysql.exe -uroot -p2491125 `
-  --default-character-set=utf8mb4 < D:\myselfProject\opsagent\sql\06_scenario_data.sql
+cd D:\myselfProject\opsagent
+powershell -ExecutionPolicy Bypass -File .\demo-data\scripts\Initialize-EnterpriseDemo.ps1
 ```
 
-`TicketClaimConcurrencyTest` 使用 Java 17 的固定大小线程池，让 8 个工作线程同时更新同一条
-工单，并断言只有一个线程成功。这个测试覆盖数据库原子条件更新和乐观锁，而不是仅演示线程 API。
+该脚本还会上传一个故意损坏的 `broken-demo.pdf`，用于验证三次消费尝试和知识解析 DLQ。看到 1 条对应死信属于预期结果。
 
-Java 17 没有正式版虚拟线程。虚拟线程在 Java 21 正式发布，因此当前代码不能使用
-`Executors.newVirtualThreadPerTaskExecutor()`。升级到 Java 21 后，可将文档解析等 I/O 密集任务
-迁移到虚拟线程；数据库连接池、外部模型并发和上传带宽仍必须使用信号量或限流器设置上限。
+不要为了重复初始化而删除 Docker volume。需要迁移或重建前，先使用 `mysqldump` 备份四个业务库。
 
-## 15. SQL 组织方式
+## 5. 登录、注册和角色
 
-Auth 和 Ticket 服务当前只有少量固定 CRUD 与原子更新，MyBatis 注解 SQL 短且没有动态条件，
-继续保留注解比增加 XML 更容易阅读。Knowledge 服务当前使用参数化 `JdbcTemplate`，不是 MyBatis。
+打开 `http://127.0.0.1:5173/`。演示账号的密码见仓库外密码文档。
 
-出现以下任一情况时应迁移到 `src/main/resources/mapper/*.xml`：
+| 角色 | 当前权限 |
+|---|---|
+| USER | 注册、登录、创建和查看自己的工单、关闭自己创建的已解决工单 |
+| OPS | 查看待接工单和自己负责的工单、接单、处理和解决工单 |
+| ADMIN | 查看全部工单、执行状态操作、访问管理员接口 |
 
-- 多表查询持续增长、单条 SQL 超过约 10—15 行；
-- 使用多个动态条件、`foreach`、`choose` 或可复用 SQL 片段；
-- 需要复杂 `resultMap`、嵌套映射或由 DBA 独立审查 SQL；
-- Java 字符串拼接已经妨碍格式化和执行计划分析。
+登录页可以进入注册页。新注册用户默认是 `USER`，角色变更需要修改 `ops_auth.sys_user_role` 后重新登录。
 
-迁移时设置 `mybatis-plus.mapper-locations=classpath*:/mapper/**/*.xml`。当前 SQL 规模尚未达到
-迁移阈值，因此没有为了形式统一而创建空的 XML 映射文件。
+页面左侧菜单包括：运行总览、工单中心、知识库、智能问答和系统监控；ADMIN 还会看到通知中心和系统管理。
 
-## 16. 中间件实际状态
+## 6. 工单操作
 
-| 组件 | 当前状态 | 说明 |
-|---|---|---|
-| MySQL | 已运行 | 四个业务库和演示数据均已初始化 |
-| Redis | 已运行并接入 | Auth 使用配置化连接，带密码探针 |
-| Nacos | 已运行并接入 | 服务注册和六份配置均可验证 |
-| Sentinel | 已运行并接入 | 六个应用已注册到 Dashboard |
-| Prometheus Server | Docker 已运行并接入 | 6/6 Java targets UP，并采集 Outbox、MQ 和文档解析指标 |
-| Grafana | Docker 已运行并接入 | 数据源健康，OpsAgent Overview 已预置 MQ 面板 |
-| RabbitMQ | Docker 已运行并接入 | 工单 Outbox 审计与文档解析两条链路，包含确认、重试、幂等和 DLQ |
-| Elasticsearch | Docker 已运行，应用未接入 | 集群 green；当前仍使用 MySQL 文本检索，避免伪装成 ES 检索 |
-| 外部 LLM | 未接入 | 缺少供应商、模型地址和 API Key，当前使用检索降级回答 |
+### 6.1 页面快速演示
 
-Prometheus 页面为 `http://127.0.0.1:9090/`，Grafana 默认页面为
-`http://127.0.0.1:3000/`。本地 Grafana 初始账号由启动脚本设置为 `admin / opsagent_local`，
-实际部署必须修改。
+1. 使用 USER 登录，进入“工单中心”，点击“新建工单”。
+2. 填写标题、描述和优先级，创建后状态为 `CREATED`。
+3. 退出后使用 OPS 登录，打开该工单并点击“接收工单”，状态变为 `ASSIGNED`。
+4. 将工单推进到 `PROCESSING` 后，处理人可点击“标记已解决”，状态变为 `RESOLVED`。
+5. 使用原创建人登录，点击“确认关闭”，状态变为 `CLOSED`。
+6. 工单详情右侧“状态时间线”可查看操作人、前后状态和备注。
+
+状态机允许的完整流转为：
+
+```text
+CREATED → ASSIGNED → PROCESSING → RESOLVED → CLOSED
+                     ├→ SUSPENDED → PROCESSING
+                     ├→ WAITING_CONFIRM → PROCESSING / RESOLVED
+                     └→ REJECTED
+```
+
+当前前端已实现创建、接单、解决和关闭按钮，但尚未提供 `ASSIGNED → PROCESSING` 的按钮。该一步暂时使用 API：
+
+```powershell
+$gateway = 'http://127.0.0.1:8080'
+$username = Read-Host 'OPS 用户名'
+$password = Read-Host 'OPS 密码'
+$loginBody = @{ username = $username; password = $password } | ConvertTo-Json
+$login = Invoke-RestMethod -Method Post -Uri "$gateway/api/auth/login" -ContentType 'application/json' -Body $loginBody
+$headers = @{ Authorization = "Bearer $($login.data.accessToken)" }
+$ticketId = Read-Host '工单 ID'
+$ticket = Invoke-RestMethod -Uri "$gateway/api/tickets/$ticketId" -Headers $headers
+$body = @{ target = 'PROCESSING'; version = $ticket.data.version; remark = '开始处理' } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "$gateway/api/tickets/$ticketId/transition" -Headers $headers -ContentType 'application/json' -Body $body
+```
+
+接单和状态更新都带版本条件。多人或多实例同时接单时，只有一个请求能成功，其他请求返回冲突。
+
+### 6.2 工单事件和审计
+
+创建、接单和状态流转会在同一数据库事务内写入 `ops_ticket.event_outbox`。Publisher 在后台发送 `ticket.#` 事件，使用 Publisher Confirm、指数退避和超时 `PUBLISHING` 回收；Platform 消费端按 `eventId` 幂等写审计。
+
+管理员可通过以下接口查看跨服务审计：
+
+```text
+GET /api/platform/admin/audits?bizId={工单ID}&limit=50
+```
+
+当前“系统管理”页面仍使用旧版通知、审计和 AI 任务接口，尚未改为展示 `/api/platform/admin/audits`；需要查看新的 RabbitMQ 审计时，应使用上述接口或数据库。
+
+## 7. 文档上传与异步解析
+
+工单详情中的“关联文档”区域目前实际读写的是知识库 `1`，并未在数据库中建立真正的“工单—文档”关联。这是当前前端适配层的已知限制。
+
+页面操作：
+
+1. 在工单详情选择 PDF、DOCX、TXT、MD 或 Markdown 文件；
+2. 点击“上传”；
+3. 点击播放图标提交异步解析任务；
+4. 等待数秒后刷新页面；
+5. 状态为 `SUCCESS` 时点击切片图标查看 Chunk。
+
+后端真实状态使用 `UPLOADED`、`PARSING`、`PARSED`、`FAILED`；前端会把 `PARSED` 映射为 `SUCCESS`。单文件默认上限 50 MB，扫描型 PDF 尚不支持 OCR。
+
+解析消息进入 `ops.knowledge.parse.queue`。失败最多消费三次，最终进入 `ops.knowledge.parse.dlq`。任务状态可通过以下接口查询：
+
+```text
+GET /api/knowledge/parse-tasks/{taskId}
+```
+
+“知识库”页面目前支持创建和查看知识库；任意知识库的文档上传、列表和解析可以通过 `/api/knowledge/bases/{id}/documents` 等接口完成。
+
+## 8. 智能问答
+
+进入“智能问答”，输入问题并提交。也可以在工单详情的“文档智能问答”区域提问。
+
+当前默认返回 `retrieval-fallback`：RAG 服务调用 Knowledge 服务的 MySQL 文本检索，返回命中的文档和 Chunk 引用，但不调用外部 LLM。Elasticsearch 容器已运行，Java 索引和检索尚未接入。
+
+建议演示问题：
+
+```text
+大促期间订单接口出现 429 和超时应该如何排查？
+RabbitMQ 消息积压时应检查哪些指标？
+Redis 命中率下降时如何确认是否发生缓存雪崩？
+```
+
+## 9. Nacos 操作与实际接入程度
+
+控制台：`http://127.0.0.1:8849/`
+
+Nacos 已实际使用，不只是启动了容器：
+
+- 六个 Java 服务注册到 Nacos；
+- Gateway 使用 `lb://服务名` 和 Nacos 服务发现转发请求；
+- 六个服务订阅各自的 `{spring.application.name}.yaml`；
+- 启动脚本自动运行 `publish-nacos-config.ps1` 发布六个 Data ID。
+
+验证方式：
+
+1. 打开控制台“服务管理”，应看到六个 `ops-*` 服务；
+2. 打开“配置管理”，选择 `DEFAULT_GROUP`，应看到六个 `*.yaml`；
+3. 执行状态脚本后，再访问任意业务页面验证 Gateway 路由。
+
+当前发布到 Nacos 的内容主要是连通性标识和管理信息，数据库、MQ 等核心参数仍主要通过环境变量和本地 `application.yml` 提供。Nacos 已接入，但配置中心的业务化程度仍有限。
+
+## 10. Sentinel 操作与实际接入程度
+
+控制台：`http://127.0.0.1:8858/`，登录凭据见仓库外密码文档。
+
+Sentinel 客户端已接入六个 Java 服务。启动脚本启用 eager 模式并设置 Dashboard 地址；实测 Dashboard 能看到六个健康应用实例。
+
+使用方法：
+
+1. 先通过页面或 API 访问各服务，产生资源调用；
+2. 登录 Sentinel；
+3. 左侧选择 `ops-gateway`、`ops-auth-service`、`ops-ticket-service`、`ops-knowledge-service`、`ops-rag-service` 或 `ops-platform-service`；
+4. 查看实时监控、簇点链路和机器列表。
+
+目前没有配置正式的流控、熔断、热点或授权规则，也没有将规则持久化到 Nacos。也就是说，Sentinel 已完成客户端和 Dashboard 接入，可观测，但尚未形成生产级治理策略。直接在 Dashboard 创建的规则可能在应用或 Dashboard 重启后丢失。
+
+## 11. RabbitMQ、Prometheus、Grafana 和 Elasticsearch
+
+- RabbitMQ 管理页可查看 `ops.platform.audit.queue`、`ops.platform.audit.dlq`、`ops.knowledge.parse.queue` 和 `ops.knowledge.parse.dlq`。
+- Prometheus 的 `/targets` 页面应显示六个 Java job 全部 `UP`。
+- Grafana 已预置 `OpsAgent Overview`，包含 Outbox、MQ 消费和文档解析指标。
+- Elasticsearch `_cluster/health` 当前应为 green，但业务检索尚未使用 Elasticsearch。
+
+所有地址和登录凭据见仓库外密码文档。
+
+## 12. 构建和代码检查
+
+后端完整检查：
+
+```powershell
+cd D:\myselfProject\opsagent
+.\mvnw.cmd verify
+```
+
+前端检查：
+
+```powershell
+cd D:\myselfProject\opsagent\ops-web
+& 'C:\Users\77190\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd' build
+```
+
+后端构建包含 Checkstyle。当前并发接单测试使用 8 个 Java 17 平台线程验证数据库条件更新；Java 17 没有正式虚拟线程 API，虚拟线程需要升级到 Java 21。
+
+## 13. 日志、数据和排障
+
+- Java/前端日志：`D:\middleware\logs`；
+- PID 文件：`D:\middleware\data`；
+- 上传文件：`D:\myselfProject\opsagent\data\uploads`；
+- Docker 数据：Compose named volumes；
+- 数据库备份：`D:\middleware\backups`。
+
+常见检查顺序：
+
+1. 执行 `status-opsagent.ps1`；
+2. 执行 `docker compose ps`；
+3. 查看对应 Java 服务的 `*.stdout.log` 和 `*.stderr.log`；
+4. 在 Prometheus `/targets` 检查抓取状态；
+5. 在 Nacos 检查服务实例；
+6. 在 RabbitMQ 检查主队列、消费者和 DLQ；
+7. 最后检查 MySQL 中的 Outbox、解析任务和消费幂等表。
+
+RabbitMQ 临时不可用时，工单主事务仍可成功，Outbox 会记录失败并自动重试。历史日志中的连接失败需要结合时间判断；只要 RabbitMQ 已恢复、主队列无积压且 Outbox 全部为 `SENT`，就不属于当前故障。
+
+## 14. 当前未完成项
+
+| 项目 | 当前情况 |
+|---|---|
+| 外部 LLM | 未配置供应商、模型地址和 API Key |
+| Elasticsearch Java 检索 | 容器已运行，应用仍使用 MySQL fallback |
+| Embedding/向量检索 | 尚未选择模型和向量维度 |
+| Sentinel 持久化规则 | 客户端已接入，尚无生产流控/熔断规则和 Nacos 持久化 |
+| OCR | 扫描 PDF 需要 Tesseract 或云 OCR |
+| 真正的工单附件关联 | 当前工单页固定使用知识库 1 |
+| 管理页面适配 | 新 Platform MQ 审计已提供 API，前端系统管理页尚未切换 |
+| Java 虚拟线程 | Java 17 不支持正式 API，需升级 Java 21 |
+| Alertmanager | 缺少 SLO、联系人和企业通知渠道 |

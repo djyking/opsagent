@@ -23,6 +23,37 @@ opsagent
 └─ pom.xml                     后端 Maven 配置
 ```
 
+## 快速操作
+
+首次运行或代码修改后，先停止旧 Java 进程，再完成构建和启动：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\start-opsagent.ps1 -Build
+```
+
+代码没有变化时直接执行 `D:\middleware\scripts\start-opsagent.ps1`。查看状态和停止：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\status-opsagent.ps1
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
+```
+
+主要入口：
+
+| 功能 | 地址 | 当前用途 |
+|---|---|---|
+| OpsAgent 前端 | `http://127.0.0.1:5173/` | 用户操作入口 |
+| Gateway | `http://127.0.0.1:8080/` | 统一 API 入口 |
+| Nacos | `http://127.0.0.1:8849/` | 服务发现和六个 Data ID |
+| Sentinel | `http://127.0.0.1:8858/` | 六个服务的实时监控和簇点链路 |
+| RabbitMQ | `http://127.0.0.1:15672/` | 队列、消费者和 DLQ |
+| Prometheus | `http://127.0.0.1:9090/targets` | 六个 Java 服务抓取状态 |
+| Grafana | `http://127.0.0.1:3000/` | `OpsAgent Overview` 指标面板 |
+| Elasticsearch | `http://127.0.0.1:9200/_cluster/health` | 仅验证集群，业务尚未使用 |
+
+账号和密码不写入 Git 文档，统一查看本机仓库外文件 `D:\middleware\docs\OpsAgent本地地址与密码.md`。
+
 ## 角色与权限
 
 - `USER`：创建并查看自己的工单、上传文档、提问、关闭已解决工单。
@@ -76,6 +107,11 @@ OPS_JWT_SECRET                 至少 32 个 UTF-8 字节
 OPS_UPLOAD_DIR                 默认 ./data/uploads
 OPS_RABBITMQ_HOST / OPS_RABBITMQ_PORT / OPS_RABBITMQ_USERNAME / OPS_RABBITMQ_PASSWORD
 NACOS_ENABLED                  默认 false
+NACOS_CONFIG_ENABLED           默认 false
+NACOS_SERVER_ADDR              默认 localhost:8848
+SENTINEL_ENABLED               默认 false
+SENTINEL_EAGER                 默认 false
+SENTINEL_DASHBOARD             默认 localhost:8858
 OPS_ES_ENABLED                 默认 false
 OPS_LLM_ENABLED                默认 false
 OPS_LLM_BASE_URL / OPS_LLM_API_KEY / OPS_LLM_MODEL
@@ -91,7 +127,7 @@ $env:OPS_JWT_SECRET = '请替换为至少32字节的随机开发密钥'
 
 - 全新开发库：Compose 首次创建 MySQL 卷时按文件名自动执行 `sql/01` 至 `sql/07` 和 `sql/init_data.sql`。
 - Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
-- 本地初始管理员为 `admin / Admin@123`，仅用于开发，部署后必须替换。
+- 本地演示账号由 SQL 初始化，账号列表及本地密码只记录在仓库外密码文档中。
 
 `compose.yaml` 只包含中间件：MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana，不包含 Java 服务。
 
@@ -101,6 +137,8 @@ docker compose ps
 ```
 
 推荐使用 `D:\middleware\scripts\start-opsagent.ps1` 启动全部中间件和本机应用；只启动中间件时添加 `-MiddlewareOnly`。停止脚本不会删除 Docker named volumes。
+
+启动脚本会启用 Nacos 服务发现和配置订阅，并把六个服务配置发布到 `DEFAULT_GROUP`。Gateway 的 `lb://` 路由依赖 Nacos 实例列表，因此 Nacos 已被实际使用。Sentinel 客户端也已注册六个应用到 Dashboard，但当前只具备监控能力，尚未配置持久化流控、熔断和热点规则。
 
 ## 构建和运行
 
@@ -134,4 +172,4 @@ pnpm build
 
 项目默认启用 `local` Profile，也可以用 `SPRING_PROFILES_ACTIVE` 覆盖。接口访问日志只记录请求方法、路径、响应状态、耗时和 Trace ID，不记录请求体、密码或完整 JWT。
 
-从数据库初始化到完整工单闭环的操作步骤见 [opsAgent使用文档.md](opsAgent使用文档.md)。
+从数据库初始化到完整工单闭环、Nacos/Sentinel 控制台操作和故障排查步骤见 [opsAgent使用文档.md](opsAgent使用文档.md)。手册同时标明了当前前端仍需通过 API 完成的步骤，避免把未接通功能写成已完成。

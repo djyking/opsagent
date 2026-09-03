@@ -13,4 +13,4 @@
 powershell -ExecutionPolicy Bypass -File .\demo-data\scripts\Initialize-EnterpriseDemo.ps1
 ```
 
-新增企业账号统一使用本地演示密码 `OpsAgent@123`，管理员仍使用 `admin / Admin@123`。这些密码仅用于本机。`broken-demo.pdf` 专门验证三次重试、失败任务和 `ops.knowledge.parse.dlq`，不是有效 PDF。
+企业演示账号和本地密码见仓库外的 `D:\middleware\docs\OpsAgent本地地址与密码.md`，本文件不保存明文密码。`broken-demo.pdf` 专门验证三次重试、失败任务和 `ops.knowledge.parse.dlq`，不是有效 PDF。
