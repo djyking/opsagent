@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * 编排权限检索、Prompt 构建、模型调用和真实来源返回。
@@ -43,8 +44,22 @@ public class RagService {
     }
 
     Answer ask(String question, Integer requestedTopK, Long documentId) {
+        StreamPlan plan = prepareStream(question, requestedTopK, documentId);
+        if (plan.immediate() != null) {
+            return plan.immediate();
+        }
+        try {
+            LlmInvocationService.Invocation invocation = invocationService.invoke(
+                    question, plan.request());
+            return complete(plan, invocation);
+        } catch (AiProviderException exception) {
+            throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, exception.getMessage());
+        }
+    }
+
+    StreamPlan prepareStream(String question, Integer requestedTopK, Long documentId) {
         if (credentialExtractionQuestion(question)) {
-            return noEvidence();
+            return StreamPlan.completed(question, noEvidence());
         }
         int topK = ragProperties.limit(requestedTopK);
         List<RetrievedChunk> chunks;
@@ -60,26 +75,42 @@ public class RagService {
         }
         List<Source> sources = chunks.stream().map(Source::from).toList();
         if (chunks.isEmpty() && internalFactQuestion(question)) {
-            return noEvidence();
+            return StreamPlan.completed(question, noEvidence());
         }
         if (!aiProperties.isEnabled()) {
-            return localFallback(chunks, sources);
+            return StreamPlan.completed(question, localFallback(chunks, sources));
         }
-        try {
-            LlmInvocationService.Invocation invocation = invocationService.invoke(
-                    question, promptBuilder.build(question, chunks));
-            LlmResult result = invocation.result();
-            return new Answer(
-                    citationValidator.validate(result.text(), chunks),
-                    sources,
-                    result.provider(),
-                    result.model(),
-                    result.inputTokens(),
-                    result.outputTokens(),
-                    invocation.latencyMs());
-        } catch (AiProviderException exception) {
-            throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, exception.getMessage());
+        return new StreamPlan(
+                question, chunks, sources, promptBuilder.build(question, chunks), null);
+    }
+
+    Answer stream(
+            StreamPlan plan,
+            Consumer<String> onDelta,
+            LlmInvocationService.AuditContext context) {
+        if (plan.immediate() != null) {
+            onDelta.accept(plan.immediate().answer());
+            return plan.immediate();
         }
+        LlmInvocationService.Invocation invocation = invocationService.stream(
+                plan.question(), plan.request(), onDelta, context);
+        return complete(plan, invocation);
+    }
+
+    LlmInvocationService.AuditContext auditContext() {
+        return invocationService.currentContext();
+    }
+
+    private Answer complete(StreamPlan plan, LlmInvocationService.Invocation invocation) {
+        LlmResult result = invocation.result();
+        return new Answer(
+                citationValidator.validate(result.text(), plan.chunks()),
+                plan.sources(),
+                result.provider(),
+                result.model(),
+                result.inputTokens(),
+                result.outputTokens(),
+                invocation.latencyMs());
     }
 
     private Answer localFallback(List<RetrievedChunk> chunks, List<Source> sources) {
@@ -167,6 +198,23 @@ public class RagService {
             int inputTokens,
             int outputTokens,
             long latencyMs) {}
+
+    /**
+     * 保存请求线程已完成的检索结果，避免 SSE 工作线程丢失 Feign Token Relay 上下文。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record StreamPlan(
+            String question,
+            List<RetrievedChunk> chunks,
+            List<Source> sources,
+            LlmRequest request,
+            Answer immediate) {
+        static StreamPlan completed(String question, Answer answer) {
+            return new StreamPlan(question, List.of(), answer.references(), null, answer);
+        }
+    }
 
     /**
      * 返回由程序根据真实检索结果生成的来源，而不是信任模型自行声明的引用。

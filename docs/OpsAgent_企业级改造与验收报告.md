@@ -15,10 +15,12 @@
 | 文档异步解析 | 快速创建任务、JSON 消息、Tika 解析、短事务切片 | 18 篇 Markdown 全部 SUCCESS/PARSED |
 | 文档重试与死信 | 监听器最多三次、错误摘要、任务失败、DLQ | 损坏 PDF 的 retry_count=3，DLQ 恰有 1 条 |
 | 企业演示数据 | 多角色、40 张企业工单、完整大促事故、评论、附件、4 个知识库 | Docker MySQL 中共有 10 个账号、50 张工单、8 个知识库 |
-| RAG | 真实上传/解析形成 chunks，MySQL 检索降级并返回引用 | “订单 429 和超时”问题返回真实 Runbook 引用 |
+| RAG | 22 篇可用文档全量向量化、权限 KNN、Provider 原生 SSE、Citation 校验 | 25 个切片均由 `text-embedding-3-small` 索引；DeepSeek SSE 返回真实分段 Token |
+| 文档删除补偿 | 创建人/ADMIN 软删除、ES 即时删除、持久化指数退避 | 停止 ES 后任务进入 RETRYING；恢复后自动 SUCCESS，向量 1→0 |
+| RAG 限流 | Sentinel 资源保护、Nacos FlowRule 持久化 | 12 个并发请求中 6 个被 5 QPS 规则拦截 |
 | 监控 | Prometheus 容器抓宿主 Java，Grafana 自动预置 | Prometheus 6/6 targets UP，Grafana 数据源返回 OK |
 
-最终数据库与消息状态：工单 Outbox 共 46 条且全部为 `SENT`；知识库共有 22 篇文档，其中 21 篇 `PARSED`、1 篇故意损坏的 PDF 为 `FAILED`；主解析队列和平台审计队列均无积压，解析 DLQ 保留 1 条预期测试死信。`document_parse_task` 中另外保留了 19 条修复消息类型头问题前的失败测试记录，便于追溯，不代表当前仍有 19 个待处理文档。
+最终知识状态：22 篇可用文档均为 `INDEXED`，25 个有效切片均使用 `text-embedding-3-small`，1 篇故意损坏 PDF 为 `FAILED`；另保留 1 条本轮删除补偿测试的软删除记录。主解析队列和平台审计队列均无积压，解析 DLQ 保留 1 条预期测试死信。
 
 ## 3. 企业账号与数据
 
@@ -42,7 +44,7 @@
 2. 展示工单 2000“大促期间订单创建接口大量超时并出现429”的完整历史、评论与附件。
 3. 用王伟账号演示接单和状态流转，观察 `event_outbox` 从 PENDING 到 SENT。
 4. 用管理员访问 `/api/platform/admin/audits?bizId=2000`，说明平台服务不跨库查询 Ticket，而是异步消费事件。
-5. 在 RAG 页面询问“大促订单 429 和超时如何排查”，展示真实 Runbook 引用及 `retrieval-fallback` 标识。
+5. 在 RAG 页面提问，展示逐 Token 输出、最终 Citation 校验和真实 Runbook 来源；生成 Provider 接收内部上下文前应确认相应数据处理授权。
 6. 打开 RabbitMQ 的四个主/死信队列，再展示损坏 PDF 对应的三次重试和单条 DLQ。
 7. 打开 Prometheus Targets（6/6 UP）和 Grafana OpsAgent Overview 的 MQ 指标。
 
@@ -67,9 +69,9 @@ D:\middleware\scripts\stop-opsagent.ps1
 
 | 项目 | 当前状态 | 未实现原因 | 后续工作 |
 |---|---|---|---|
-| 既有内部文档全量向量化 | 未执行 | AI/RAG 代码和合成文档验收已完成，但未授权把既有内部 Runbook 批量发送给外部 OpenAI | 完成数据分级、脱敏和第三方处理审批后调用管理员 reindex API |
 | 多 Provider 自动 Fallback | 未启用 | OpenAI、DeepSeek、Kimi 均已接入并实测；自动切换会改变上下文接收方 | 建立 Provider allowlist、数据策略和成本策略后再启用 |
-| 分布式 RAG 限流与缓存 | 未接入 Redis | 当前为单实例每用户限流，避免权限相关回答被跨用户缓存 | 多实例前实现 Redis Lua 限流；缓存键必须包含用户权限和文档版本 |
+| Sentinel 全局共享限流 | 部分实现 | Nacos 已持久化 5 QPS FlowRule，但普通客户端仍每实例计数 | 严格多实例总额度需部署 Cluster Token Server |
+| Redis 问答缓存 | 未实现 | 权限和文档版本会影响答案，直接共享缓存有越权风险 | 缓存键加入用户权限、文档版本和 Prompt 版本，并实现删除失效 |
 | Java 虚拟线程 | 未实现 | Java 17 没有正式虚拟线程 API，Java 21 才正式提供 | 升级 Java 21 后用于文档 I/O；数据库连接等稀缺资源仍需限流 |
 | OCR | 未实现 | Tika 只能处理文本型 PDF，扫描件需要 OCR 运行时 | 评估 Tesseract 或云 OCR，并增加文件隔离和资源限制 |
 | 工单附件上传 API | 仅有真实文件和数据库元数据 | 当前 Ticket 模块没有附件存储接口 | 复用 Knowledge 的文件校验/存储抽象，补上传、下载和权限校验 |

@@ -13,6 +13,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * 统一模型调用的指标、耗时和最小化 Usage 审计。
@@ -36,15 +37,23 @@ public class LlmInvocationService {
     }
 
     Invocation invoke(String question, LlmRequest request) {
-        return invoke(router.selected(), question, request);
+        return invoke(router.selected(), question, request, currentContext());
     }
 
     Invocation invoke(LlmClient client, String question, LlmRequest request) {
+        return invoke(client, question, request, currentContext());
+    }
+
+    private Invocation invoke(
+            LlmClient client,
+            String question,
+            LlmRequest request,
+            AuditContext context) {
         long started = System.nanoTime();
         try {
             LlmResult result = client.generate(request);
             long latency = elapsedMillis(started);
-            record(client, question, result, latency, true, null);
+            record(client, question, result, latency, true, null, context);
             metric(client.provider(), "success", latency);
             return new Invocation(result, latency);
         } catch (AiProviderException exception) {
@@ -52,10 +61,38 @@ public class LlmInvocationService {
             String error = exception.statusCode() == 0
                     ? "CONNECTION"
                     : "HTTP_" + exception.statusCode();
-            record(client, question, null, latency, false, error);
+            record(client, question, null, latency, false, error, context);
             metric(client.provider(), "failure", latency);
             throw exception;
         }
+    }
+
+    Invocation stream(
+            String question,
+            LlmRequest request,
+            Consumer<String> onDelta,
+            AuditContext context) {
+        LlmClient client = router.selected();
+        long started = System.nanoTime();
+        try {
+            LlmResult result = client.stream(request, onDelta);
+            long latency = elapsedMillis(started);
+            record(client, question, result, latency, true, null, context);
+            metric(client.provider(), "success", latency);
+            return new Invocation(result, latency);
+        } catch (AiProviderException exception) {
+            long latency = elapsedMillis(started);
+            String error = exception.statusCode() == 0
+                    ? "CONNECTION"
+                    : "HTTP_" + exception.statusCode();
+            record(client, question, null, latency, false, error, context);
+            metric(client.provider(), "failure", latency);
+            throw exception;
+        }
+    }
+
+    AuditContext currentContext() {
+        return new AuditContext(SecurityUsers.current().userId(), MDC.get("traceId"));
     }
 
     private void record(
@@ -64,12 +101,13 @@ public class LlmInvocationService {
             LlmResult result,
             long latency,
             boolean success,
-            String error) {
+            String error,
+            AuditContext context) {
         int input = result == null ? 0 : result.inputTokens();
         int output = result == null ? 0 : result.outputTokens();
         usageRepository.save(new AiUsageRepository.AiUsage(
-                MDC.get("traceId"),
-                SecurityUsers.current().userId(),
+                context.traceId(),
+                context.userId(),
                 client.provider(),
                 client.model(),
                 hash(question),
@@ -110,4 +148,12 @@ public class LlmInvocationService {
      * @since 2026/9/1
      */
     record Invocation(LlmResult result, long latencyMs) {}
+
+    /**
+     * 保存请求线程中的最小化审计上下文，供 SSE 工作线程安全使用。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record AuditContext(long userId, String traceId) {}
 }

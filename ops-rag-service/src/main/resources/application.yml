@@ -22,6 +22,14 @@ spring:
       eager: ${SENTINEL_EAGER:false}
       transport:
         dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
+      datasource:
+        rag-flow:
+          nacos:
+            server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+            data-id: ${SENTINEL_RULE_DATA_ID:ops-rag-sentinel-flow-rules}
+            group-id: DEFAULT_GROUP
+            data-type: json
+            rule-type: flow
 ops:
   security:
     secret: ${OPS_JWT_SECRET:}

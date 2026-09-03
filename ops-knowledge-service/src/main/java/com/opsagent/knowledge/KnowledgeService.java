@@ -32,18 +32,21 @@ public class KnowledgeService {
     private final DocumentParserService parser;
     private final DocumentParsePublisher publisher;
     private final KnowledgeIndexService indexService;
+    private final KnowledgeIndexCompensationService compensationService;
 
     KnowledgeService(
             KnowledgeRepository repo,
             FileStorageService storage,
             DocumentParserService parser,
             DocumentParsePublisher publisher,
-            KnowledgeIndexService indexService) {
+            KnowledgeIndexService indexService,
+            KnowledgeIndexCompensationService compensationService) {
         this.repo = repo;
         this.storage = storage;
         this.parser = parser;
         this.publisher = publisher;
         this.indexService = indexService;
+        this.compensationService = compensationService;
     }
 
     long createBase(String name, String description) {
@@ -79,6 +82,35 @@ public class KnowledgeService {
     Map<String, Object> parseTask(long taskId) {
         Map<String, Object> task = repo.parseTask(taskId);
         if (task == null) throw new BusinessException(ErrorCode.NOT_FOUND, "解析任务不存在");
+        return task;
+    }
+
+    @Transactional
+    DeleteResult deleteDocument(long documentId) {
+        Map<String, Object> document = repo.document(documentId);
+        if (document == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
+        }
+        var principal = SecurityUsers.current();
+        long creator = number(document, "create_by", "createBy");
+        boolean administrator = principal.roles().stream()
+                .anyMatch(role -> "ADMIN".equals(role) || "ROLE_ADMIN".equals(role));
+        if (!administrator && creator != principal.userId()) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "只能删除本人创建的文档");
+        }
+        if (repo.logicalDelete(documentId) == 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
+        }
+        long taskId = repo.createDeleteIndexTask(documentId);
+        String indexStatus = compensationService.process(taskId);
+        return new DeleteResult(documentId, taskId, indexStatus);
+    }
+
+    Map<String, Object> indexTask(long taskId) {
+        Map<String, Object> task = repo.indexTask(taskId);
+        if (task == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "索引补偿任务不存在");
+        }
         return task;
     }
 
@@ -193,6 +225,24 @@ public class KnowledgeService {
         }
         return visibility;
     }
+
+    private long number(Map<String, Object> row, String... keys) {
+        for (String key : keys) {
+            Object value = row.get(key);
+            if (value instanceof Number number) {
+                return number.longValue();
+            }
+        }
+        return 0L;
+    }
+
+    /**
+     * 返回文档软删除结果和对应的 Elasticsearch 补偿任务状态。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record DeleteResult(long documentId, long taskId, String indexStatus) {}
 
     /**
      * 已在事务外完成文件读取的文档切片结果。

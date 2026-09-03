@@ -237,6 +237,73 @@ public class KnowledgeRepository {
                 documentId);
     }
 
+    int logicalDelete(long documentId) {
+        return jdbc.update(
+                "UPDATE knowledge_document SET deleted=1,status='DELETED',update_time=NOW()"
+                        + " WHERE id=? AND deleted=0",
+                documentId);
+    }
+
+    long createDeleteIndexTask(long documentId) {
+        jdbc.update(
+                "INSERT INTO knowledge_index_task(document_id,operation,status,retry_count,"
+                        + "next_retry_time,error_message,create_time,update_time)"
+                        + " VALUES(?,'DELETE','PENDING',0,NOW(),NULL,NOW(),NOW())"
+                        + " ON DUPLICATE KEY UPDATE status='PENDING',retry_count=0,"
+                        + "next_retry_time=NOW(),error_message=NULL,update_time=NOW()",
+                documentId);
+        return jdbc.queryForObject(
+                "SELECT id FROM knowledge_index_task WHERE document_id=? AND operation='DELETE'",
+                Long.class,
+                documentId);
+    }
+
+    Map<String, Object> indexTask(long taskId) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM knowledge_index_task WHERE id=?", taskId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    List<Long> dueIndexTaskIds(int limit) {
+        return jdbc.queryForList(
+                "SELECT id FROM knowledge_index_task WHERE"
+                        + " (status IN ('PENDING','RETRYING')"
+                        + " AND (next_retry_time IS NULL OR next_retry_time<=NOW()))"
+                        + " OR (status='PROCESSING'"
+                        + " AND update_time<=DATE_SUB(NOW(),INTERVAL 5 MINUTE))"
+                        + " ORDER BY id LIMIT ?",
+                Long.class,
+                limit);
+    }
+
+    int claimIndexTask(long taskId) {
+        return jdbc.update(
+                "UPDATE knowledge_index_task SET status='PROCESSING',update_time=NOW()"
+                        + " WHERE id=? AND ((status IN ('PENDING','RETRYING')"
+                        + " AND (next_retry_time IS NULL OR next_retry_time<=NOW()))"
+                        + " OR (status='PROCESSING'"
+                        + " AND update_time<=DATE_SUB(NOW(),INTERVAL 5 MINUTE)))",
+                taskId);
+    }
+
+    void indexTaskSuccess(long taskId) {
+        jdbc.update(
+                "UPDATE knowledge_index_task SET status='SUCCESS',next_retry_time=NULL,"
+                        + "error_message=NULL,update_time=NOW() WHERE id=?",
+                taskId);
+    }
+
+    void indexTaskFailure(long taskId, String message, int maximumAttempts) {
+        jdbc.update(
+                "UPDATE knowledge_index_task SET retry_count=retry_count+1,"
+                        + "status=IF(retry_count+1>=?,'FAILED','RETRYING'),"
+                        + "next_retry_time=DATE_ADD(NOW(),INTERVAL POW(2,retry_count+1) SECOND),"
+                        + "error_message=?,update_time=NOW() WHERE id=?",
+                maximumAttempts,
+                safeMessage(message),
+                taskId);
+    }
+
     /**
      * 文档存储路径与原始名称。
      *

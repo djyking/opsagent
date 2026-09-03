@@ -3,6 +3,8 @@ package com.opsagent.common.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsagent.common.core.*;
 
+import jakarta.servlet.DispatcherType;
+
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -82,7 +84,9 @@ public class SecurityAutoConfiguration {
                                                 }))
                 .authorizeHttpRequests(
                         a ->
-                                a.requestMatchers(p.getPermitAll().toArray(String[]::new))
+                                a.dispatcherTypeMatchers(DispatcherType.ASYNC)
+                                        .permitAll()
+                                        .requestMatchers(p.getPermitAll().toArray(String[]::new))
                                         .permitAll()
                                         .anyRequest()
                                         .authenticated())

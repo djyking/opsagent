@@ -10,8 +10,11 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class DeepSeekLlmClient extends ChatCompletionsLlmClient {
-    DeepSeekLlmClient(AiProperties properties, AiHttpExecutor http) {
-        super(properties, http);
+    DeepSeekLlmClient(
+            AiProperties properties,
+            AiHttpExecutor http,
+            AiStreamHttpExecutor streamHttp) {
+        super(properties, http, streamHttp);
     }
 
     @Override

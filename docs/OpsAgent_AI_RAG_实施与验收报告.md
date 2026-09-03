@@ -4,9 +4,9 @@
 
 ## 1. 结论
 
-本轮已完成 OpenAI、DeepSeek、Kimi 三 Provider 抽象与真实调用，完成 OpenAI Embedding、Elasticsearch `dense_vector`、检索前数据权限、版本化 Prompt、Citation 校验、用量审计、限流、管理员诊断和前端接入。
+本轮已完成 OpenAI、DeepSeek、Kimi 三 Provider 抽象与真实调用，完成 OpenAI Embedding、Elasticsearch `dense_vector`、检索前数据权限、版本化 Prompt、Citation 校验、用量审计、真实 SSE、Sentinel 限流、文档删除补偿、管理员诊断和前端接入。
 
-三家生成模型均已通过真实 `OK` 请求；完整 RAG 使用无敏感合成 Runbook 验收成功。现有内部 Runbook 没有批量发送给 OpenAI 做 Embedding，因为项目目录写权限不等于内部数据可发送第三方的授权。历史文档继续通过权限过滤后的 MySQL 关键词检索提供本地降级能力。
+三家生成模型均已通过真实 `OK` 请求；完整 RAG 使用无敏感合成 Runbook 验收成功。用户已明确授权把 21 篇内部文档发送给 OpenAI `text-embedding-3-small`，全量重建现已完成：数据库中 22 篇可用文档、25 个切片全部为 `INDEXED`，ES 中为 25 条向量；多出的 1 篇是此前的无敏感合成验收文档。另有 1 篇故意损坏 PDF 保持 `FAILED`。
 
 ## 2. 架构
 
@@ -14,7 +14,7 @@
 Browser
   → Gateway / JWT
   → RAG Service
-      → 凭据索取拦截 / 每用户限流
+      → 凭据索取拦截 / Sentinel FlowRule
       → Knowledge Service（Bearer Token 透传）
           → Query Embedding（text-embedding-3-small）
           → Elasticsearch KNN
@@ -26,8 +26,9 @@ Browser
           ├─ OpenAI Responses API
           ├─ DeepSeek Chat Completions
           └─ Kimi Chat Completions（thinking disabled）
+      → Provider 原生 Token SSE
       → CitationValidator
-      → Answer + 程序生成的 Sources
+      → token + Sources + 校验后的 done.answer
       → ops_rag.ai_usage_log + Micrometer
 ```
 
@@ -49,14 +50,16 @@ Browser
 | Prompt Injection 基础防护 | 已实现并测试 | 文档内容标记为不可信数据；合成恶意语句未执行、未泄露 Key |
 | Citation 校验 | 已实现并测试 | 只返回实际 RetrievedChunk；未知 `[chunk:id]` 被移除 |
 | 无证据防编造 | 已实现并实测 | 凭据索取直接拒答；低相似结果不进入 Prompt |
-| 超时与重试 | 已实现 | 401/403 不重试；429/5xx/网络错误最多 3 次 |
+| 超时与重试 | 已实现 | 401/403 不重试；429/5xx/网络错误最多 3 次；SSE 仅在首 Token 前重试 |
 | Context / 成本控制 | 已实现 | 问题 2000 字、TopK 20、上下文 16000 字、输出 Token 限制 |
-| 用户限流 | 已实现 | 单实例每用户每分钟 20 次 |
+| Sentinel 限流 | 已实现并实测 | Nacos 持久化 `ops-rag-ask` FlowRule，每实例 5 QPS；12 并发时 6 次被拦截 |
 | AI Usage 审计 | 已实现并实测 | 记录模型、Token、耗时、结果、问题哈希；不保存正文和 Key |
 | Prometheus 指标 | 已实现 | `opsagent_ai_requests_total`、`opsagent_ai_request_duration_seconds` |
 | 管理员诊断 | 已实现并实测 | 配置状态和真实 probe；响应脱敏，不包含 Key/Authorization |
-| 前端问答 | 已实现并构建 | 调用 `/api/rag/ask`，显示模型、耗时、答案和来源 |
-| MySQL 关键词降级 | 已保留 | 未向量化历史文档仍可本地检索，并执行相同权限条件 |
+| SSE 流式问答 | 已实现并实测 | `/api/rag/stream` 返回 status/token/sources/done/error，真实 Token 非事后切串 |
+| 前端问答 | 已实现并构建 | Fetch 读取 POST SSE，逐 Token 显示并以 `done.answer` 覆盖最终校验文本 |
+| 文档删除补偿 | 已实现并故障实测 | 创建人/ADMIN 软删除；ES 失败持久化重试，最多 10 次 |
+| MySQL 关键词降级 | 已保留 | ES 无高质量命中或不可用时仍执行相同权限条件 |
 
 ## 4. 数据库与中间件变更
 
@@ -64,10 +67,11 @@ Browser
 - 新增 `ops_rag.ai_usage_log`。
 - `ops_knowledge.knowledge_document` 新增 `visibility` 和权限索引。
 - `ops_knowledge.knowledge_chunk` 新增 `embedding_model`、`indexed_at`。
+- `ops_knowledge.knowledge_index_task` 保存 ES DELETE 补偿状态、重试次数和下次执行时间。
 - Elasticsearch 新增 `opsagent-knowledge-v1`，Embedding 字段为 1536 维 cosine `dense_vector`。
-- 新增迁移脚本 `sql/08_ops_ai_rag.sql`，脚本使用 `information_schema` 判断，重复执行不会删除或覆盖已有数据。
+- 新增迁移脚本 `sql/08_ops_ai_rag.sql` 和 `sql/09_knowledge_index_compensation.sql`；脚本重复执行不会删除已有数据。
 
-迁移前后原有 22 篇文档和 24 个切片均保留。验收新增文档 ID `1023`、切片 ID `1025`，该切片状态为 `INDEXED`；Elasticsearch 验收时包含 1 条向量文档。
+当前未删除文档为 22 篇 `INDEXED`、1 篇预期 `FAILED`；25 个有效切片的模型均为 `text-embedding-3-small`，Elasticsearch `_count=25`。删除补偿验收临时文档 ID `1024` 已软删除，不计入上述可用文档。
 
 ## 5. 真实测试结果
 
@@ -80,13 +84,17 @@ Browser
 | DeepSeek Java probe | 通过 | 返回 `OK` |
 | Kimi Java probe | 通过 | 关闭 thinking 后返回 `OK` |
 | 文档 Embedding | 通过 | `text-embedding-3-small`，数据库状态 `INDEXED` |
-| Elasticsearch 索引 | 通过 | `opsagent-knowledge-v1/_count = 1` |
+| Elasticsearch 索引 | 通过 | `opsagent-knowledge-v1/_count = 25` |
 | 明确答案 RAG | 通过 | 命中 `chunk:1025`，回答“先确认 Sentinel 主从切换” |
 | Prompt Injection | 通过 | 仅把恶意语句作为文档数据解释，`keyLeak=false` |
 | 密码索取 | 通过（最终策略） | 直接证据不足，Provider `none`、Sources `0`、不产生 AI Usage |
 | 历史关键词降级 | 通过 | 指定文档 `1013` 命中 `202-05-rabbitmq-backlog.md` |
 | Maven `verify` | 通过 | Checkstyle 0 违规，现有与新增测试全部通过 |
 | 前端 `pnpm build` | 通过 | Vue TypeScript 检查和 Vite 生产构建成功 |
+| DeepSeek SSE | 通过 | `ST`、`REAM`、`_OK` 三个真实 delta；首字节 0.72s，总耗时 1.63s |
+| SSE 正常结束 | 通过 | HTTP 200、完整 `done`，无 chunked transfer 错误 |
+| Sentinel FlowRule | 通过 | 12 并发中 6 个放行、6 个拦截；规则已从 Nacos 推送 |
+| ES 删除补偿 | 通过 | ES 停止后为 RETRYING；恢复后 SUCCESS，向量 1→0，数据库 deleted=1 |
 
 OpenAI 首次 Java probe 曾连接超时。根因是 Windows 启用了 `127.0.0.1:7890` HTTPS 代理，而 Java 默认直连到了不可用的 DNS 地址。启动脚本现会自动读取 Windows 当前代理并给 Java HTTPS 请求使用，localhost 配置为不走代理；修复后 OpenAI probe 通过。
 
@@ -103,19 +111,20 @@ OpenAI 首次 Java probe 曾连接超时。根因是 Windows 启用了 `127.0.0.
 | 密码问题可能命中安全规范文档 | 不必要外部调用 | 检索前凭据索取硬性拦截 |
 | Key 容易进入配置 | Secret 泄露 | 仓库外文件解析、环境变量注入、全程不打印 |
 | 重试可能扩大成本 | 重复计费 | 最大 3 次，仅 429/5xx/网络错误重试 |
+| DeepSeek 思考阶段 `content:null` | 前端出现字符串 `null` | 仅处理 JSON 文本节点，复测只输出真实 Token |
+| SSE 完成时 ASYNC 二次分派丢失鉴权 | 响应已提交后 403、chunk 未正常结束 | 仅放行容器内部 `DispatcherType.ASYNC`，初始请求仍强制 JWT |
+| 补偿任务可能被多实例重复领取 | 重复 ES 删除与状态竞争 | 使用带状态和到期条件的原子 claim 更新 |
 
 ## 7. 当前未实际使用或未完成
 
 | 项目 | 当前状态 | 原因与后续工作 |
 |---|---|---|
-| 21 篇既有内部文档的全量向量化 | 未执行 | 未获得把具体内部文档发送给外部 Embedding Provider 的数据授权。完成数据分级/脱敏/第三方处理审批后，由 ADMIN 调用 `/api/knowledge/internal/reindex` |
 | Kimi K3 | 未使用 | 当前 Key 的 `/models` 只返回 `kimi-k2.6`、`kimi-k2.7-code`；获得权限后改 `MOONSHOT_MODEL` 即可 |
 | 自动跨供应商 Fallback | 未启用 | 涉及上下文跨第三方传输和成本策略，建议经审批后增加 allowlist |
-| Redis 分布式 RAG 限流 | 未实现 | 当前单实例内存限流满足本地演示；多实例前改为 Redis Lua 或 Sentinel 持久化规则 |
+| Sentinel 全局共享额度 | 未实现 | 当前规则由 Nacos 集中下发但每实例计数；严格多实例额度需 Cluster Token Server |
 | Redis 问答缓存 | 未实现 | 需要先定义用户权限、文档版本和缓存失效键，避免跨用户缓存泄漏 |
-| SSE 流式输出 | 未实现 | 第一版使用普通 JSON；后续需同步实现取消、超时、前端流式渲染和网关配置 |
 | 会话历史 | 未实现 | 当前为单轮问答，尚未定义会话权限、保留期和隐私清理策略 |
-| 文档删除的 ES 补偿 | 未启用 | 现有文档删除 API 尚未开放；开放时需增加 Outbox/MQ 删除向量 |
+| 上传原文件物理清理 | 未实现 | 删除接口有意保留原文件便于恢复；后续按审计保留期增加定时清理 |
 | OCR | 未实现 | 扫描 PDF 仍需 Tesseract 或受控云 OCR |
 | 生产 Secret Manager | 未接入 | 本地使用仓库外文件；生产应接 Vault/KMS/Kubernetes Secret |
 
@@ -123,6 +132,7 @@ OpenAI 首次 Java probe 曾连接超时。根因是 Windows 启用了 `127.0.0.
 
 - 用户操作：`http://127.0.0.1:5173/`
 - RAG API：`POST http://127.0.0.1:8080/api/rag/ask`
+- RAG SSE：`POST http://127.0.0.1:8080/api/rag/stream`
 - Provider 状态：`GET http://127.0.0.1:8080/api/rag/admin/providers`
 - Elasticsearch：`http://127.0.0.1:9200/opsagent-knowledge-v1/_count`
 - Prometheus：`http://127.0.0.1:9090/`

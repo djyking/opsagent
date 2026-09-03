@@ -1,5 +1,7 @@
 package com.opsagent.rag;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -25,7 +27,10 @@ class ExternalAiSmokeIT {
                 "https://api.openai.com/v1",
                 "OPENAI_API_KEY",
                 "gpt-5.6-luna");
-        assertThat(new OpenAiLlmClient(properties, new AiHttpExecutor())
+        assertThat(new OpenAiLlmClient(
+                                properties,
+                                new AiHttpExecutor(),
+                                new AiStreamHttpExecutor(new ObjectMapper()))
                         .generate(request()).text())
                 .isEqualToIgnoringCase("OK");
     }
@@ -38,7 +43,10 @@ class ExternalAiSmokeIT {
                 "https://api.deepseek.com",
                 "DEEPSEEK_API_KEY",
                 "deepseek-v4-flash");
-        assertThat(new DeepSeekLlmClient(properties, new AiHttpExecutor())
+        assertThat(new DeepSeekLlmClient(
+                                properties,
+                                new AiHttpExecutor(),
+                                new AiStreamHttpExecutor(new ObjectMapper()))
                         .generate(request()).text())
                 .isEqualToIgnoringCase("OK");
     }
@@ -51,7 +59,10 @@ class ExternalAiSmokeIT {
                 "https://api.moonshot.cn/v1",
                 "MOONSHOT_API_KEY",
                 "kimi-k2.6");
-        assertThat(new KimiLlmClient(properties, new AiHttpExecutor())
+        assertThat(new KimiLlmClient(
+                                properties,
+                                new AiHttpExecutor(),
+                                new AiStreamHttpExecutor(new ObjectMapper()))
                         .generate(request()).text())
                 .isEqualToIgnoringCase("OK");
     }

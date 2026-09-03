@@ -88,6 +88,24 @@ public class ElasticsearchVectorStore {
                 .toBodilessEntity();
     }
 
+    long deleteDocument(long documentId) {
+        try {
+            JsonNode response = client.post()
+                    .uri("/" + properties.getIndexName()
+                            + "/_delete_by_query?conflicts=proceed&refresh=true")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of("query", Map.of("term", Map.of("documentId", documentId))))
+                    .retrieve()
+                    .body(JsonNode.class);
+            return response.path("deleted").asLong();
+        } catch (RestClientResponseException exception) {
+            if (exception.getStatusCode().value() == 404) {
+                return 0L;
+            }
+            throw new IllegalStateException("Elasticsearch 文档删除失败", exception);
+        }
+    }
+
     List<Map<String, Object>> search(
             List<Double> queryVector,
             long userId,

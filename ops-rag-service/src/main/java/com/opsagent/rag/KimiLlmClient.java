@@ -12,8 +12,11 @@ import java.util.Map;
  */
 @Component
 public class KimiLlmClient extends ChatCompletionsLlmClient {
-    KimiLlmClient(AiProperties properties, AiHttpExecutor http) {
-        super(properties, http);
+    KimiLlmClient(
+            AiProperties properties,
+            AiHttpExecutor http,
+            AiStreamHttpExecutor streamHttp) {
+        super(properties, http, streamHttp);
     }
 
     @Override

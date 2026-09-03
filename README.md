@@ -2,7 +2,7 @@
 
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-当前已形成“登录 → 工单 → Outbox → RabbitMQ → 平台审计”和“文档上传 → RabbitMQ → 切片 → OpenAI Embedding → Elasticsearch → 权限检索 → LLM → 真实来源”两条业务闭环。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于进程启动时注入。
+当前已形成“登录 → 工单 → Outbox → RabbitMQ → 平台审计”和“文档上传 → RabbitMQ → 切片 → OpenAI Embedding → Elasticsearch → 权限检索 → LLM SSE → 真实来源”两条业务闭环，并实现文档软删除和 Elasticsearch 持久化补偿。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于进程启动时注入。
 
 ## 项目结构
 
@@ -80,7 +80,10 @@ POST /api/knowledge/bases/{id}/documents
 POST /api/knowledge/documents/{id}/parse
 GET  /api/knowledge/parse-tasks/{id}
 GET  /api/knowledge/documents/{id}/chunks
+DELETE /api/knowledge/documents/{id}       创建人或 ADMIN，软删除并清理 ES
+GET  /api/knowledge/internal/index-tasks/{id} ADMIN，查看 ES 补偿任务
 POST /api/rag/ask
+POST /api/rag/stream                       POST SSE，真实 Token 流
 POST /api/rag/chat                         兼容旧客户端
 GET  /api/rag/admin/providers              ADMIN，脱敏配置状态
 POST /api/rag/admin/providers/{name}/probe ADMIN，真实连通性诊断
@@ -104,9 +107,11 @@ Question → 同模型 Embedding → RBAC/文档范围过滤 → TopK/最低相�
 → 版本化 YAML Prompt → OpenAI / DeepSeek / Kimi → Citation 校验 → Answer + Sources
 ```
 
-OpenAI 使用 Responses API，DeepSeek 和 Kimi 使用兼容 Chat Completions。Prompt 位于 `ops-rag-service/src/main/resources/prompts/rag-answer.yml`。返回来源完全由真实检索结果生成；模型声明但检索结果中不存在的 `[chunk:id]` 会被剔除。问题最大 2000 字符，默认 TopK 5、最大 20、上下文 16000 字符、每用户每分钟 20 次。
+OpenAI 使用 Responses API，DeepSeek 和 Kimi 使用兼容 Chat Completions。`POST /api/rag/stream` 返回 `status`、`token`、`sources`、`done` 或 `error` 事件，前端用 Fetch `ReadableStream` 逐 Token 渲染；最终 `done.answer` 是 Citation 校验后的权威文本。Prompt 位于 `ops-rag-service/src/main/resources/prompts/rag-answer.yml`。返回来源完全由真实检索结果生成；模型声明但检索结果中不存在的 `[chunk:id]` 会被剔除。问题最大 2000 字符，默认 TopK 5、最大 20、上下文 16000 字符。RAG 入口使用 Sentinel `ops-rag-ask` 资源，当前 Nacos 规则为每实例 5 QPS。
 
 `POST /api/rag/ask` 可选传 `documentId`，用于把问答严格限定在用户有权访问的单个文档。文档访问规则为：`PUBLIC` 对已认证用户可见，`PRIVATE` 仅创建者和 ADMIN 可见；权限过滤在内容进入 Prompt 之前完成。
+
+删除文档时数据库立即写入 `deleted=1/status=DELETED`，并创建 `knowledge_index_task`。ES 同步删除失败时任务按指数退避重试，最多 10 次；本地原文件暂时保留，供恢复或后续保留期清理任务使用。
 
 ## 配置
 
@@ -127,6 +132,7 @@ NACOS_SERVER_ADDR              默认 localhost:8848
 SENTINEL_ENABLED               默认 false
 SENTINEL_EAGER                 默认 false
 SENTINEL_DASHBOARD             默认 localhost:8858
+SENTINEL_RULE_DATA_ID          默认 ops-rag-sentinel-flow-rules
 OPS_VECTOR_ENABLED             是否启用 Embedding/向量检索
 OPS_ES_URL / OPS_ES_KNOWLEDGE_INDEX / OPS_VECTOR_MINIMUM_SCORE
 OPS_AI_ENABLED / OPS_AI_PROVIDER
@@ -147,7 +153,7 @@ $env:OPS_AI_PROVIDER = 'openai' # openai、deepseek 或 kimi，修改后重启 R
 
 ## 数据库与容器
 
-- 全新开发库：Compose 首次创建 MySQL 卷时按文件名自动执行 `sql/01` 至 `sql/08` 和 `sql/init_data.sql`。
+- 全新开发库：Compose 首次创建 MySQL 卷时按文件名自动执行 `sql/01` 至 `sql/09` 和 `sql/init_data.sql`。
 - Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
 - 本地演示账号由 SQL 初始化，账号列表及本地密码只记录在仓库外密码文档中。
 
@@ -155,7 +161,7 @@ $env:OPS_AI_PROVIDER = 'openai' # openai、deepseek 或 kimi，修改后重启 R
 
 `ops_rag.ai_usage_log` 仅记录用户 ID、Provider、模型、问题 SHA-256、Token、耗时、成功状态和脱敏错误码，不保存问题正文、Prompt、回答或 Key。
 
-解析新文档时，启用向量功能会自动生成 Embedding 并索引。全量重新向量化会把既有文档内容发送给外部 Embedding Provider，必须先完成数据分级和出境/第三方处理审批；未获批准时保留 MySQL 权限关键词降级，不影响历史文档的本地检索。
+解析新文档时，启用向量功能会自动生成 Embedding 并索引。2026-09-03 已在用户明确授权后执行全量重建：22 篇可用文档、25 个切片均使用 OpenAI `text-embedding-3-small`，另有 1 篇损坏 PDF 保持 `FAILED`。今后再次导入内部文档时仍需单独确认数据分级和第三方处理范围；生成阶段会把检索上下文发送给当前 `OPS_AI_PROVIDER`，不要把 Embedding 授权等同于任意生成 Provider 授权。
 
 ```powershell
 docker compose up -d
@@ -164,7 +170,7 @@ docker compose ps
 
 推荐使用 `D:\middleware\scripts\start-opsagent.ps1` 启动全部中间件和本机应用；只启动中间件时添加 `-MiddlewareOnly`。停止脚本不会删除 Docker named volumes。
 
-启动脚本会启用 Nacos 服务发现和配置订阅，并把六个服务配置发布到 `DEFAULT_GROUP`。Gateway 的 `lb://` 路由依赖 Nacos 实例列表，因此 Nacos 已被实际使用。Sentinel 客户端也已注册六个应用到 Dashboard，但当前只具备监控能力，尚未配置持久化流控、熔断和热点规则。
+启动脚本会启用 Nacos 服务发现和配置订阅，并把六个服务配置及 `ops-rag-sentinel-flow-rules` 发布到 `DEFAULT_GROUP`。Gateway 的 `lb://` 路由依赖 Nacos 实例列表，因此 Nacos 已被实际使用。RAG 服务订阅 Sentinel FlowRule，`ops-rag-ask` 当前限制为每实例 5 QPS。Nacos 实现规则统一下发，但普通 Sentinel 客户端仍是每实例计数；多实例严格共享总额度需要部署 Sentinel Cluster Token Server。
 
 ## 构建和运行
 

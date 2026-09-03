@@ -111,8 +111,11 @@ export const documentApi = {
   },
   chunks: (id: number) =>
     request<DocumentChunk[]>({ url: `/api/knowledge/documents/${id}/chunks` }),
-  remove: (_id: number) =>
-    Promise.reject(new Error("文档删除接口将在对象存储补偿完成后启用")),
+  remove: (id: number) =>
+    request<{ documentId: number; taskId: number; indexStatus: string }>({
+      method: "DELETE",
+      url: `/api/knowledge/documents/${id}`,
+    }),
 };
 
 export const aiApi = {

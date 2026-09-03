@@ -71,6 +71,17 @@ public class KnowledgeController {
         return ApiResponse.success(service.chunks(id));
     }
 
+    @DeleteMapping("/documents/{id}")
+    ApiResponse<KnowledgeService.DeleteResult> delete(@PathVariable long id) {
+        return ApiResponse.success(service.deleteDocument(id));
+    }
+
+    @GetMapping("/internal/index-tasks/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Map<String, Object>> indexTask(@PathVariable long id) {
+        return ApiResponse.success(service.indexTask(id));
+    }
+
     @GetMapping("/internal/search")
     ApiResponse<List<Map<String, Object>>> search(
             @RequestParam String query,

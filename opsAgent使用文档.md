@@ -167,9 +167,18 @@ GET /api/knowledge/parse-tasks/{taskId}
 
 “知识库”页面目前支持创建和查看知识库；任意知识库的文档上传、列表和解析可以通过 `/api/knowledge/bases/{id}/documents` 等接口完成。
 
+工单详情的删除按钮现已调用真实接口：
+
+```text
+DELETE /api/knowledge/documents/{documentId}
+GET    /api/knowledge/internal/index-tasks/{taskId}  # 仅 ADMIN
+```
+
+只有文档创建人或 ADMIN 可以删除。接口先把数据库记录软删除，再同步尝试 ES `_delete_by_query`；失败时 `knowledge_index_task` 进入 `RETRYING` 并按指数退避自动补偿，最多 10 次。本地上传原文件暂不物理删除，后续可按审计保留期增加清理任务。
+
 ## 8. 智能问答
 
-进入“智能问答”，输入问题并提交。页面已调用真实 `POST /api/rag/ask`，展示 Provider、模型、耗时和真实来源。工单详情的文档问答会同时传 `documentId`，后端把检索范围限定到该文档。
+进入“智能问答”，输入问题并提交。页面已调用真实 `POST /api/rag/stream`，使用 Fetch 读取 POST SSE 并逐 Token 展示回答；完成后展示 Provider、模型、耗时和真实来源。普通 JSON 接口 `POST /api/rag/ask` 继续保留。工单详情的文档问答会同时传 `documentId`，后端把检索范围限定到该文档。
 
 默认 Provider 为 DeepSeek，当前支持：
 
@@ -185,7 +194,7 @@ GET /api/knowledge/parse-tasks/{taskId}
 完整处理顺序：
 
 ```text
-问题校验/用户限流
+问题校验/Sentinel QPS 限流
   → Query Embedding
   → Elasticsearch KNN
   → PUBLIC/创建人/ADMIN 权限过滤
@@ -194,8 +203,11 @@ GET /api/knowledge/parse-tasks/{taskId}
   → YAML Prompt 与上下文预算
   → 选定的 LLM Provider
   → Citation 校验
-  → Answer + 程序生成的 Sources
+  → token SSE
+  → Citation 校验后的 done.answer + 程序生成的 Sources
 ```
+
+SSE 事件顺序为 `status`、多个 `token`、`sources`、`done`；失败时发送 `error`。浏览器必须以最终 `done.answer` 为准，因为未知 Citation 会在完整回答生成后统一清理。只有首个 Token 尚未发送时才允许对 429、5xx 或网络错误重试，避免输出重复。
 
 建议使用项目内无敏感验收文档 `demo-data/ai-rag-smoke/Redis生产环境故障处理手册.md` 演示：
 
@@ -218,6 +230,15 @@ POST /api/rag/admin/providers/kimi/probe
 
 诊断响应只包含 configured、reachable、model 和脱敏 lastError，绝不返回 Key 或 Authorization。
 
+命令行验证 POST SSE 可使用：
+
+```powershell
+$body = @{ question = '请只回答 STREAM_OK'; topK = 1 } | ConvertTo-Json
+curl.exe --http1.1 -N -H "Authorization: Bearer $($login.data.accessToken)" `
+  -H 'Content-Type: application/json' -H 'Accept: text/event-stream' `
+  --data-binary $body http://127.0.0.1:8080/api/rag/stream
+```
+
 ## 9. Nacos 操作与实际接入程度
 
 控制台：`http://127.0.0.1:8849/`
@@ -227,12 +248,12 @@ Nacos 已实际使用，不只是启动了容器：
 - 六个 Java 服务注册到 Nacos；
 - Gateway 使用 `lb://服务名` 和 Nacos 服务发现转发请求；
 - 六个服务订阅各自的 `{spring.application.name}.yaml`；
-- 启动脚本自动运行 `publish-nacos-config.ps1` 发布六个 Data ID。
+- 启动脚本自动运行 `publish-nacos-config.ps1` 发布六个服务 Data ID 和一个 Sentinel JSON Data ID。
 
 验证方式：
 
 1. 打开控制台“服务管理”，应看到六个 `ops-*` 服务；
-2. 打开“配置管理”，选择 `DEFAULT_GROUP`，应看到六个 `*.yaml`；
+2. 打开“配置管理”，选择 `DEFAULT_GROUP`，应看到六个 `*.yaml` 和 `ops-rag-sentinel-flow-rules`；
 3. 执行状态脚本后，再访问任意业务页面验证 Gateway 路由。
 
 当前发布到 Nacos 的内容主要是连通性标识和管理信息，数据库、MQ 等核心参数仍主要通过环境变量和本地 `application.yml` 提供。Nacos 已接入，但配置中心的业务化程度仍有限。
@@ -241,16 +262,16 @@ Nacos 已实际使用，不只是启动了容器：
 
 控制台：`http://127.0.0.1:8858/`，登录凭据见仓库外密码文档。
 
-Sentinel 客户端已接入六个 Java 服务。启动脚本启用 eager 模式并设置 Dashboard 地址；实测 Dashboard 能看到六个健康应用实例。
+Sentinel 客户端已接入六个 Java 服务。启动脚本启用 eager 模式并设置 Dashboard 地址；实测 Dashboard 能看到六个健康应用实例。RAG 服务还通过 `sentinel-datasource-nacos` 订阅 `ops-rag-sentinel-flow-rules`。
 
 使用方法：
 
 1. 先通过页面或 API 访问各服务，产生资源调用；
 2. 登录 Sentinel；
 3. 左侧选择 `ops-gateway`、`ops-auth-service`、`ops-ticket-service`、`ops-knowledge-service`、`ops-rag-service` 或 `ops-platform-service`；
-4. 查看实时监控、簇点链路和机器列表。
+4. 查看实时监控、簇点链路和机器列表；RAG 资源名为 `ops-rag-ask`。
 
-目前没有配置正式的流控、熔断、热点或授权规则，也没有将规则持久化到 Nacos。也就是说，Sentinel 已完成客户端和 Dashboard 接入，可观测，但尚未形成生产级治理策略。直接在 Dashboard 创建的规则可能在应用或 Dashboard 重启后丢失。
+当前 Nacos 中已持久化 RAG FlowRule：每实例 5 QPS，超过后返回“问答请求过于频繁”。2026-09-03 使用 12 个并发请求实测，6 个放行、6 个被拦截；请求跨越 1 秒统计边界，因此放行数可能不是严格 5。需要明确：Nacos 只负责统一下发规则，普通 Sentinel 客户端仍在各实例本地计数；多实例要共享严格总额度，必须再部署 Sentinel Cluster Token Server。熔断、热点参数和授权规则尚未配置。
 
 ## 11. RabbitMQ、Prometheus、Grafana 和 Elasticsearch
 
@@ -307,15 +328,14 @@ RabbitMQ 临时不可用时，工单主事务仍可成功，Outbox 会记录失�
 
 | 项目 | 当前情况 |
 |---|---|
-| 历史文档全量向量化 | 现有内部 Runbook 未默认发送给外部 OpenAI；需先确认数据分级、第三方处理和出境策略，再由 ADMIN 调用 `POST /api/knowledge/internal/reindex` |
-| 分布式限流 | 当前 RAG 是单实例内存每用户限流；多实例生产环境应迁移到 Redis 或 Sentinel 持久化规则 |
+| 严格全局分布式限流 | 已用 Nacos 持久化 Sentinel 规则，但当前仍是每实例计数；多实例共享总额度需部署 Sentinel Cluster Token Server |
 | 多 Provider 自动 Fallback | 默认关闭，避免供应商故障时未经确认把同一上下文发送给另一家；当前支持显式配置切换 |
-| 流式输出 | 第一版为非流式 JSON；SSE 尚未实现 |
-| Sentinel 持久化规则 | 客户端已接入，尚无生产流控/熔断规则和 Nacos 持久化 |
+| 生成数据授权 | 22 篇可用文档已获准发送 OpenAI Embedding；检索上下文发送给 DeepSeek/Kimi 属于不同处理目的，生产使用前应另行确认 |
+| Sentinel 其他治理规则 | RAG FlowRule 已持久化；熔断、热点参数和授权规则尚未配置 |
 | OCR | 扫描 PDF 需要 Tesseract 或云 OCR |
 | 真正的工单附件关联 | 当前工单页固定使用知识库 1 |
 | 管理页面适配 | 新 Platform MQ 审计已提供 API，前端系统管理页尚未切换 |
 | Java 虚拟线程 | Java 17 不支持正式 API，需升级 Java 21 |
 | Alertmanager | 缺少 SLO、联系人和企业通知渠道 |
 
-已实现但当前默认不使用的能力：旧 `/api/rag/chat` 仅作为兼容别名；全量 reindex 未执行；Kimi K3 因当前账号模型列表不可见而未配置。
+已实现但当前默认不使用的能力：旧 `/api/rag/chat` 仅作为兼容别名；Kimi K3 因当前账号模型列表不可见而未配置。2026-09-03 已完成 22 篇可用文档、25 个切片的 `text-embedding-3-small` 全量向量化；另有 1 篇故意损坏 PDF 保持 `FAILED`。
