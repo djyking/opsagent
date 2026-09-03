@@ -30,7 +30,7 @@ const title = computed(
       "rag-chat": "智能问答",
       monitor: "系统监控",
       notifications: "通知中心",
-      admin: "系统管理",
+      admin: "操作审计",
     })[String(route.name)] || "OpsAgent",
 );
 const nav = computed(() => [
@@ -42,7 +42,7 @@ const nav = computed(() => [
   ...(auth.isAdmin
     ? [
         { to: "/notifications", label: "通知中心", icon: Bell },
-        { to: "/admin", label: "系统管理", icon: ShieldCheck },
+        { to: "/admin", label: "操作审计", icon: ShieldCheck },
       ]
     : []),
 ]);

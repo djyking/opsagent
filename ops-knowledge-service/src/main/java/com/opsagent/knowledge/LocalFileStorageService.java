@@ -18,12 +18,18 @@ import java.util.*;
 @Service
 public class LocalFileStorageService implements FileStorageService {
     private final Path root;
+    private final long maxFileSizeBytes;
 
     LocalFileStorageService(KnowledgeProperties p) {
         root = Path.of(p.getStorageRoot()).toAbsolutePath().normalize();
+        maxFileSizeBytes = p.getMaxFileSizeBytes();
     }
 
     public StoredFile store(MultipartFile file) throws IOException {
+        if (file.isEmpty()) throw new IllegalArgumentException("文件内容为空");
+        if (file.getSize() > maxFileSizeBytes) {
+            throw new IllegalArgumentException("文件不能超过 10 MB");
+        }
         String name =
                 Path.of(Objects.requireNonNullElse(file.getOriginalFilename(), ""))
                         .getFileName()

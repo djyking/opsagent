@@ -52,6 +52,21 @@ final class TicketDtos {
     record AddComment(@NotBlank @Size(max = 2000) String content) {}
 
     /**
+     * 新增结构化处置记录请求参数。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record AddWorkRecord(
+            @NotBlank
+                    @Pattern(
+                            regexp =
+                                    "DIAGNOSIS|ACTION|VERIFICATION|ROOT_CAUSE|BUSINESS_REPLY")
+                    String recordType,
+            @NotBlank @Size(max = 2000) String content,
+            @Size(max = 1000) String evidence) {}
+
+    /**
      * 工单详情响应数据。
      *
      * @author heyu

@@ -142,6 +142,42 @@ public class TicketService {
         return audit.comments(id);
     }
 
+    @Transactional
+    TicketAuditMapper.WorkRecord addWorkRecord(long id, AddWorkRecord request) {
+        Ticket ticket = require(id);
+        authorizeRead(ticket);
+        OpsPrincipal user = SecurityUsers.current();
+        audit.workRecord(
+                id,
+                request.recordType(),
+                request.content().trim(),
+                normalize(request.evidence()),
+                user.userId());
+        List<TicketAuditMapper.WorkRecord> records = audit.workRecords(id);
+        return records.get(records.size() - 1);
+    }
+
+    List<TicketAuditMapper.WorkRecord> workRecords(long id) {
+        authorizeRead(require(id));
+        return audit.workRecords(id);
+    }
+
+    Map<String, Object> trace(long id) {
+        Ticket ticket = require(id);
+        authorizeRead(ticket);
+        return Map.of(
+                "ticket",
+                view(ticket),
+                "history",
+                audit.historyList(id),
+                "assignments",
+                audit.assignments(id),
+                "operations",
+                audit.operations(id),
+                "outboxEvents",
+                outbox.traces(id));
+    }
+
     private Ticket require(long id) {
         Ticket t = tickets.selectById(id);
         if (t == null) throw new BusinessException(ErrorCode.NOT_FOUND, "工单不存在");
@@ -162,6 +198,10 @@ public class TicketService {
 
     private void forbidden() {
         throw new BusinessException(ErrorCode.FORBIDDEN, "无权操作该工单");
+    }
+
+    private String normalize(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private View view(Ticket t) {

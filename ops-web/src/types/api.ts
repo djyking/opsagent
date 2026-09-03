@@ -85,9 +85,63 @@ export interface AiReference {
   chunkId: number;
   documentId: number;
   chunkIndex: number;
+  documentName?: string;
   pageNumber?: number;
   relevanceScore: number;
-  excerpt: string;
+  excerpt?: string;
+}
+export interface TicketComment {
+  id: number;
+  ticketId: number;
+  userId: number;
+  content: string;
+  createTime: string;
+}
+export type WorkRecordType =
+  | "DIAGNOSIS"
+  | "ACTION"
+  | "VERIFICATION"
+  | "ROOT_CAUSE"
+  | "BUSINESS_REPLY";
+export interface TicketWorkRecord {
+  id: number;
+  ticketId: number;
+  recordType: WorkRecordType;
+  content: string;
+  evidence?: string;
+  createBy: number;
+  createTime: string;
+}
+export interface TicketTrace {
+  ticket: Ticket;
+  history: TicketLog[];
+  assignments: Array<{
+    id: number;
+    ticketId: number;
+    assigneeId: number;
+    assignedBy: number;
+    assignmentType: string;
+    createTime: string;
+  }>;
+  operations: Array<{
+    id: number;
+    ticketId: number;
+    operatorId: number;
+    operation: string;
+    requestId?: string;
+    detailJson?: string;
+    createTime: string;
+  }>;
+  outboxEvents: Array<{
+    id: number;
+    eventId: string;
+    aggregateId: number;
+    eventType: string;
+    status: string;
+    retryCount: number;
+    createTime: string;
+    updateTime: string;
+  }>;
 }
 export interface AiAnswer {
   questionId: number;
@@ -125,12 +179,39 @@ export interface NotificationRecord {
 }
 export interface OperationLog {
   id: number;
+  serviceName?: string;
   bizType: string;
   bizId: number;
   operationType: string;
   operator: string;
+  traceId?: string;
   content: string;
   createTime: string;
+}
+export interface MonitorSummary {
+  checkedAt: string;
+  services: Array<{
+    job: string;
+    health: string;
+    lastScrape: string;
+    lastError?: string;
+    scrapeUrl: string;
+  }>;
+  prometheus: {
+    url: string;
+    targetsUrl: string;
+    healthy: boolean;
+    targetCount: number;
+    upCount: number;
+    error?: string;
+  };
+  grafana: {
+    url: string;
+    dashboardUrl: string;
+    healthy: boolean;
+    version?: string;
+    error?: string;
+  };
 }
 export interface AiTask {
   id: number;

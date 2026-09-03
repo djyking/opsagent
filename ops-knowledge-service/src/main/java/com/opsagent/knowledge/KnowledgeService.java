@@ -61,11 +61,18 @@ public class KnowledgeService {
         return repo.documents(base);
     }
 
-    long upload(long base, MultipartFile file, String requestedVisibility) {
+    List<Map<String, Object>> ticketDocuments(long ticketId) {
+        var principal = SecurityUsers.current();
+        return repo.ticketDocuments(
+                ticketId, principal.userId(), administrator(principal.roles()));
+    }
+
+    long upload(long base, Long ticketId, MultipartFile file, String requestedVisibility) {
         try {
             var principal = SecurityUsers.current();
             String visibility = normalizeVisibility(requestedVisibility, principal.roles());
-            return repo.addDocument(base, storage.store(file), principal.userId(), visibility);
+            return repo.addDocument(
+                    base, ticketId, storage.store(file), principal.userId(), visibility);
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件保存失败：" + e.getMessage());
         }
@@ -136,6 +143,16 @@ public class KnowledgeService {
     }
 
     List<Map<String, Object>> chunks(long id) {
+        Map<String, Object> document = repo.document(id);
+        if (document == null) throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
+        var principal = SecurityUsers.current();
+        String visibility = String.valueOf(document.get("visibility"));
+        long creator = number(document, "create_by", "createBy");
+        if (!administrator(principal.roles())
+                && !"PUBLIC".equals(visibility)
+                && creator != principal.userId()) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权查看该文档切片");
+        }
         return repo.chunks(id);
     }
 
@@ -224,6 +241,10 @@ public class KnowledgeService {
             throw new BusinessException(ErrorCode.FORBIDDEN, "只有 OPS 或 ADMIN 可以发布公共知识文档");
         }
         return visibility;
+    }
+
+    private boolean administrator(List<String> roles) {
+        return roles.stream().anyMatch(role -> "ADMIN".equals(role) || "ROLE_ADMIN".equals(role));
     }
 
     private long number(Map<String, Object> row, String... keys) {

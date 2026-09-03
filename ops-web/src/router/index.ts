@@ -44,7 +44,7 @@ const router = createRouter({
         {
           path: "rag/chat",
           name: "rag-chat",
-          component: () => import("@/views/RagChatView.vue"),
+          component: () => import("@/views/RagWorkspaceView.vue"),
         },
         {
           path: "system/monitor",
@@ -60,7 +60,7 @@ const router = createRouter({
         {
           path: "admin",
           name: "admin",
-          component: () => import("@/views/AdminView.vue"),
+          component: () => import("@/views/AuditAdminView.vue"),
           meta: { admin: true },
         },
       ],

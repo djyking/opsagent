@@ -57,8 +57,8 @@ powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
 ## 角色与权限
 
 - `USER`：创建并查看自己的工单、上传文档、提问、关闭已解决工单。
-- `OPS`：查看待处理工单和自己负责的工单，接单、上传文档、提问、解决工单。
-- `ADMIN`：访问全部工单，执行所有状态操作，并查看通知、审计日志和 AI 后续任务。
+- `OPS`：查看待处理工单和自己负责的工单，接单、填写结构化处置记录、上传文档、提问和解决工单。
+- `ADMIN`：访问全部工单和真实后台链路，执行所有状态操作，并管理通知和审计记录。
 
 认证沿用现有 Spring Security 与 JWT。登录、注册、健康检查和 Swagger 之外的接口默认要求 `Authorization: Bearer <token>`。JWT 默认有效期为 120 分钟；服务端每次请求仍会校验签名、有效期并恢复 `SecurityContext`。
 
@@ -75,8 +75,14 @@ GET  /api/tickets/{id}
 PUT  /api/tickets/{id}
 POST /api/tickets/{id}/claim
 POST /api/tickets/{id}/transition
+GET  /api/tickets/{id}/trace                ticket/assignment/operation/outbox 链路
+GET  /api/tickets/{id}/work-records
+POST /api/tickets/{id}/work-records         诊断、动作、根因、验证、业务回复
 
+POST /api/knowledge/bases
+GET  /api/knowledge/bases
 POST /api/knowledge/bases/{id}/documents
+GET  /api/knowledge/tickets/{ticketId}/documents
 POST /api/knowledge/documents/{id}/parse
 GET  /api/knowledge/parse-tasks/{id}
 GET  /api/knowledge/documents/{id}/chunks
@@ -89,13 +95,16 @@ GET  /api/rag/admin/providers              ADMIN，脱敏配置状态
 POST /api/rag/admin/providers/{name}/probe ADMIN，真实连通性诊断
 POST /api/knowledge/internal/reindex       ADMIN，全量重新向量化
 GET  /api/platform/admin/audits
+GET  /api/platform/admin/notifications
+PUT  /api/platform/admin/notifications/read-all
+GET  /api/platform/monitor/summary
 ```
 
 各 MVC 服务启用 SpringDoc；经 Gateway 暴露 Swagger 聚合仍是后续项。
 
 ## 文档和问答
 
-支持文本型 PDF、DOCX、TXT、MD/Markdown，默认单文件上限 50 MB。文件使用 UUID 服务端名称和相对路径保存，并校验扩展名、声明类型及 Tika 检测类型，同时记录 SHA-256。扫描版 PDF 不支持 OCR。
+支持文本型 PDF、DOCX、TXT、MD/Markdown，前后端统一限制单文件最大 10 MB。文件使用 UUID 服务端名称和相对路径保存，并校验扩展名、声明类型及 Tika 检测类型，同时记录 SHA-256。扫描版 PDF 不支持 OCR。工单上传会把 `ticket_id` 写入知识文档，知识库工作台则管理对应业务库下的全部文档。
 
 解析 API 创建 `QUEUED` 任务并发布到 RabbitMQ；消费者最多尝试三次，成功后文档为 `PARSED`、任务为 `SUCCESS`，最终失败时任务为 `FAILED` 且消息进入 DLQ。Tika 文件读取在数据库事务外执行，切片与幂等记录使用短事务保存。
 

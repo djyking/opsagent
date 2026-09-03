@@ -3,6 +3,7 @@ package com.opsagent.knowledge;
 import com.opsagent.common.core.ApiResponse;
 
 import jakarta.validation.constraints.*;
+import jakarta.validation.Valid;
 
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -31,10 +32,12 @@ public class KnowledgeController {
      * @author heyu
      * @since 2026/8/17
      */
-    record BaseRequest(@NotBlank String name, String description) {}
+    record BaseRequest(
+            @NotBlank @Size(max = 128) String name,
+            @Size(max = 500) String description) {}
 
     @PostMapping("/bases")
-    ApiResponse<Long> create(@RequestBody BaseRequest r) {
+    ApiResponse<Long> create(@Valid @RequestBody BaseRequest r) {
         return ApiResponse.success(service.createBase(r.name(), r.description()));
     }
 
@@ -52,8 +55,14 @@ public class KnowledgeController {
     ApiResponse<Long> upload(
             @PathVariable long id,
             @RequestPart MultipartFile file,
+            @RequestParam(required = false) Long ticketId,
             @RequestParam(defaultValue = "PRIVATE") String visibility) {
-        return ApiResponse.success(service.upload(id, file, visibility));
+        return ApiResponse.success(service.upload(id, ticketId, file, visibility));
+    }
+
+    @GetMapping("/tickets/{ticketId}/documents")
+    ApiResponse<List<Map<String, Object>>> ticketDocuments(@PathVariable long ticketId) {
+        return ApiResponse.success(service.ticketDocuments(ticketId));
     }
 
     @PostMapping("/documents/{id}/parse")

@@ -44,6 +44,16 @@ public interface OutboxMapper {
             """)
     List<OutboxEvent> pending(int limit);
 
+    @Select(
+            """
+            SELECT id, event_id eventId, aggregate_id aggregateId, event_type eventType,
+                   status, retry_count retryCount, create_time createTime, update_time updateTime
+            FROM event_outbox
+            WHERE aggregate_type='TICKET' AND aggregate_id=#{ticketId}
+            ORDER BY id
+            """)
+    List<OutboxTrace> traces(long ticketId);
+
     @Update(
             """
             UPDATE event_outbox
@@ -93,4 +103,20 @@ public interface OutboxMapper {
             String payload,
             int retryCount,
             LocalDateTime createTime) {}
+
+    /**
+     * 工单事件从业务事务到消息队列的投递轨迹。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record OutboxTrace(
+            long id,
+            String eventId,
+            long aggregateId,
+            String eventType,
+            String status,
+            int retryCount,
+            LocalDateTime createTime,
+            LocalDateTime updateTime) {}
 }

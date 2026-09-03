@@ -103,9 +103,10 @@ powershell -ExecutionPolicy Bypass -File .\demo-data\scripts\Initialize-Enterpri
 1. 使用 USER 登录，进入“工单中心”，点击“新建工单”。
 2. 填写标题、描述和优先级，创建后状态为 `CREATED`。
 3. 退出后使用 OPS 登录，打开该工单并点击“接收工单”，状态变为 `ASSIGNED`。
-4. 将工单推进到 `PROCESSING` 后，处理人可点击“标记已解决”，状态变为 `RESOLVED`。
-5. 使用原创建人登录，点击“确认关闭”，状态变为 `CLOSED`。
-6. 工单详情右侧“状态时间线”可查看操作人、前后状态和备注。
+4. 点击“开始处理”进入 `PROCESSING`，在“结构化处置记录”中分别填写现象与诊断、执行动作、根因分析和验证结果；普通沟通写入“处理记录与回复”。
+5. 需要业务复核时提交 `WAITING_CONFIRM`，确认处理完成后推进到 `RESOLVED`。
+6. 使用原创建人登录，点击“确认关闭”，状态变为 `CLOSED`。
+7. “后台数据链路”可以查看 `ticket_assignment`、`ticket_operation_log` 和 `event_outbox → RabbitMQ` 的真实记录，状态时间线来自 `ticket_history`。
 
 状态机允许的完整流转为：
 
@@ -114,21 +115,6 @@ CREATED → ASSIGNED → PROCESSING → RESOLVED → CLOSED
                      ├→ SUSPENDED → PROCESSING
                      ├→ WAITING_CONFIRM → PROCESSING / RESOLVED
                      └→ REJECTED
-```
-
-当前前端已实现创建、接单、解决和关闭按钮，但尚未提供 `ASSIGNED → PROCESSING` 的按钮。该一步暂时使用 API：
-
-```powershell
-$gateway = 'http://127.0.0.1:8080'
-$username = Read-Host 'OPS 用户名'
-$password = Read-Host 'OPS 密码'
-$loginBody = @{ username = $username; password = $password } | ConvertTo-Json
-$login = Invoke-RestMethod -Method Post -Uri "$gateway/api/auth/login" -ContentType 'application/json' -Body $loginBody
-$headers = @{ Authorization = "Bearer $($login.data.accessToken)" }
-$ticketId = Read-Host '工单 ID'
-$ticket = Invoke-RestMethod -Uri "$gateway/api/tickets/$ticketId" -Headers $headers
-$body = @{ target = 'PROCESSING'; version = $ticket.data.version; remark = '开始处理' } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri "$gateway/api/tickets/$ticketId/transition" -Headers $headers -ContentType 'application/json' -Body $body
 ```
 
 接单和状态更新都带版本条件。多人或多实例同时接单时，只有一个请求能成功，其他请求返回冲突。
@@ -143,11 +129,11 @@ Invoke-RestMethod -Method Post -Uri "$gateway/api/tickets/$ticketId/transition" 
 GET /api/platform/admin/audits?bizId={工单ID}&limit=50
 ```
 
-当前“系统管理”页面仍使用旧版通知、审计和 AI 任务接口，尚未改为展示 `/api/platform/admin/audits`；需要查看新的 RabbitMQ 审计时，应使用上述接口或数据库。
+管理员“操作审计”页面已接入该接口，支持按工单和操作类型筛选、查看事件 JSON 与 Trace ID、跳转业务工单。通知中心支持全部/未读/已读筛选、单条和批量已读以及跳转工单。没有真实执行链的旧“AI 任务”入口已隐藏。
 
 ## 7. 文档上传与异步解析
 
-工单详情中的“关联文档”区域目前实际读写的是知识库 `1`，并未在数据库中建立真正的“工单—文档”关联。这是当前前端适配层的已知限制。
+工单详情上传文档时会写入 `knowledge_document.ticket_id`，因此文档与当前工单存在真实数据库关联。独立知识库页面用于管理业务知识域，工单页面用于管理当前事件的证据和附件。
 
 页面操作：
 
@@ -157,7 +143,7 @@ GET /api/platform/admin/audits?bizId={工单ID}&limit=50
 4. 等待数秒后刷新页面；
 5. 状态为 `SUCCESS` 时点击切片图标查看 Chunk。
 
-后端真实状态使用 `UPLOADED`、`PARSING`、`PARSED`、`FAILED`；前端会把 `PARSED` 映射为 `SUCCESS`。单文件默认上限 50 MB，扫描型 PDF 尚不支持 OCR。
+后端真实状态使用 `UPLOADED`、`PARSING`、`PARSED`、`INDEXED`、`FAILED`；前端将可用的 `PARSED/INDEXED` 映射为成功。前后端统一限制 10 MB，扫描型 PDF尚不支持 OCR。
 
 解析消息进入 `ops.knowledge.parse.queue`。失败最多消费三次，最终进入 `ops.knowledge.parse.dlq`。任务状态可通过以下接口查询：
 
@@ -165,7 +151,7 @@ GET /api/platform/admin/audits?bizId={工单ID}&limit=50
 GET /api/knowledge/parse-tasks/{taskId}
 ```
 
-“知识库”页面目前支持创建和查看知识库；任意知识库的文档上传、列表和解析可以通过 `/api/knowledge/bases/{id}/documents` 等接口完成。
+“知识库”页面是完整工作台：创建后自动进入新库，可以选择知识库、拖拽上传、异步解析/向量化、查看切片和删除文档。只有状态达到 `INDEXED` 的文档才算真正进入向量检索链路。
 
 工单详情的删除按钮现已调用真实接口：
 
@@ -278,6 +264,7 @@ Sentinel 客户端已接入六个 Java 服务。启动脚本启用 eager 模式�
 - RabbitMQ 管理页可查看 `ops.platform.audit.queue`、`ops.platform.audit.dlq`、`ops.knowledge.parse.queue` 和 `ops.knowledge.parse.dlq`。
 - Prometheus 的 `/targets` 页面应显示六个 Java job 全部 `UP`。
 - Grafana 已预置 `OpsAgent Overview`，包含 Outbox、MQ 消费和文档解析指标。
+- OpsAgent“系统监控”页会通过 Platform 服务实时读取 Prometheus Targets 和 Grafana 健康状态，并提供直达链接；不是静态占位页。
 - Elasticsearch `_cluster/health` 当前应为 green，`opsagent-knowledge-v1` 保存已向量化切片。
 - Prometheus 可查询 `opsagent_ai_requests_total` 和 `opsagent_ai_request_duration_seconds`。
 - `ops_rag.ai_usage_log` 保存不含问题正文的模型用量审计。
@@ -333,8 +320,6 @@ RabbitMQ 临时不可用时，工单主事务仍可成功，Outbox 会记录失�
 | 生成数据授权 | 22 篇可用文档已获准发送 OpenAI Embedding；检索上下文发送给 DeepSeek/Kimi 属于不同处理目的，生产使用前应另行确认 |
 | Sentinel 其他治理规则 | RAG FlowRule 已持久化；熔断、热点参数和授权规则尚未配置 |
 | OCR | 扫描 PDF 需要 Tesseract 或云 OCR |
-| 真正的工单附件关联 | 当前工单页固定使用知识库 1 |
-| 管理页面适配 | 新 Platform MQ 审计已提供 API，前端系统管理页尚未切换 |
 | Java 虚拟线程 | Java 17 不支持正式 API，需升级 Java 21 |
 | Alertmanager | 缺少 SLO、联系人和企业通知渠道 |
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   ArrowLeft,
@@ -13,32 +13,62 @@ import {
   Bot,
   Clock3,
   MessageSquareText,
+  Database,
+  Wrench,
 } from "@lucide/vue";
 import { aiApi, documentApi, ticketApi } from "@/api/modules";
+import { streamRagAnswer } from "@/api/rag-stream";
 import type {
   AiQuestion,
   DocumentChunk,
   DocumentRecord,
   Ticket,
+  TicketComment,
   TicketLog,
+  TicketTrace,
+  TicketWorkRecord,
+  WorkRecordType,
 } from "@/types/api";
 import { useAuthStore } from "@/stores/auth";
 import BaseModal from "@/components/BaseModal.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
+import AnswerContent from "@/components/AnswerContent.vue";
+
+type TicketAction =
+  | "accept"
+  | "start"
+  | "suspend"
+  | "resume"
+  | "waitConfirm"
+  | "resolve"
+  | "reopen"
+  | "close";
+
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ACCEPTED_EXTENSIONS = ["pdf", "docx", "txt", "md", "markdown"];
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const id = Number(route.params.id);
 const ticket = ref<Ticket>();
 const logs = ref<TicketLog[]>([]);
+const comments = ref<TicketComment[]>([]);
+const workRecords = ref<TicketWorkRecord[]>([]);
+const trace = ref<TicketTrace>();
+const traceOpen = ref(false);
 const documents = ref<DocumentRecord[]>([]);
 const questions = ref<AiQuestion[]>([]);
 const loading = ref(true);
 const error = ref("");
 const busy = ref("");
-const action = ref<"accept" | "resolve" | "close" | "">("");
+const action = ref<TicketAction | "">("");
 const remark = ref("");
+const commentText = ref("");
+const workRecordType = ref<WorkRecordType>("DIAGNOSIS");
+const workRecordContent = ref("");
+const workRecordEvidence = ref("");
 const selectedFile = ref<File>();
+const dragActive = ref(false);
 const question = ref("");
 const selectedDocument = ref<number>();
 const chunks = ref<DocumentChunk[]>([]);
@@ -50,32 +80,53 @@ const isAssignee = computed(
 const canUpload = computed(
   () => auth.isAdmin || isOwner.value || isAssignee.value,
 );
-const availableAction = computed(() => {
-  if (!ticket.value) return null;
+const availableActions = computed<TicketAction[]>(() => {
+  if (!ticket.value) return [];
+  const operator = isAssignee.value || auth.isAdmin;
   if (ticket.value.status === "CREATED" && (auth.isOps || auth.isAdmin))
-    return "accept";
-  if (
-    ticket.value.status === "PROCESSING" &&
-    (isAssignee.value || auth.isAdmin)
-  )
-    return "resolve";
-  if (ticket.value.status === "RESOLVED" && (isOwner.value || auth.isAdmin))
-    return "close";
-  return null;
+    return ["accept"];
+  if (ticket.value.status === "ASSIGNED" && operator) return ["start"];
+  if (ticket.value.status === "PROCESSING" && operator)
+    return ["waitConfirm", "resolve", "suspend"];
+  if (ticket.value.status === "SUSPENDED" && operator) return ["resume"];
+  if (ticket.value.status === "WAITING_CONFIRM" && operator)
+    return ["resolve", "resume"];
+  if (ticket.value.status === "RESOLVED") {
+    const actions: TicketAction[] = [];
+    if (isOwner.value || auth.isAdmin) actions.push("close");
+    if (operator) actions.push("reopen");
+    return actions;
+  }
+  return [];
 });
 const actionLabels = {
   accept: "接收工单",
+  start: "开始处理",
+  suspend: "挂起处理",
+  resume: "恢复处理",
+  waitConfirm: "提交业务确认",
   resolve: "标记已解决",
+  reopen: "重新处理",
   close: "确认关闭",
 };
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    [ticket.value, logs.value, documents.value] = await Promise.all([
+    [
+      ticket.value,
+      logs.value,
+      documents.value,
+      comments.value,
+      workRecords.value,
+      trace.value,
+    ] = await Promise.all([
       ticketApi.detail(id),
       ticketApi.logs(id),
       documentApi.list(id),
+      ticketApi.comments(id),
+      ticketApi.workRecords(id),
+      ticketApi.trace(id),
     ]);
     questions.value = (await aiApi.page(id)).records;
   } catch (e) {
@@ -111,11 +162,38 @@ async function upload() {
     busy.value = "";
   }
 }
+
+function selectFile(file?: File) {
+  dragActive.value = false;
+  if (!file) return;
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+    selectedFile.value = undefined;
+    error.value = "仅支持 PDF、DOCX、TXT 和 Markdown 文件";
+    return;
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    selectedFile.value = undefined;
+    error.value = "文件不能超过 10 MB，请压缩或拆分后重新上传";
+    return;
+  }
+  selectedFile.value = file;
+  error.value = "";
+}
+
+function dropFile(event: DragEvent) {
+  selectFile(event.dataTransfer?.files?.[0]);
+}
 async function parse(doc: DocumentRecord) {
   busy.value = `parse-${doc.id}`;
   try {
     await documentApi.parse(doc.id);
-    documents.value = await documentApi.list(id);
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      documents.value = await documentApi.list(id);
+      const current = documents.value.find((item) => item.id === doc.id);
+      if (current && !["PENDING", "PARSING"].includes(current.parseStatus)) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : "解析失败";
     documents.value = await documentApi.list(id);
@@ -149,36 +227,88 @@ async function showChunks(doc: DocumentRecord) {
 async function ask() {
   if (!question.value.trim()) return;
   busy.value = "ask";
+  error.value = "";
+  const asked = question.value.trim();
+  const saved = reactive<AiQuestion>({
+    id: Date.now(),
+    ticketId: id,
+    documentId: selectedDocument.value,
+    userId: auth.user?.userId || 0,
+    question: asked,
+    answer: "",
+    modelName: "正在检索知识库",
+    status: "SUCCESS",
+    references: [],
+    createTime: new Date().toISOString(),
+  });
+  questions.value = [saved, ...questions.value];
+  question.value = "";
   try {
-    const asked = question.value;
-    const answer = await aiApi.ask(id, {
+    const answer = await streamRagAnswer({
       question: asked,
       documentId: selectedDocument.value,
       topK: 5,
+    }, {
+      onStatus: (message) => (saved.modelName = message),
+      onSources: (rows) => (saved.references = rows),
+      onToken: async (delta) => {
+        saved.answer = `${saved.answer || ""}${delta}`;
+        await nextTick();
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      },
     });
-    question.value = "";
-    const saved: AiQuestion = {
-      id: answer.questionId,
-      ticketId: id,
-      userId: auth.user?.userId || 0,
-      question: asked,
-      answer: answer.answer,
-      modelName: answer.modelName,
-      status: "SUCCESS",
-      costTimeMs: answer.costTimeMs,
-      references: answer.references,
-      createTime: new Date().toISOString(),
-    };
-    questions.value = [
-      saved,
-      ...questions.value.filter((item) => item.id !== saved.id),
-    ];
+    saved.answer = answer.answer || saved.answer;
+    saved.modelName = `${answer.provider}/${answer.model}`;
+    saved.costTimeMs = answer.latencyMs;
+    saved.references = answer.references;
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "提问失败";
+    saved.status = "FAILED";
+    saved.errorMessage = e instanceof Error ? e.message : "提问失败";
   } finally {
     busy.value = "";
   }
 }
+
+async function addComment() {
+  const content = commentText.value.trim();
+  if (!content || busy.value === "comment") return;
+  busy.value = "comment";
+  try {
+    comments.value.push(await ticketApi.comment(id, content));
+    commentText.value = "";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "回复失败";
+  } finally {
+    busy.value = "";
+  }
+}
+async function addWorkRecord() {
+  const content = workRecordContent.value.trim();
+  if (!content || busy.value === "work-record") return;
+  busy.value = "work-record";
+  try {
+    workRecords.value.push(
+      await ticketApi.addWorkRecord(id, {
+        recordType: workRecordType.value,
+        content,
+        evidence: workRecordEvidence.value.trim() || undefined,
+      }),
+    );
+    workRecordContent.value = "";
+    workRecordEvidence.value = "";
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "处置记录保存失败";
+  } finally {
+    busy.value = "";
+  }
+}
+const workRecordLabels: Record<WorkRecordType, string> = {
+  DIAGNOSIS: "现象与诊断",
+  ACTION: "执行动作",
+  VERIFICATION: "验证结果",
+  ROOT_CAUSE: "根因分析",
+  BUSINESS_REPLY: "业务回复",
+};
 onMounted(load);
 </script>
 <template>
@@ -214,13 +344,17 @@ onMounted(load);
             new Date(ticket.updateTime).toLocaleString("zh-CN")
           }}</strong>
         </div>
-        <button
-          v-if="availableAction"
-          class="button primary"
-          @click="action = availableAction"
-        >
-          <Check :size="18" />{{ actionLabels[availableAction] }}
-        </button>
+        <div v-if="availableActions.length" class="ticket-actions">
+          <button
+            v-for="nextAction in availableActions"
+            :key="nextAction"
+            class="button"
+            :class="nextAction === 'suspend' || nextAction === 'reopen' ? 'secondary' : 'primary'"
+            @click="action = nextAction"
+          >
+            <Check :size="18" />{{ actionLabels[nextAction] }}
+          </button>
+        </div>
       </div>
     </section>
     <div v-if="error" class="inline-error">
@@ -236,18 +370,26 @@ onMounted(load);
             </div>
             <span class="panel-count">{{ documents.length }} 个文件</span>
           </header>
-          <div v-if="canUpload" class="upload-strip">
+          <div
+            v-if="canUpload"
+            class="upload-strip upload-dropzone"
+            :class="{ 'drag-active': dragActive }"
+            @dragenter.prevent="dragActive = true"
+            @dragover.prevent="dragActive = true"
+            @dragleave.prevent="dragActive = false"
+            @drop.prevent="dropFile"
+          >
             <label
               ><Upload :size="19" /><span>{{
-                selectedFile?.name || "选择 PDF、DOCX、TXT 或 Markdown"
+                selectedFile?.name || "拖拽文件到这里，或点击选择文件"
               }}</span
               ><input
                 type="file"
                 accept=".pdf,.docx,.txt,.md,.markdown"
-                @change="
-                  (e) =>
-                    (selectedFile = (e.target as HTMLInputElement).files?.[0])
-                " /></label
+                @change="(e) => selectFile((e.target as HTMLInputElement).files?.[0])"
+              />
+              <small>支持 PDF、DOCX、TXT、Markdown，单文件最大 10 MB</small>
+            </label
             ><button
               class="button primary small"
               :disabled="!selectedFile || busy === 'upload'"
@@ -349,23 +491,85 @@ onMounted(load);
                   new Date(qa.createTime).toLocaleString("zh-CN")
                 }}</time>
               </div>
-              <div class="qa-answer">
+              <div class="qa-answer ticket-answer">
                 <span>A</span>
-                <p>
-                  {{ qa.status === "SUCCESS" ? qa.answer : qa.errorMessage }}
-                </p>
+                <div>
+                  <small v-if="qa.modelName" class="answer-model">{{ qa.modelName }}</small>
+                  <AnswerContent
+                    :content="qa.status === 'SUCCESS' ? qa.answer : qa.errorMessage"
+                  />
+                </div>
               </div>
               <div v-if="qa.references?.length" class="reference-list">
                 <span v-for="ref in qa.references" :key="ref.chunkId"
-                  >文档 #{{ ref.documentId }} · Chunk {{ ref.chunkIndex }} ·
-                  {{ ref.relevanceScore.toFixed(1) }}</span
+                  >{{ ref.documentName || `文档 #${ref.documentId}` }}
+                  <small v-if="ref.pageNumber">第 {{ ref.pageNumber }} 页</small>
+                  <small v-if="ref.relevanceScore"
+                    >相关度 {{ (ref.relevanceScore * 100).toFixed(0) }}%</small
+                  ></span
                 >
               </div>
             </article>
           </div>
         </section>
+        <section class="panel work-record-panel">
+          <header class="panel-header">
+            <div><span class="eyebrow">RESOLUTION WORKBENCH</span><h3>结构化处置记录</h3></div>
+            <Wrench :size="22" />
+          </header>
+          <form class="work-record-form" @submit.prevent="addWorkRecord">
+            <select v-model="workRecordType">
+              <option v-for="(label, value) in workRecordLabels" :key="value" :value="value">{{ label }}</option>
+            </select>
+            <textarea v-model.trim="workRecordContent" maxlength="2000" rows="3" placeholder="记录诊断依据、执行动作、根因或验证结论…" />
+            <input v-model.trim="workRecordEvidence" maxlength="1000" placeholder="证据、命令或监控链接（选填）" />
+            <button class="button primary" :disabled="!workRecordContent.trim() || busy === 'work-record'">{{ busy === "work-record" ? "保存中…" : "保存处置记录" }}</button>
+          </form>
+          <div v-if="workRecords.length" class="work-record-list">
+            <article v-for="record in workRecords" :key="record.id">
+              <span>{{ workRecordLabels[record.recordType] }}</span>
+              <div><p>{{ record.content }}</p><code v-if="record.evidence">{{ record.evidence }}</code><small>记录 #{{ record.id }} · 用户 #{{ record.createBy }} · {{ new Date(record.createTime).toLocaleString("zh-CN") }}</small></div>
+            </article>
+          </div>
+          <div v-else class="empty-state small-empty">还没有结构化处置记录</div>
+        </section>
+        <section class="panel comment-panel">
+          <header class="panel-header">
+            <div>
+              <span class="eyebrow">COLLABORATION</span>
+              <h3>处理记录与回复</h3>
+            </div>
+            <MessageSquareText :size="22" />
+          </header>
+          <div v-if="comments.length" class="comment-list">
+            <article v-for="item in comments" :key="item.id">
+              <div class="comment-avatar">{{ String(item.userId).slice(-2) }}</div>
+              <div>
+                <header><strong>用户 #{{ item.userId }}</strong><time>{{ new Date(item.createTime).toLocaleString('zh-CN') }}</time></header>
+                <p>{{ item.content }}</p>
+              </div>
+            </article>
+          </div>
+          <div v-else class="empty-state small-empty">暂无处理回复</div>
+          <form class="comment-form" @submit.prevent="addComment">
+            <textarea
+              v-model.trim="commentText"
+              rows="3"
+              maxlength="2000"
+              placeholder="记录排查过程、处理结果或向相关人员回复…"
+            />
+            <button class="button primary" :disabled="!commentText.trim() || busy === 'comment'">
+              <Send :size="16" />{{ busy === "comment" ? "发送中…" : "发送回复" }}
+            </button>
+          </form>
+        </section>
       </div>
       <aside class="detail-aside">
+        <section class="panel trace-summary-panel">
+          <header class="panel-header"><div><span class="eyebrow">BACKEND TRACE</span><h3>后台数据链路</h3></div><Database :size="20" /></header>
+          <div class="trace-metrics"><span><strong>{{ trace?.assignments.length || 0 }}</strong>ticket_assignment</span><span><strong>{{ trace?.operations.length || 0 }}</strong>ticket_operation_log</span><span><strong>{{ trace?.outboxEvents.length || 0 }}</strong>event_outbox</span></div>
+          <button class="button secondary trace-button" @click="traceOpen = true">查看真实表记录</button>
+        </section>
         <section class="panel timeline-panel">
           <header class="panel-header">
             <div>
@@ -434,8 +638,15 @@ onMounted(load);
           </header>
           <p>{{ chunk.content }}</p>
         </article>
-      </div></BaseModal
-    >
+      </div></BaseModal>
+    <BaseModal v-if="traceOpen" title="工单后台数据链路" wide @close="traceOpen = false">
+      <div class="trace-detail">
+        <section><h4>ticket</h4><p>ID #{{ ticket.id }} · version {{ ticket.version }} · {{ ticket.status }}</p></section>
+        <section><h4>ticket_assignment</h4><div v-if="!trace?.assignments.length" class="muted">暂无分派记录</div><article v-for="item in trace?.assignments" :key="item.id"><code>#{{ item.id }}</code><span>处理人 #{{ item.assigneeId }} · {{ item.assignmentType }}</span><time>{{ new Date(item.createTime).toLocaleString("zh-CN") }}</time></article></section>
+        <section><h4>ticket_operation_log</h4><article v-for="item in trace?.operations" :key="item.id"><code>#{{ item.id }}</code><span>{{ item.operation }} · 操作人 #{{ item.operatorId }}</span><time>{{ new Date(item.createTime).toLocaleString("zh-CN") }}</time></article></section>
+        <section><h4>event_outbox → RabbitMQ</h4><article v-for="item in trace?.outboxEvents" :key="item.id"><code>#{{ item.id }}</code><span>{{ item.eventType }}</span><StatusBadge :value="item.status" /><time>{{ new Date(item.updateTime).toLocaleString("zh-CN") }}</time></article></section>
+      </div>
+    </BaseModal>
   </div>
   <div v-else class="empty-state page-loading">工单不存在或无权访问</div>
 </template>

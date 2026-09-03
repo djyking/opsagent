@@ -104,7 +104,10 @@ onMounted(load);
       >
         <option value="">全部状态</option>
         <option value="CREATED">待接单</option>
+        <option value="ASSIGNED">已接单</option>
         <option value="PROCESSING">处理中</option>
+        <option value="SUSPENDED">已挂起</option>
+        <option value="WAITING_CONFIRM">待业务确认</option>
         <option value="RESOLVED">待确认</option>
         <option value="CLOSED">已关闭</option></select
       ><select

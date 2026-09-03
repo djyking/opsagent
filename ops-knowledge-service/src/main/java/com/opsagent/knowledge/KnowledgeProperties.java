@@ -13,6 +13,7 @@ public class KnowledgeProperties {
     private String storageRoot = "./data/uploads";
     private int chunkSize = 2400;
     private int chunkOverlap = 200;
+    private long maxFileSizeBytes = 10L * 1024 * 1024;
 
     public String getStorageRoot() {
         return storageRoot;
@@ -36,5 +37,13 @@ public class KnowledgeProperties {
 
     public void setChunkOverlap(int v) {
         chunkOverlap = v;
+    }
+
+    public long getMaxFileSizeBytes() {
+        return maxFileSizeBytes;
+    }
+
+    public void setMaxFileSizeBytes(long maxFileSizeBytes) {
+        this.maxFileSizeBytes = maxFileSizeBytes;
     }
 }

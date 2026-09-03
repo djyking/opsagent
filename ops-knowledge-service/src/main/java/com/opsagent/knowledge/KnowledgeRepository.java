@@ -46,27 +46,34 @@ public class KnowledgeRepository {
                         + " knowledge_base WHERE deleted=0 ORDER BY id DESC");
     }
 
-    long addDocument(long base, FileStorageService.StoredFile f, long user, String visibility) {
+    long addDocument(
+            long base,
+            Long ticketId,
+            FileStorageService.StoredFile f,
+            long user,
+            String visibility) {
         KeyHolder k = new GeneratedKeyHolder();
         jdbc.update(
                 c -> {
                     PreparedStatement p =
                             c.prepareStatement(
-                                    "INSERT INTO knowledge_document(knowledge_base_id, file_name,"
+                                    "INSERT INTO knowledge_document(knowledge_base_id,ticket_id,file_name,"
                                         + " original_name, file_type, file_size, storage_path,"
                                         + " status, content_hash, version, visibility, create_by, create_time,"
                                         + " update_time, deleted)"
-                                        + " VALUES(?,?,?,?,?,?,'UPLOADED',?,1,?,?,NOW(),NOW(),0)",
+                                        + " VALUES(?,?,?,?,?,?,?,'UPLOADED',?,1,?,?,NOW(),NOW(),0)",
                                     Statement.RETURN_GENERATED_KEYS);
                     p.setLong(1, base);
-                    p.setString(2, PathName.file(f.relativePath()));
-                    p.setString(3, f.originalName());
-                    p.setString(4, f.extension());
-                    p.setLong(5, f.size());
-                    p.setString(6, f.relativePath());
-                    p.setString(7, f.sha256());
-                    p.setString(8, visibility);
-                    p.setLong(9, user);
+                    if (ticketId == null) p.setNull(2, Types.BIGINT);
+                    else p.setLong(2, ticketId);
+                    p.setString(3, PathName.file(f.relativePath()));
+                    p.setString(4, f.originalName());
+                    p.setString(5, f.extension());
+                    p.setLong(6, f.size());
+                    p.setString(7, f.relativePath());
+                    p.setString(8, f.sha256());
+                    p.setString(9, visibility);
+                    p.setLong(10, user);
                     return p;
                 },
                 k);
@@ -80,6 +87,17 @@ public class KnowledgeRepository {
                         + " knowledge_document WHERE knowledge_base_id=? AND deleted=0 ORDER BY id"
                         + " DESC",
                 base);
+    }
+
+    List<Map<String, Object>> ticketDocuments(long ticketId, long userId, boolean administrator) {
+        return jdbc.queryForList(
+                "SELECT id,knowledge_base_id,ticket_id,original_name,file_type,file_size,status,"
+                        + "visibility,content_hash,parse_error,create_by,create_time,update_time FROM"
+                        + " knowledge_document WHERE ticket_id=? AND deleted=0"
+                        + " AND (?=1 OR visibility='PUBLIC' OR create_by=?) ORDER BY id DESC",
+                ticketId,
+                administrator ? 1 : 0,
+                userId);
     }
 
     Map<String, Object> document(long id) {

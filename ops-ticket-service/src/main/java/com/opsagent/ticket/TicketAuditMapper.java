@@ -50,10 +50,39 @@ public interface TicketAuditMapper {
             String requestId,
             String detail);
 
+    @Insert(
+            "INSERT INTO ticket_work_record(ticket_id,record_type,content,evidence,create_by,"
+                    + "create_time) VALUES(#{ticketId},#{recordType},#{content},#{evidence},"
+                    + "#{createBy},NOW())")
+    int workRecord(
+            long ticketId,
+            String recordType,
+            String content,
+            String evidence,
+            long createBy);
+
     @Select(
             "SELECT id,ticket_id ticketId,user_id userId,content,create_time createTime FROM"
                     + " ticket_comment WHERE ticket_id=#{ticketId} AND deleted=0 ORDER BY id")
     List<Comment> comments(long ticketId);
+
+    @Select(
+            "SELECT id,ticket_id ticketId,assignee_id assigneeId,assigned_by assignedBy,"
+                    + "assignment_type assignmentType,create_time createTime FROM"
+                    + " ticket_assignment WHERE ticket_id=#{ticketId} ORDER BY id")
+    List<Assignment> assignments(long ticketId);
+
+    @Select(
+            "SELECT id,ticket_id ticketId,operator_id operatorId,operation,request_id requestId,"
+                    + "detail_json detailJson,create_time createTime FROM ticket_operation_log"
+                    + " WHERE ticket_id=#{ticketId} ORDER BY id")
+    List<Operation> operations(long ticketId);
+
+    @Select(
+            "SELECT id,ticket_id ticketId,record_type recordType,content,evidence,create_by"
+                    + " createBy,create_time createTime FROM ticket_work_record"
+                    + " WHERE ticket_id=#{ticketId} ORDER BY id")
+    List<WorkRecord> workRecords(long ticketId);
 
     /**
      * 工单状态流转历史数据。
@@ -78,4 +107,48 @@ public interface TicketAuditMapper {
      * @since 2026/8/9
      */
     record Comment(long id, long ticketId, long userId, String content, LocalDateTime createTime) {}
+
+    /**
+     * 工单分派轨迹。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record Assignment(
+            long id,
+            long ticketId,
+            long assigneeId,
+            long assignedBy,
+            String assignmentType,
+            LocalDateTime createTime) {}
+
+    /**
+     * 工单服务内部操作日志。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record Operation(
+            long id,
+            long ticketId,
+            long operatorId,
+            String operation,
+            String requestId,
+            String detailJson,
+            LocalDateTime createTime) {}
+
+    /**
+     * 工单结构化处置记录。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record WorkRecord(
+            long id,
+            long ticketId,
+            String recordType,
+            String content,
+            String evidence,
+            long createBy,
+            LocalDateTime createTime) {}
 }

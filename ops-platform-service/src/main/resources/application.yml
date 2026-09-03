@@ -44,6 +44,9 @@ ops:
       - /actuator/health
       - /actuator/info
       - /actuator/prometheus
+  monitor:
+    prometheus-url: ${OPS_PROMETHEUS_URL:http://localhost:9090}
+    grafana-url: ${OPS_GRAFANA_URL:http://localhost:3000}
 management:
   endpoints:
     web:

@@ -2,9 +2,15 @@
 defineProps<{ value: string }>();
 const labels: Record<string, string> = {
   CREATED: "待接单",
+  ASSIGNED: "已接单",
   PROCESSING: "处理中",
+  SUSPENDED: "已挂起",
+  WAITING_CONFIRM: "待业务确认",
   RESOLVED: "待确认",
   CLOSED: "已关闭",
+  REJECTED: "已驳回",
+  UNREAD: "未读",
+  READ: "已读",
   PENDING: "待处理",
   PARSING: "解析中",
   SUCCESS: "成功",

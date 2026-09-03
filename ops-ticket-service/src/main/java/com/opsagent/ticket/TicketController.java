@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 提供工单创建、查询、接单、流转、评论和历史接口。
@@ -64,5 +65,21 @@ public class TicketController {
     @GetMapping("/{id}/history")
     ApiResponse<List<TicketAuditMapper.History>> history(@PathVariable long id) {
         return ApiResponse.success(service.history(id));
+    }
+
+    @PostMapping("/{id}/work-records")
+    ApiResponse<TicketAuditMapper.WorkRecord> addWorkRecord(
+            @PathVariable long id, @Valid @RequestBody AddWorkRecord request) {
+        return ApiResponse.success(service.addWorkRecord(id, request));
+    }
+
+    @GetMapping("/{id}/work-records")
+    ApiResponse<List<TicketAuditMapper.WorkRecord>> workRecords(@PathVariable long id) {
+        return ApiResponse.success(service.workRecords(id));
+    }
+
+    @GetMapping("/{id}/trace")
+    ApiResponse<Map<String, Object>> trace(@PathVariable long id) {
+        return ApiResponse.success(service.trace(id));
     }
 }

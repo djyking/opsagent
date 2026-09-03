@@ -12,7 +12,11 @@ import type {
   OperationLog,
   PageResponse,
   Ticket,
+  TicketComment,
   TicketLog,
+  TicketTrace,
+  TicketWorkRecord,
+  WorkRecordType,
 } from "@/types/api";
 
 export const authApi = {
@@ -27,13 +31,28 @@ export const authApi = {
 };
 
 export const ticketApi = {
-  page: async (_params: Record<string, unknown>) => {
-    const records = await request<Ticket[]>({ url: "/api/tickets" });
+  page: async (params: Record<string, unknown>) => {
+    const all = await request<Ticket[]>({ url: "/api/tickets" });
+    const keyword = String(params.keyword || "").trim().toLowerCase();
+    const status = String(params.status || "");
+    const priority = String(params.priority || "");
+    const pageNum = Math.max(Number(params.pageNum || 1), 1);
+    const pageSize = Math.max(Number(params.pageSize || 10), 1);
+    const filtered = all.filter(
+      (ticket) =>
+        (!keyword ||
+          ticket.ticketNo.toLowerCase().includes(keyword) ||
+          ticket.title.toLowerCase().includes(keyword) ||
+          ticket.description.toLowerCase().includes(keyword)) &&
+        (!status || ticket.status === status) &&
+        (!priority || ticket.priority === priority),
+    );
+    const records = filtered.slice((pageNum - 1) * pageSize, pageNum * pageSize);
     return {
       records,
-      total: records.length,
-      pageNum: 1,
-      pageSize: Math.max(records.length, 1),
+      total: filtered.length,
+      pageNum,
+      pageSize,
     } as PageResponse<Ticket>;
   },
   detail: (id: number) => request<Ticket>({ url: `/api/tickets/${id}` }),
@@ -46,7 +65,15 @@ export const ticketApi = {
     Promise.reject(new Error("仅 CREATED 工单可编辑，编辑接口将在下一批迁移")),
   action: async (
     id: number,
-    action: "accept" | "resolve" | "close",
+    action:
+      | "accept"
+      | "start"
+      | "suspend"
+      | "resume"
+      | "waitConfirm"
+      | "resolve"
+      | "reopen"
+      | "close",
     remark: string,
   ) => {
     const current = await request<Ticket>({ url: `/api/tickets/${id}` });
@@ -56,15 +83,44 @@ export const ticketApi = {
         url: `/api/tickets/${id}/claim`,
         data: { version: current.version },
       });
-    const target = action === "resolve" ? "RESOLVED" : "CLOSED";
+    const targets = {
+      start: "PROCESSING",
+      suspend: "SUSPENDED",
+      resume: "PROCESSING",
+      waitConfirm: "WAITING_CONFIRM",
+      resolve: "RESOLVED",
+      reopen: "PROCESSING",
+      close: "CLOSED",
+    } as const;
     return request<Ticket>({
       method: "POST",
       url: `/api/tickets/${id}/transition`,
-      data: { target, version: current.version, remark },
+      data: { target: targets[action], version: current.version, remark },
     });
   },
   logs: (id: number) =>
     request<TicketLog[]>({ url: `/api/tickets/${id}/history` }),
+  comments: (id: number) =>
+    request<TicketComment[]>({ url: `/api/tickets/${id}/comments` }),
+  comment: (id: number, content: string) =>
+    request<TicketComment>({
+      method: "POST",
+      url: `/api/tickets/${id}/comments`,
+      data: { content },
+    }),
+  workRecords: (id: number) =>
+    request<TicketWorkRecord[]>({ url: `/api/tickets/${id}/work-records` }),
+  addWorkRecord: (
+    id: number,
+    data: { recordType: WorkRecordType; content: string; evidence?: string },
+  ) =>
+    request<TicketWorkRecord>({
+      method: "POST",
+      url: `/api/tickets/${id}/work-records`,
+      data,
+    }),
+  trace: (id: number) =>
+    request<TicketTrace>({ url: `/api/tickets/${id}/trace` }),
   remove: (_id: number) =>
     Promise.reject(new Error("微服务版不提供直接物理删除工单")),
 };
@@ -72,7 +128,7 @@ export const ticketApi = {
 export const documentApi = {
   list: async (_ticketId: number) => {
     const rows = await request<Record<string, unknown>[]>({
-      url: "/api/knowledge/bases/1/documents",
+      url: `/api/knowledge/tickets/${_ticketId}/documents`,
     });
     return rows.map((row) => ({
       id: Number(row.id),
@@ -95,6 +151,7 @@ export const documentApi = {
   upload: async (_ticketId: number, file: File) => {
     const data = new FormData();
     data.append("file", file);
+    data.append("ticketId", String(_ticketId));
     const id = await request<number>({
       method: "POST",
       url: "/api/knowledge/bases/1/documents",
@@ -159,22 +216,66 @@ export const aiApi = {
 };
 
 export const adminApi = {
-  notifications: (params: { pageNum: number; pageSize: number }) =>
-    request<PageResponse<NotificationRecord>>({
-      url: "/api/notifications",
+  notifications: (params: {
+    pageNum: number;
+    pageSize: number;
+    status?: string;
+  }) =>
+    request<PageResponse<Record<string, unknown>> & { unreadTotal: number }>({
+      url: "/api/platform/admin/notifications",
       params,
-    }),
+    }).then((page) => ({
+      ...page,
+      records: page.records.map(
+        (row) =>
+          ({
+            id: Number(row.id),
+            ticketId: Number(row.ticket_id),
+            receiver: String(row.receiver_id),
+            title: String(row.title),
+            content: String(row.content),
+            status: String(row.status),
+            createTime: String(row.create_time),
+          }) as NotificationRecord,
+      ),
+    })),
   notificationStatus: (id: number, status: string) =>
     request<NotificationRecord>({
       method: "PUT",
-      url: `/api/notifications/${id}/status`,
+      url: `/api/platform/admin/notifications/${id}/status`,
       params: { status },
     }),
-  audits: (params: { pageNum: number; pageSize: number }) =>
-    request<PageResponse<OperationLog>>({
-      url: "/api/audit/operation-logs",
-      params,
+  readAllNotifications: () =>
+    request<{ updated: number; unreadTotal: number }>({
+      method: "PUT",
+      url: "/api/platform/admin/notifications/read-all",
     }),
+  audits: (params: {
+    pageNum: number;
+    pageSize: number;
+    bizId?: string;
+    operation?: string;
+  }) =>
+    request<PageResponse<Record<string, unknown>>>({
+      url: "/api/platform/admin/audits",
+      params,
+    }).then((page) => ({
+      ...page,
+      records: page.records.map(
+        (row) =>
+          ({
+            id: Number(row.id),
+            serviceName: String(row.service_name || ""),
+            bizType: String(row.biz_type),
+            bizId: Number(row.biz_id || 0),
+            operationType: String(row.operation),
+            operator: String(row.user_id || "系统"),
+            traceId: String(row.trace_id || ""),
+            content: String(row.detail_json || "无附加信息"),
+            createTime: String(row.create_time),
+          }) as OperationLog,
+      ),
+    })),
   tasks: (params: { pageNum: number; pageSize: number }) =>
     request<PageResponse<AiTask>>({ url: "/api/tasks/ai", params }),
   taskStatus: (id: number, status: string) =>

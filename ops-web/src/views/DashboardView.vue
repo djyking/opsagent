@@ -16,14 +16,16 @@ import { useAuthStore } from "@/stores/auth";
 const auth = useAuthStore();
 const tickets = ref<Ticket[]>([]);
 const loading = ref(true);
-const counts = computed(() =>
-  Object.fromEntries(
-    ["CREATED", "PROCESSING", "RESOLVED", "CLOSED"].map((s) => [
-      s,
-      tickets.value.filter((t) => t.status === s).length,
-    ]),
-  ),
-);
+const counts = computed(() => ({
+  CREATED: tickets.value.filter((ticket) => ticket.status === "CREATED").length,
+  ACTIVE: tickets.value.filter((ticket) =>
+    ["ASSIGNED", "PROCESSING", "SUSPENDED"].includes(ticket.status),
+  ).length,
+  WAITING: tickets.value.filter((ticket) =>
+    ["WAITING_CONFIRM", "RESOLVED"].includes(ticket.status),
+  ).length,
+  CLOSED: tickets.value.filter((ticket) => ticket.status === "CLOSED").length,
+}));
 onMounted(async () => {
   try {
     tickets.value = (
@@ -62,14 +64,14 @@ const date = new Intl.DateTimeFormat("zh-CN", {
       <article>
         <span class="metric-icon amber"><Clock3 /></span>
         <div>
-          <span>处理中</span><strong>{{ counts.PROCESSING || 0 }}</strong>
+          <span>处理中</span><strong>{{ counts.ACTIVE || 0 }}</strong>
         </div>
         <small>正在排查处理</small>
       </article>
       <article>
         <span class="metric-icon green"><CheckCircle2 /></span>
         <div>
-          <span>待确认</span><strong>{{ counts.RESOLVED || 0 }}</strong>
+          <span>待确认</span><strong>{{ counts.WAITING || 0 }}</strong>
         </div>
         <small>等待创建人关闭</small>
       </article>
