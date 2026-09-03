@@ -13,6 +13,11 @@ spring:
       discovery:
         enabled: ${NACOS_ENABLED:false}
         server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+    sentinel:
+      enabled: ${SENTINEL_ENABLED:false}
+      eager: ${SENTINEL_EAGER:false}
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
     gateway:
       server:
         webflux:

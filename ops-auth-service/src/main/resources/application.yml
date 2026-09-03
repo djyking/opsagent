@@ -9,6 +9,14 @@ spring:
     url: ${OPS_AUTH_DB_URL:jdbc:mysql://localhost:3306/ops_auth?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
     username: ${OPS_AUTH_DB_USERNAME:root}
     password: ${OPS_AUTH_DB_PASSWORD:}
+  data:
+    redis:
+      host: ${OPS_REDIS_HOST:localhost}
+      port: ${OPS_REDIS_PORT:6379}
+      password: ${OPS_REDIS_PASSWORD:}
+      database: ${OPS_REDIS_DATABASE:0}
+      connect-timeout: 3s
+      timeout: 3s
   cloud:
     nacos:
       config:
@@ -17,6 +25,11 @@ spring:
       discovery:
         enabled: ${NACOS_ENABLED:false}
         server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+    sentinel:
+      enabled: ${SENTINEL_ENABLED:false}
+      eager: ${SENTINEL_EAGER:false}
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
 ops:
   security:
     secret: ${OPS_JWT_SECRET:}
@@ -30,6 +43,9 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 management:
+  health:
+    redis:
+      enabled: ${OPS_REDIS_ENABLED:false}
   endpoints:
     web:
       exposure:

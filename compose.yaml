@@ -50,12 +50,15 @@ services:
       retries: 12
 
   nacos:
-    image: nacos/nacos-server:v2.5.1
+    image: nacos/nacos-server:v3.0.3
     profiles: ["middleware"]
     environment:
       MODE: standalone
       NACOS_AUTH_ENABLE: "false"
-    ports: ["8848:8848", "9848:9848"]
+      NACOS_AUTH_TOKEN: ${NACOS_AUTH_TOKEN:-b3BzYWdlbnQtbG9jYWwtbmFjb3Mtc2VjcmV0LWtleS0yMDI2MDkwMw==}
+      NACOS_AUTH_IDENTITY_KEY: ${NACOS_AUTH_IDENTITY_KEY:-opsagent-local}
+      NACOS_AUTH_IDENTITY_VALUE: ${NACOS_AUTH_IDENTITY_VALUE:-opsagent-local-identity-2026}
+    ports: ["8848:8848", "9848:9848", "8849:8080"]
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
