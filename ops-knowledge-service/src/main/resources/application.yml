@@ -51,6 +51,16 @@ ops:
       - /actuator/prometheus
   knowledge:
     storage-root: ${OPS_UPLOAD_DIR:./data/uploads}
+    vector:
+      enabled: ${OPS_VECTOR_ENABLED:false}
+      elasticsearch-url: ${OPS_ES_URL:http://localhost:9200}
+      index-name: ${OPS_ES_KNOWLEDGE_INDEX:opsagent-knowledge-v1}
+      dimensions: ${OPS_EMBEDDING_DIMENSIONS:1536}
+      minimum-score: ${OPS_VECTOR_MINIMUM_SCORE:0.72}
+      embedding-base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+      embedding-api-key: ${OPENAI_API_KEY:}
+      embedding-model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
+      timeout-seconds: ${OPS_EMBEDDING_TIMEOUT_SECONDS:30}
 management:
   endpoints:
     web:

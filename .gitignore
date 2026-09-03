@@ -2,8 +2,10 @@ HELP.md
 *.md
 !opsAgent使用文档.md
 !docs/OpsAgent_企业级改造与验收报告.md
+!docs/OpsAgent_AI_RAG_实施与验收报告.md
 !demo-data/README.md
 !demo-data/generated/knowledge-docs/*.md
+!demo-data/ai-rag-smoke/*.md
 target/
 .env
 !.env.example

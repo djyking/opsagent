@@ -6,6 +6,7 @@ import jakarta.validation.constraints.*;
 
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.*;
 
@@ -48,8 +49,11 @@ public class KnowledgeController {
     }
 
     @PostMapping("/bases/{id}/documents")
-    ApiResponse<Long> upload(@PathVariable long id, @RequestPart MultipartFile file) {
-        return ApiResponse.success(service.upload(id, file));
+    ApiResponse<Long> upload(
+            @PathVariable long id,
+            @RequestPart MultipartFile file,
+            @RequestParam(defaultValue = "PRIVATE") String visibility) {
+        return ApiResponse.success(service.upload(id, file, visibility));
     }
 
     @PostMapping("/documents/{id}/parse")
@@ -69,7 +73,15 @@ public class KnowledgeController {
 
     @GetMapping("/internal/search")
     ApiResponse<List<Map<String, Object>>> search(
-            @RequestParam String query, @RequestParam(defaultValue = "5") int topK) {
-        return ApiResponse.success(service.search(query, topK));
+            @RequestParam String query,
+            @RequestParam(defaultValue = "5") int topK,
+            @RequestParam(required = false) Long documentId) {
+        return ApiResponse.success(service.search(query, topK, documentId));
+    }
+
+    @PostMapping("/internal/reindex")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Integer> reindex() {
+        return ApiResponse.success(service.reindexAll());
     }
 }

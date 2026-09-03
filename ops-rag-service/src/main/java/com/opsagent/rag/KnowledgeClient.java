@@ -14,7 +14,10 @@ import java.util.*;
 @FeignClient(name = "ops-knowledge-service", url = "${ops.rag.knowledge-url:}")
 interface KnowledgeClient {
     @GetMapping("/api/knowledge/internal/search")
-    Envelope<List<Map<String, Object>>> search(@RequestParam String query, @RequestParam int topK);
+    Envelope<List<Map<String, Object>>> search(
+            @RequestParam String query,
+            @RequestParam int topK,
+            @RequestParam(required = false) Long documentId);
 
     /**
      * 知识服务统一响应包装。

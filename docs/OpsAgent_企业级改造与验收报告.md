@@ -67,12 +67,12 @@ D:\middleware\scripts\stop-opsagent.ps1
 
 | 项目 | 当前状态 | 未实现原因 | 后续工作 |
 |---|---|---|---|
-| 外部 LLM | 未调用 | 没有供应商、Base URL、模型和 API Key | 明确供应商后增加 OpenAI-compatible client、超时、限流、脱敏和成本指标 |
-| Elasticsearch 检索 | 容器 green，但 Java 未读写 | 当前文档要求可用业务闭环，MySQL fallback 已可验收；没有 embedding 模型，不应假装已接入 | 增加索引模板、bulk 写入、中文分析器或向量字段、重建索引和回退策略 |
-| 向量数据库/Embedding | 未接入 | 缺少模型及维度约定 | 选定 embedding 模型后再确定 ES dense_vector 或独立向量库 |
+| 既有内部文档全量向量化 | 未执行 | AI/RAG 代码和合成文档验收已完成，但未授权把既有内部 Runbook 批量发送给外部 OpenAI | 完成数据分级、脱敏和第三方处理审批后调用管理员 reindex API |
+| 多 Provider 自动 Fallback | 未启用 | OpenAI、DeepSeek、Kimi 均已接入并实测；自动切换会改变上下文接收方 | 建立 Provider allowlist、数据策略和成本策略后再启用 |
+| 分布式 RAG 限流与缓存 | 未接入 Redis | 当前为单实例每用户限流，避免权限相关回答被跨用户缓存 | 多实例前实现 Redis Lua 限流；缓存键必须包含用户权限和文档版本 |
 | Java 虚拟线程 | 未实现 | Java 17 没有正式虚拟线程 API，Java 21 才正式提供 | 升级 Java 21 后用于文档 I/O；数据库连接等稀缺资源仍需限流 |
 | OCR | 未实现 | Tika 只能处理文本型 PDF，扫描件需要 OCR 运行时 | 评估 Tesseract 或云 OCR，并增加文件隔离和资源限制 |
 | 工单附件上传 API | 仅有真实文件和数据库元数据 | 当前 Ticket 模块没有附件存储接口 | 复用 Knowledge 的文件校验/存储抽象，补上传、下载和权限校验 |
 | 生产告警规则 | 未配置 | 本地演示缺少接收人、SLO 和通知渠道 | 添加 Prometheus rule、Alertmanager 及企业通知渠道 |
 
-以上未实现项不会在界面或文档中标记为“已接入”。
+AI/RAG 的详细实现、真实 Provider 测试和限制见 `docs/OpsAgent_AI_RAG_实施与验收报告.md`。以上未实现项不会在界面或文档中标记为“已接入”。

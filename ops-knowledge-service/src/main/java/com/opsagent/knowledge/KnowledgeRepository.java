@@ -46,7 +46,7 @@ public class KnowledgeRepository {
                         + " knowledge_base WHERE deleted=0 ORDER BY id DESC");
     }
 
-    long addDocument(long base, FileStorageService.StoredFile f, long user) {
+    long addDocument(long base, FileStorageService.StoredFile f, long user, String visibility) {
         KeyHolder k = new GeneratedKeyHolder();
         jdbc.update(
                 c -> {
@@ -54,9 +54,9 @@ public class KnowledgeRepository {
                             c.prepareStatement(
                                     "INSERT INTO knowledge_document(knowledge_base_id, file_name,"
                                         + " original_name, file_type, file_size, storage_path,"
-                                        + " status, content_hash, version, create_by, create_time,"
+                                        + " status, content_hash, version, visibility, create_by, create_time,"
                                         + " update_time, deleted)"
-                                        + " VALUES(?,?,?,?,?,?,'UPLOADED',?,1,?,NOW(),NOW(),0)",
+                                        + " VALUES(?,?,?,?,?,?,'UPLOADED',?,1,?,?,NOW(),NOW(),0)",
                                     Statement.RETURN_GENERATED_KEYS);
                     p.setLong(1, base);
                     p.setString(2, PathName.file(f.relativePath()));
@@ -65,7 +65,8 @@ public class KnowledgeRepository {
                     p.setLong(5, f.size());
                     p.setString(6, f.relativePath());
                     p.setString(7, f.sha256());
-                    p.setLong(8, user);
+                    p.setString(8, visibility);
+                    p.setLong(9, user);
                     return p;
                 },
                 k);
@@ -74,7 +75,7 @@ public class KnowledgeRepository {
 
     List<Map<String, Object>> documents(long base) {
         return jdbc.queryForList(
-                "SELECT id, knowledge_base_id, original_name, file_type, file_size, status,"
+                "SELECT id, knowledge_base_id, original_name, file_type, file_size, status, visibility,"
                         + " content_hash, parse_error, create_by, create_time, update_time FROM"
                         + " knowledge_document WHERE knowledge_base_id=? AND deleted=0 ORDER BY id"
                         + " DESC",
@@ -185,20 +186,55 @@ public class KnowledgeRepository {
     List<Map<String, Object>> chunks(long id) {
         return jdbc.queryForList(
                 "SELECT"
-                    + " id,document_id,chunk_index,content,token_count,embedding_status,page_number,create_time"
+                    + " id,document_id,chunk_index,content,token_count,embedding_status,"
+                    + " embedding_model,indexed_at,page_number,create_time"
                     + " FROM knowledge_chunk WHERE document_id=? ORDER BY chunk_index",
                 id);
     }
 
-    List<Map<String, Object>> search(String query, int limit) {
+    List<Map<String, Object>> search(
+            String query,
+            int limit,
+            long userId,
+            boolean administrator,
+            Long documentId) {
         String like = "%" + query + "%";
+        String documentFilter = documentId == null ? "" : " AND d.id=?";
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(like);
+        arguments.add(administrator ? 1 : 0);
+        arguments.add(userId);
+        if (documentId != null) {
+            arguments.add(documentId);
+        }
+        arguments.add(limit);
+        String sql = "SELECT c.id chunkId,c.document_id documentId,c.chunk_index"
+                + " chunkIndex,c.content,d.original_name documentName,c.page_number page,"
+                + " d.version,d.update_time updateTime FROM knowledge_chunk c"
+                + " JOIN knowledge_document d ON d.id=c.document_id WHERE c.content LIKE ? AND"
+                + " d.deleted=0 AND (?=1 OR d.visibility='PUBLIC' OR d.create_by=?)"
+                + documentFilter + " ORDER BY c.id DESC LIMIT ?";
+        return jdbc.queryForList(sql, arguments.toArray());
+    }
+
+    List<Long> indexableDocumentIds() {
         return jdbc.queryForList(
-                "SELECT c.id chunkId,c.document_id documentId,c.chunk_index"
-                    + " chunkIndex,c.content,d.original_name documentName FROM knowledge_chunk c"
-                    + " JOIN knowledge_document d ON d.id=c.document_id WHERE c.content LIKE ? AND"
-                    + " d.deleted=0 ORDER BY c.id DESC LIMIT ?",
-                like,
-                limit);
+                "SELECT id FROM knowledge_document WHERE deleted=0 AND status IN ('PARSED','INDEXED')"
+                        + " ORDER BY id",
+                Long.class);
+    }
+
+    void markIndexed(long documentId, List<Long> chunkIds, String model) {
+        for (Long chunkId : chunkIds) {
+            jdbc.update(
+                    "UPDATE knowledge_chunk SET embedding_status='INDEXED',embedding_model=?,"
+                            + "indexed_at=NOW() WHERE id=?",
+                    model,
+                    chunkId);
+        }
+        jdbc.update(
+                "UPDATE knowledge_document SET status='INDEXED',parse_error=NULL WHERE id=?",
+                documentId);
     }
 
     /**

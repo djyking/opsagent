@@ -4,20 +4,31 @@ import { request } from "@/api/http";
 const question = ref("");
 const answer = ref("");
 const references = ref<Record<string, unknown>[]>([]);
+const model = ref("");
+const latencyMs = ref(0);
+const error = ref("");
 const busy = ref(false);
 async function ask() {
   busy.value = true;
+  error.value = "";
   try {
     const r = await request<{
       answer: string;
       references: Record<string, unknown>[];
+      provider: string;
+      model: string;
+      latencyMs: number;
     }>({
       method: "POST",
-      url: "/api/rag/chat",
+      url: "/api/rag/ask",
       data: { question: question.value, topK: 5 },
     });
     answer.value = r.answer;
     references.value = r.references;
+    model.value = `${r.provider}/${r.model}`;
+    latencyMs.value = r.latencyMs;
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "问答请求失败";
   } finally {
     busy.value = false;
   }
@@ -43,7 +54,9 @@ async function ask() {
         {{ busy ? "检索中…" : "提问" }}
       </button>
     </form>
+    <p v-if="error" class="error-text">{{ error }}</p>
     <article v-if="answer" class="qa-answer">
+      <small>{{ model }} · {{ latencyMs }} ms</small>
       <p>{{ answer }}</p>
       <div class="reference-list">
         <span v-for="(item, index) in references" :key="index"

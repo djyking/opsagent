@@ -2,7 +2,7 @@
 
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-当前已形成“登录 → 工单 → Outbox → RabbitMQ → 平台审计”和“文档上传 → RabbitMQ → 重试/DLQ → 切片 → 检索 → RAG 引用”两条业务闭环。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。Elasticsearch 已运行但尚未接入 Java 检索，外部 LLM 未配置时明确使用 MySQL 检索降级。
+当前已形成“登录 → 工单 → Outbox → RabbitMQ → 平台审计”和“文档上传 → RabbitMQ → 切片 → OpenAI Embedding → Elasticsearch → 权限检索 → LLM → 真实来源”两条业务闭环。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于进程启动时注入。
 
 ## 项目结构
 
@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
 | RabbitMQ | `http://127.0.0.1:15672/` | 队列、消费者和 DLQ |
 | Prometheus | `http://127.0.0.1:9090/targets` | 六个 Java 服务抓取状态 |
 | Grafana | `http://127.0.0.1:3000/` | `OpsAgent Overview` 指标面板 |
-| Elasticsearch | `http://127.0.0.1:9200/_cluster/health` | 仅验证集群，业务尚未使用 |
+| Elasticsearch | `http://127.0.0.1:9200/_cluster/health` | `dense_vector` 知识检索索引 |
 
 账号和密码不写入 Git 文档，统一查看本机仓库外文件 `D:\middleware\docs\OpsAgent本地地址与密码.md`。
 
@@ -80,7 +80,11 @@ POST /api/knowledge/bases/{id}/documents
 POST /api/knowledge/documents/{id}/parse
 GET  /api/knowledge/parse-tasks/{id}
 GET  /api/knowledge/documents/{id}/chunks
-POST /api/rag/chat
+POST /api/rag/ask
+POST /api/rag/chat                         兼容旧客户端
+GET  /api/rag/admin/providers              ADMIN，脱敏配置状态
+POST /api/rag/admin/providers/{name}/probe ADMIN，真实连通性诊断
+POST /api/knowledge/internal/reindex       ADMIN，全量重新向量化
 GET  /api/platform/admin/audits
 ```
 
@@ -92,7 +96,17 @@ GET  /api/platform/admin/audits
 
 解析 API 创建 `QUEUED` 任务并发布到 RabbitMQ；消费者最多尝试三次，成功后文档为 `PARSED`、任务为 `SUCCESS`，最终失败时任务为 `FAILED` 且消息进入 DLQ。Tika 文件读取在数据库事务外执行，切片与幂等记录使用短事务保存。
 
-问答先在当前工单（可选限定单个文档）内读取有限候选切片，再进行中英文关键词评分并选取 Top K。默认不调用外部模型，会明确返回本地占位行为；配置 OpenAI 兼容服务后才会访问 `/chat/completions`。
+问答默认经过以下链路：
+
+```text
+Document → Parse/Chunk → text-embedding-3-small → Elasticsearch dense_vector
+Question → 同模型 Embedding → RBAC/文档范围过滤 → TopK/最低相似度
+→ 版本化 YAML Prompt → OpenAI / DeepSeek / Kimi → Citation 校验 → Answer + Sources
+```
+
+OpenAI 使用 Responses API，DeepSeek 和 Kimi 使用兼容 Chat Completions。Prompt 位于 `ops-rag-service/src/main/resources/prompts/rag-answer.yml`。返回来源完全由真实检索结果生成；模型声明但检索结果中不存在的 `[chunk:id]` 会被剔除。问题最大 2000 字符，默认 TopK 5、最大 20、上下文 16000 字符、每用户每分钟 20 次。
+
+`POST /api/rag/ask` 可选传 `documentId`，用于把问答严格限定在用户有权访问的单个文档。文档访问规则为：`PUBLIC` 对已认证用户可见，`PRIVATE` 仅创建者和 ADMIN 可见；权限过滤在内容进入 Prompt 之前完成。
 
 ## 配置
 
@@ -102,6 +116,7 @@ GET  /api/platform/admin/audits
 OPS_AUTH_DB_URL / OPS_AUTH_DB_USERNAME / OPS_AUTH_DB_PASSWORD
 OPS_TICKET_DB_URL / OPS_TICKET_DB_USERNAME / OPS_TICKET_DB_PASSWORD
 OPS_KNOWLEDGE_DB_URL / OPS_KNOWLEDGE_DB_USERNAME / OPS_KNOWLEDGE_DB_PASSWORD
+OPS_RAG_DB_URL / OPS_RAG_DB_USERNAME / OPS_RAG_DB_PASSWORD
 OPS_PLATFORM_DB_URL / OPS_PLATFORM_DB_USERNAME / OPS_PLATFORM_DB_PASSWORD
 OPS_JWT_SECRET                 至少 32 个 UTF-8 字节
 OPS_UPLOAD_DIR                 默认 ./data/uploads
@@ -112,24 +127,35 @@ NACOS_SERVER_ADDR              默认 localhost:8848
 SENTINEL_ENABLED               默认 false
 SENTINEL_EAGER                 默认 false
 SENTINEL_DASHBOARD             默认 localhost:8858
-OPS_ES_ENABLED                 默认 false
-OPS_LLM_ENABLED                默认 false
-OPS_LLM_BASE_URL / OPS_LLM_API_KEY / OPS_LLM_MODEL
+OPS_VECTOR_ENABLED             是否启用 Embedding/向量检索
+OPS_ES_URL / OPS_ES_KNOWLEDGE_INDEX / OPS_VECTOR_MINIMUM_SCORE
+OPS_AI_ENABLED / OPS_AI_PROVIDER
+OPENAI_API_KEY / OPENAI_MODEL / OPENAI_EMBEDDING_MODEL
+DEEPSEEK_API_KEY / DEEPSEEK_MODEL
+MOONSHOT_API_KEY / MOONSHOT_MODEL
+OPS_AI_TIMEOUT_SECONDS / OPS_AI_MAX_ATTEMPTS / OPS_AI_MAX_OUTPUT_TOKENS
 ```
 
 密钥和生产数据库密码不要写入仓库。PowerShell 本地示例：
 
 ```powershell
 $env:OPS_JWT_SECRET = '请替换为至少32字节的随机开发密钥'
+$env:OPS_AI_PROVIDER = 'openai' # openai、deepseek 或 kimi，修改后重启 RAG 服务
 ```
+
+本机启动脚本从 `C:\Users\77190\Desktop\api-key.txt` 解析三个 Key，只写入子进程环境且不打印值；还会读取当前 Windows HTTPS 代理供 Java 访问外部 API。仓库、Nacos、数据库、前端和日志均不保存真实 Key。生产环境应改用 Vault、Kubernetes Secret 或云密钥管理服务。
 
 ## 数据库与容器
 
-- 全新开发库：Compose 首次创建 MySQL 卷时按文件名自动执行 `sql/01` 至 `sql/07` 和 `sql/init_data.sql`。
+- 全新开发库：Compose 首次创建 MySQL 卷时按文件名自动执行 `sql/01` 至 `sql/08` 和 `sql/init_data.sql`。
 - Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
 - 本地演示账号由 SQL 初始化，账号列表及本地密码只记录在仓库外密码文档中。
 
 `compose.yaml` 只包含中间件：MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana，不包含 Java 服务。
+
+`ops_rag.ai_usage_log` 仅记录用户 ID、Provider、模型、问题 SHA-256、Token、耗时、成功状态和脱敏错误码，不保存问题正文、Prompt、回答或 Key。
+
+解析新文档时，启用向量功能会自动生成 Embedding 并索引。全量重新向量化会把既有文档内容发送给外部 Embedding Provider，必须先完成数据分级和出境/第三方处理审批；未获批准时保留 MySQL 权限关键词降级，不影响历史文档的本地检索。
 
 ```powershell
 docker compose up -d

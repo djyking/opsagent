@@ -3,6 +3,10 @@ server:
 spring:
   application:
     name: ops-rag-service
+  datasource:
+    url: ${OPS_RAG_DB_URL:jdbc:mysql://localhost:3306/ops_rag?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${OPS_RAG_DB_USERNAME:root}
+    password: ${OPS_RAG_DB_PASSWORD:}
   config:
     import: optional:nacos:${spring.application.name}.yaml
   cloud:
@@ -27,11 +31,32 @@ ops:
       - /actuator/prometheus
   rag:
     knowledge-url: ${OPS_KNOWLEDGE_URL:}
-    elasticsearch-enabled: ${OPS_ES_ENABLED:false}
-    llm-enabled: ${OPS_LLM_ENABLED:false}
-    llm-base-url: ${OPS_LLM_BASE_URL:}
-    llm-api-key: ${OPS_LLM_API_KEY:}
-    llm-model: ${OPS_LLM_MODEL:}
+    top-k: ${OPS_RAG_TOP_K:5}
+    maximum-top-k: ${OPS_RAG_MAX_TOP_K:20}
+    context-character-budget: ${OPS_RAG_CONTEXT_BUDGET:16000}
+    requests-per-minute: ${OPS_RAG_REQUESTS_PER_MINUTE:20}
+  ai:
+    enabled: ${OPS_AI_ENABLED:false}
+    provider: ${OPS_AI_PROVIDER:deepseek}
+    timeout-seconds: ${OPS_AI_TIMEOUT_SECONDS:90}
+    maximum-attempts: ${OPS_AI_MAX_ATTEMPTS:3}
+    max-output-tokens: ${OPS_AI_MAX_OUTPUT_TOKENS:1200}
+    providers:
+      openai:
+        base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+        api-key: ${OPENAI_API_KEY:}
+        model: ${OPENAI_MODEL:gpt-5.6-luna}
+        api-style: responses
+      deepseek:
+        base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+        api-key: ${DEEPSEEK_API_KEY:}
+        model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+        api-style: chat-completions
+      kimi:
+        base-url: ${MOONSHOT_BASE_URL:https://api.moonshot.cn/v1}
+        api-key: ${MOONSHOT_API_KEY:}
+        model: ${MOONSHOT_MODEL:kimi-k2.6}
+        api-style: chat-completions
 management:
   endpoints:
     web:

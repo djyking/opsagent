@@ -124,17 +124,23 @@ export const aiApi = {
       answer: string;
       references: AiReference[];
       model: string;
+      provider: string;
+      latencyMs: number;
     }>({
       method: "POST",
-      url: "/api/rag/chat",
-      data: { question: data.question, topK: data.topK || 5 },
+      url: "/api/rag/ask",
+      data: {
+        question: data.question,
+        topK: data.topK || 5,
+        documentId: data.documentId,
+      },
     });
     return {
       questionId: Date.now(),
       ticketId,
       answer: result.answer,
-      modelName: result.model,
-      costTimeMs: 0,
+      modelName: `${result.provider}/${result.model}`,
+      costTimeMs: result.latencyMs,
       references: result.references,
     } as AiAnswer;
   },
