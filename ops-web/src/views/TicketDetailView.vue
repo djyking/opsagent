@@ -34,6 +34,17 @@ import BaseModal from "@/components/BaseModal.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import AnswerContent from "@/components/AnswerContent.vue";
 import RagSources from "@/components/RagSources.vue";
+import PriorityIndicator from "@/components/PriorityIndicator.vue";
+import LoadingState from "@/components/LoadingState.vue";
+import EmptyState from "@/components/EmptyState.vue";
+import InlineError from "@/components/InlineError.vue";
+import DetailHeader from "@/components/DetailHeader.vue";
+import DescriptionList from "@/components/DescriptionList.vue";
+import FormField from "@/components/FormField.vue";
+import TechnicalMetadata from "@/components/TechnicalMetadata.vue";
+import { formatDateTime } from "@/utils/datetime";
+import { operationLabel, statusLabel } from "@/ui/status-map";
+import { parseTicketDescription } from "@/utils/ticket-description";
 
 type TicketAction =
   | "accept"
@@ -58,6 +69,7 @@ const workRecords = ref<TicketWorkRecord[]>([]);
 const trace = ref<TicketTrace>();
 const sla = ref<Record<string, unknown>>();
 const traceOpen = ref(false);
+const activeTab = ref<"overview" | "documents" | "records" | "activity">("overview");
 const documents = ref<DocumentRecord[]>([]);
 const questions = ref<AiQuestion[]>([]);
 const loading = ref(true);
@@ -82,6 +94,10 @@ const isAssignee = computed(
 const canUpload = computed(
   () => auth.isAdmin || isOwner.value || isAssignee.value,
 );
+const descriptionParts = computed(() => parseTicketDescription(ticket.value?.description));
+const technicalMetadata = computed<Record<string, string | number | boolean>>(() => descriptionParts.value.metadata);
+const alertName = computed(() => descriptionParts.value.alertName || "未提供");
+const affectedService = computed(() => descriptionParts.value.affectedService || ticket.value?.affectedCiCode || "未关联");
 const availableActions = computed<TicketAction[]>(() => {
   if (!ticket.value) return [];
   const operator = isAssignee.value || auth.isAdmin;
@@ -316,63 +332,42 @@ const workRecordLabels: Record<WorkRecordType, string> = {
 onMounted(load);
 </script>
 <template>
-  <div v-if="loading" class="loading-state page-loading">正在加载工单详情…</div>
+  <LoadingState v-if="loading" class="page-loading" text="正在加载工单详情…" />
   <div v-else-if="ticket" class="detail-page">
-    <button class="text-button back-link" @click="router.push('/tickets')">
-      <ArrowLeft :size="17" />返回工单列表
-    </button>
-    <section class="ticket-hero">
-      <div class="ticket-hero-main">
-        <div class="detail-badges">
-          <StatusBadge :value="ticket.priority" /><StatusBadge
-            :value="ticket.status"
-          />
-        </div>
-        <span class="ticket-number">{{ ticket.ticketNo }}</span>
-        <h2>{{ ticket.title }}</h2>
-        <p>{{ ticket.description }}</p>
-      </div>
-      <div class="ticket-meta">
-        <div>
-          <span>创建人</span><strong>#{{ ticket.creatorId }}</strong>
-        </div>
-        <div>
-          <span>当前处理人</span
-          ><strong>{{
-            ticket.assigneeId ? "#" + ticket.assigneeId : "尚未分配"
-          }}</strong>
-        </div>
-        <div>
-          <span>受影响 CI</span><strong>{{ ticket.affectedCiCode || "未关联" }}</strong>
-        </div>
-        <div>
-          <span>最后更新</span
-          ><strong>{{
-            new Date(ticket.updateTime).toLocaleString("zh-CN")
-          }}</strong>
-        </div>
-        <div v-if="availableActions.length" class="ticket-actions">
-          <button
-            v-for="nextAction in availableActions"
-            :key="nextAction"
-            class="button"
-            :class="nextAction === 'suspend' || nextAction === 'reopen' ? 'secondary' : 'primary'"
-            @click="action = nextAction"
-          >
-            <Check :size="18" />{{ actionLabels[nextAction] }}
-          </button>
-        </div>
-      </div>
-    </section>
-    <div v-if="error" class="inline-error">
-      {{ error }}<button @click="error = ''">×</button>
-    </div>
-    <div class="detail-grid">
+    <DetailHeader :identifier="ticket.ticketNo" :title="ticket.title">
+      <template #back><button class="text-button" @click="router.push('/tickets')"><ArrowLeft :size="16" />返回工单列表</button></template>
+      <template #badges><PriorityIndicator :value="ticket.priority" /><StatusBadge :value="ticket.status" /></template>
+      <template #meta>
+        <dl class="ticket-header-meta">
+          <div><dt>受影响服务</dt><dd><code>{{ affectedService }}</code></dd></div>
+          <div><dt>当前处理人</dt><dd>{{ ticket.assigneeId ? "#" + ticket.assigneeId : "待分配" }}</dd></div>
+          <div><dt>最后更新</dt><dd>{{ formatDateTime(ticket.updateTime) }}</dd></div>
+        </dl>
+      </template>
+      <template #actions>
+        <button v-if="availableActions.length === 1" class="button" :class="availableActions[0] === 'suspend' || availableActions[0] === 'reopen' ? 'secondary' : 'primary'" @click="action = availableActions[0]"><Check :size="16" />{{ actionLabels[availableActions[0]] }}</button>
+        <details v-else-if="availableActions.length" class="ticket-action-menu"><summary class="button primary">处理工单</summary><div><button v-for="nextAction in availableActions" :key="nextAction" @click="action = nextAction">{{ actionLabels[nextAction] }}</button></div></details>
+      </template>
+      <template #tabs><nav class="ticket-detail-tabs" aria-label="工单详情视图"><button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">概览</button><button :class="{ active: activeTab === 'documents' }" @click="activeTab = 'documents'">文档与问答</button><button :class="{ active: activeTab === 'records' }" @click="activeTab = 'records'">处置记录</button><button :class="{ active: activeTab === 'activity' }" @click="activeTab = 'activity'">活动</button></nav></template>
+    </DetailHeader>
+    <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
+    <div class="detail-grid" :class="{ 'detail-grid-full': activeTab === 'documents' || activeTab === 'records' }">
       <div class="detail-main">
-        <section class="panel">
+        <section v-show="activeTab === 'overview'" class="panel ticket-overview-panel">
+          <header class="panel-header"><div><h3>工单概览</h3><p>问题、服务与责任信息</p></div></header>
+          <DescriptionList class="ticket-overview-list">
+            <div><dt>告警名称</dt><dd><code>{{ alertName }}</code></dd></div>
+            <div v-if="descriptionParts.summary"><dt>告警摘要</dt><dd>{{ descriptionParts.summary }}</dd></div>
+            <div><dt>问题描述</dt><dd>{{ descriptionParts.text }}</dd></div>
+            <div><dt>受影响服务</dt><dd><code>{{ affectedService }}</code></dd></div>
+            <div><dt>创建人</dt><dd>#{{ ticket.creatorId }}</dd></div>
+            <div><dt>当前处理人</dt><dd>{{ ticket.assigneeId ? '#' + ticket.assigneeId : '待分配' }}</dd></div>
+          </DescriptionList>
+          <TechnicalMetadata :metadata="technicalMetadata" :preview-count="3" />
+        </section>
+        <section v-show="activeTab === 'documents'" class="panel">
           <header class="panel-header">
             <div>
-              <span class="eyebrow">DOCUMENTS</span>
               <h3>关联文档</h3>
             </div>
             <span class="panel-count">{{ documents.length }} 个文件</span>
@@ -450,10 +445,9 @@ onMounted(load);
             </article>
           </div>
         </section>
-        <section class="panel ai-panel">
+        <section v-show="activeTab === 'documents'" class="panel ai-panel">
           <header class="panel-header">
             <div>
-              <span class="eyebrow">DOCUMENT Q&A</span>
               <h3>文档智能问答</h3>
             </div>
             <Bot :size="26" />
@@ -511,18 +505,16 @@ onMounted(load);
             </article>
           </div>
         </section>
-        <section class="panel work-record-panel">
+        <section v-show="activeTab === 'records'" class="panel work-record-panel">
           <header class="panel-header">
-            <div><span class="eyebrow">RESOLUTION WORKBENCH</span><h3>结构化处置记录</h3></div>
+            <div><h3>结构化处置记录</h3></div>
             <Wrench :size="22" />
           </header>
-          <form class="work-record-form" @submit.prevent="addWorkRecord">
-            <select v-model="workRecordType">
-              <option v-for="(label, value) in workRecordLabels" :key="value" :value="value">{{ label }}</option>
-            </select>
-            <textarea v-model.trim="workRecordContent" maxlength="2000" rows="3" placeholder="记录诊断依据、执行动作、根因或验证结论…" />
-            <input v-model.trim="workRecordEvidence" maxlength="1000" placeholder="证据、命令或监控链接（选填）" />
-            <button class="button primary" :disabled="!workRecordContent.trim() || busy === 'work-record'">{{ busy === "work-record" ? "保存中…" : "保存处置记录" }}</button>
+          <form class="record-editor" @submit.prevent="addWorkRecord">
+            <FormField label="记录类型" class="record-editor__type"><select v-model="workRecordType"><option v-for="(label, value) in workRecordLabels" :key="value" :value="value">{{ label }}</option></select></FormField>
+            <FormField label="处置内容" class="record-editor__content"><textarea v-model.trim="workRecordContent" maxlength="2000" rows="3" placeholder="记录诊断依据、执行动作、根因或验证结论…" /></FormField>
+            <FormField label="证据、命令或监控链接（选填）" class="record-editor__evidence"><input v-model.trim="workRecordEvidence" maxlength="1000" placeholder="输入证据、命令或监控链接" /></FormField>
+            <div class="record-editor__actions"><button class="button primary" :disabled="!workRecordContent.trim() || busy === 'work-record'">{{ busy === "work-record" ? "保存中…" : "保存处置记录" }}</button></div>
           </form>
           <div v-if="workRecords.length" class="work-record-list">
             <article v-for="record in workRecords" :key="record.id">
@@ -532,10 +524,9 @@ onMounted(load);
           </div>
           <div v-else class="empty-state small-empty">还没有结构化处置记录</div>
         </section>
-        <section class="panel comment-panel">
+        <section v-show="activeTab === 'records'" class="panel comment-panel">
           <header class="panel-header">
             <div>
-              <span class="eyebrow">COLLABORATION</span>
               <h3>处理记录与回复</h3>
             </div>
             <MessageSquareText :size="22" />
@@ -563,20 +554,19 @@ onMounted(load);
           </form>
         </section>
       </div>
-      <aside class="detail-aside">
-        <section v-if="sla" class="panel sla-detail-card">
-          <header class="panel-header"><div><span class="eyebrow">SERVICE LEVEL</span><h3>SLA 计时</h3></div><Clock3 :size="20" /></header>
-          <dl><div><dt>响应状态</dt><dd>{{ sla.responseStatus }}</dd></div><div><dt>解决状态</dt><dd>{{ sla.resolutionStatus }}</dd></div><div><dt>响应截止</dt><dd>{{ new Date(String(sla.responseDeadline)).toLocaleString("zh-CN") }}</dd></div><div><dt>解决截止</dt><dd>{{ new Date(String(sla.resolutionDeadline)).toLocaleString("zh-CN") }}</dd></div><div><dt>升级级别</dt><dd>L{{ sla.escalationLevel }}</dd></div></dl>
+      <aside class="detail-aside" v-show="activeTab === 'overview' || activeTab === 'activity'">
+        <section v-if="sla && activeTab === 'overview'" class="panel sla-detail-card">
+          <header class="panel-header"><div><h3>SLA 计时</h3></div><Clock3 :size="20" /></header>
+          <DescriptionList><div><dt>响应状态</dt><dd>{{ statusLabel(sla.responseStatus) }}</dd></div><div><dt>解决状态</dt><dd>{{ statusLabel(sla.resolutionStatus) }}</dd></div><div><dt>响应截止</dt><dd>{{ formatDateTime(String(sla.responseDeadline)) }}</dd></div><div><dt>解决截止</dt><dd>{{ formatDateTime(String(sla.resolutionDeadline)) }}</dd></div><div><dt>升级级别</dt><dd><code>L{{ sla.escalationLevel }}</code></dd></div></DescriptionList>
         </section>
-        <section class="panel trace-summary-panel">
-          <header class="panel-header"><div><span class="eyebrow">BACKEND TRACE</span><h3>后台数据链路</h3></div><Database :size="20" /></header>
+        <section v-if="activeTab === 'activity'" class="panel trace-summary-panel">
+          <header class="panel-header"><div><h3>技术数据链路</h3><p>真实业务表与事件投递记录</p></div><Database :size="20" /></header>
           <div class="trace-metrics"><span><strong>{{ trace?.assignments.length || 0 }}</strong>ticket_assignment</span><span><strong>{{ trace?.operations.length || 0 }}</strong>ticket_operation_log</span><span><strong>{{ trace?.outboxEvents.length || 0 }}</strong>event_outbox</span></div>
           <button class="button secondary trace-button" @click="traceOpen = true">查看真实表记录</button>
         </section>
-        <section class="panel timeline-panel">
+        <section v-if="activeTab === 'activity'" class="panel timeline-panel">
           <header class="panel-header">
             <div>
-              <span class="eyebrow">ACTIVITY</span>
               <h3>状态时间线</h3>
             </div>
             <Clock3 :size="21" />
@@ -585,15 +575,15 @@ onMounted(load);
             <li v-for="log in logs" :key="log.id">
               <i />
               <div>
-                <strong>{{ log.operationType }}</strong
+                <strong :title="log.operationType">{{ operationLabel(log.operationType) }}</strong
                 ><span
-                  >{{ log.fromStatus ? `${log.fromStatus} → ` : ""
-                  }}{{ log.toStatus }}</span
+                   >{{ log.fromStatus ? `${statusLabel(log.fromStatus)} → ` : ""
+                   }}{{ statusLabel(log.toStatus) }}</span
                 >
                 <p v-if="log.remark">{{ log.remark }}</p>
                 <time
                   >#{{ log.operatorId }} ·
-                  {{ new Date(log.createTime).toLocaleString("zh-CN") }}</time
+                   {{ formatDateTime(log.createTime) }}</time
                 >
               </div>
             </li>
@@ -651,5 +641,5 @@ onMounted(load);
       </div>
     </BaseModal>
   </div>
-  <div v-else class="empty-state page-loading">工单不存在或无权访问</div>
+  <EmptyState v-else class="page-loading" title="工单不存在或无权访问" />
 </template>

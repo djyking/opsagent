@@ -46,3 +46,7 @@ build/
 
 ### VS Code ###
 .vscode/
+/ui-audit-output/
+/ui-final-output/
+/ui-consistency-final/
+/ui-final-polish-output/

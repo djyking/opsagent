@@ -1,0 +1,1 @@
+import{_ as e,o,c as t,K as c}from"./index-Da9_i_Iz.js";const r={},n={class:"oa-description-list"};function a(s,i){return o(),t("dl",n,[c(s.$slots,"default")])}const l=e(r,[["render",a]]);export{l as D};

@@ -6,6 +6,14 @@ import { adminApi } from "@/api/modules";
 import type { NotificationRecord, PageResponse } from "@/types/api";
 import StatusBadge from "@/components/StatusBadge.vue";
 import PaginationBar from "@/components/PaginationBar.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import FilterBar from "@/components/FilterBar.vue";
+import ListSurface from "@/components/ListSurface.vue";
+import EmptyState from "@/components/EmptyState.vue";
+import InlineError from "@/components/InlineError.vue";
+import LoadingState from "@/components/LoadingState.vue";
+import { formatDateTime, formatRelativeTime } from "@/utils/datetime";
+import { operationLabel } from "@/ui/status-map";
 const data = ref<PageResponse<NotificationRecord>>({
   records: [],
   total: 0,
@@ -16,6 +24,7 @@ const page = ref(1);
 const status = ref("");
 const unreadTotal = ref(0);
 const error = ref("");
+const loading = ref(false);
 const busy = ref<number>();
 const router = useRouter();
 const groups = computed(() => {
@@ -35,7 +44,13 @@ const groups = computed(() => {
   }
   return [...result.entries()].map(([label, records]) => ({ label, records }));
 });
+function localizeContent(value: string) {
+  const notificationOperations: Record<string, string> = { CREATED: "创建", CLAIMED: "接单", PROCESSING: "开始处理", WAITING_CONFIRM: "提交业务确认", RESOLVED: "解决", CLOSED: "关闭" };
+  return value.replace(/['\"]([A-Z][A-Z0-9_]*)['\"]/g, (_match, raw) => `“${notificationOperations[raw] || operationLabel(raw)}”`);
+}
 async function load() {
+  loading.value = true;
+  error.value = "";
   try {
     const result = await adminApi.notifications({
       pageNum: page.value,
@@ -46,6 +61,8 @@ async function load() {
     unreadTotal.value = result.unreadTotal;
   } catch (e) {
     error.value = e instanceof Error ? e.message : "加载失败";
+  } finally {
+    loading.value = false;
   }
 }
 async function setFilter(value: string) {
@@ -79,44 +96,39 @@ onMounted(load);
 </script>
 <template>
   <div class="stack-page">
-    <section class="page-lead">
-      <div>
-        <span class="eyebrow">NOTIFICATION RECORDS</span>
-        <h2>通知中心</h2>
-        <p>查看工单状态事件生成的站内通知处理记录。</p>
-      </div>
-      <button class="button secondary" :disabled="!unreadTotal || busy === -1" @click="markAllRead">
-        <CheckCheck :size="16" />全部标记已读（{{ unreadTotal }}）
-      </button>
-    </section>
-    <section class="panel">
-      <div class="record-toolbar">
+    <PageHeader title="通知中心" description="查看工单状态事件生成的站内通知处理记录">
+      <template #meta><span>{{ unreadTotal }} 条未读</span></template>
+      <template #actions>
+        <button class="button secondary" :disabled="!unreadTotal || busy === -1" @click="markAllRead">
+          <CheckCheck :size="16" />全部标记已读
+        </button>
+      </template>
+    </PageHeader>
+    <ListSurface class="notification-surface">
+      <template #toolbar><FilterBar>
+        <div class="record-toolbar">
         <button :class="{ active: !status }" @click="setFilter('')">全部</button>
         <button :class="{ active: status === 'UNREAD' }" @click="setFilter('UNREAD')"><Mail :size="14" />未读</button>
         <button :class="{ active: status === 'READ' }" @click="setFilter('READ')"><CheckCircle2 :size="14" />已读</button>
-      </div>
-      <div v-if="error" class="inline-error">{{ error }}</div>
-      <div v-if="!data.records.length" class="empty-state">
-        <Bell :size="36" /><strong>暂无通知记录</strong>
-      </div>
+        </div>
+      </FilterBar></template>
+      <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
+      <LoadingState v-if="loading && !data.records.length" text="正在加载通知…" />
+      <EmptyState v-else-if="!data.records.length" title="暂无通知记录" description="新通知会按日期归入这里" :icon="Bell" />
       <div v-else class="notification-groups">
         <section v-for="group in groups" :key="group.label" class="notification-group">
           <h3>{{ group.label }}</h3>
         <article v-for="item in group.records" :key="item.id" class="notification-row">
-          <i v-if="item.status === 'UNREAD'" class="notification-unread-dot" />
           <div class="record-icon"><Bell :size="20" /></div>
           <div class="record-body">
             <header>
               <strong>{{ item.title }}</strong
               ><StatusBadge :value="item.status" />
             </header>
-            <p>{{ item.content }}</p>
-            <span
-              >工单 #{{ item.ticketId }} · 接收人 #{{ item.receiver }} ·
-              {{ new Date(item.createTime).toLocaleString("zh-CN") }}</span
-            >
+            <p>{{ localizeContent(item.content) }}</p>
+            <span>工单 #{{ item.ticketId }} · 接收人 #{{ item.receiver }} · <time :title="formatDateTime(item.createTime)">{{ formatRelativeTime(item.createTime) }}</time></span>
           </div>
-          <div v-if="item.status === 'UNREAD'" class="row-actions">
+          <div v-if="item.status === 'UNREAD'" class="row-actions reveal-on-row">
             <button
               class="icon-button success"
               title="标记已读"
@@ -127,7 +139,7 @@ onMounted(load);
             </button>
             <button class="icon-button" title="进入对应工单" @click="router.push(`/tickets/${item.ticketId}`)"><ExternalLink :size="17" /></button>
           </div>
-          <div v-else class="row-actions"><button class="icon-button" title="标记未读" :disabled="busy === item.id" @click="updateStatus(item, 'UNREAD')"><Mail :size="17" /></button><button class="icon-button" title="进入对应工单" @click="router.push(`/tickets/${item.ticketId}`)"><ExternalLink :size="17" /></button></div>
+          <div v-else class="row-actions reveal-on-row"><button class="icon-button" title="标记未读" :disabled="busy === item.id" @click="updateStatus(item, 'UNREAD')"><Mail :size="17" /></button><button class="icon-button" title="进入对应工单" @click="router.push(`/tickets/${item.ticketId}`)"><ExternalLink :size="17" /></button></div>
         </article>
         </section>
       </div>
@@ -143,6 +155,6 @@ onMounted(load);
           }
         "
       />
-    </section>
+    </ListSurface>
   </div>
 </template>

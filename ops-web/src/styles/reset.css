@@ -1,0 +1,12 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #app { min-width: 320px; min-height: 100%; }
+html { background: var(--oa-bg-canvas); }
+body { margin: 0; color: var(--oa-text-primary); background: var(--oa-bg-canvas); font-family: var(--oa-font-sans); font-size: var(--oa-font-size-body); line-height: var(--oa-line-height-body); font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { box-sizing: border-box; font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+a { color: inherit; text-decoration: none; }
+code, pre, kbd { font-family: var(--oa-font-mono); }
+svg { flex: none; }
+::selection { color: var(--oa-text-primary); background: var(--oa-primary-soft); }
+*:focus-visible { outline: 2px solid color-mix(in srgb, var(--oa-primary) 38%, transparent); outline-offset: 2px; }

@@ -7,7 +7,6 @@ import {
   Bot,
   CheckCircle2,
   Clock3,
-  Plus,
   Radio,
   RefreshCw,
   ShieldAlert,
@@ -17,6 +16,7 @@ import PageHeader from "@/components/PageHeader.vue";
 import MetricStrip from "@/components/MetricStrip.vue";
 import type { MetricStripItem } from "@/components/MetricStrip.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
+import PriorityIndicator from "@/components/PriorityIndicator.vue";
 import { itsmApi, ticketApi } from "@/api/modules";
 import { request } from "@/api/http";
 import type { MonitorSummary, Ticket } from "@/types/api";
@@ -175,15 +175,12 @@ onMounted(load);
         <button class="button secondary" :disabled="loading" @click="load">
           <RefreshCw :size="15" />{{ loading ? "刷新中…" : "刷新" }}
         </button>
-        <RouterLink class="button primary" to="/tickets?create=1">
-          <Plus :size="16" />新建工单
-        </RouterLink>
       </template>
     </PageHeader>
 
     <p v-if="error" class="inline-error">{{ error }}</p>
 
-    <MetricStrip :items="overviewMetrics" label="核心运维指标" />
+    <MetricStrip class="oa-dashboard-metrics" :items="overviewMetrics" label="核心运维指标" />
 
     <section class="oa-dashboard-grid">
       <article class="panel oa-active-work">
@@ -195,14 +192,14 @@ onMounted(load);
         <div v-else-if="!activeTickets.length" class="empty-state small-empty">
           <CheckCircle2 :size="28" /><strong>当前没有活跃工单</strong><span>所有问题均已闭环。</span>
         </div>
-        <div v-else class="responsive-table">
+        <div v-else class="dashboard-table-wrap">
           <table class="oa-compact-table">
-            <thead><tr><th>级别</th><th>工单</th><th>服务</th><th>状态</th><th>负责人</th><th>更新</th></tr></thead>
+            <thead><tr><th>级别</th><th>工单</th><th class="dashboard-service-column">服务</th><th>状态</th><th>负责人</th><th>更新</th></tr></thead>
             <tbody>
               <tr v-for="ticket in activeTickets" :key="ticket.id">
-                <td><StatusBadge :value="ticket.priority" /></td>
-                <td><RouterLink class="table-title" :to="`/tickets/${ticket.id}`"><strong>{{ ticket.title }}</strong><span>{{ ticket.ticketNo }}</span></RouterLink></td>
-                <td>{{ ticket.affectedCiCode || "未关联" }}</td>
+                <td><PriorityIndicator :value="ticket.priority" /></td>
+                <td><RouterLink class="table-title" :to="`/tickets/${ticket.id}`"><strong>{{ ticket.title }}</strong><span>{{ ticket.ticketNo }} · {{ ticket.affectedCiCode || "未关联服务" }}</span></RouterLink></td>
+                <td class="dashboard-service-column">{{ ticket.affectedCiCode || "未关联" }}</td>
                 <td><StatusBadge :value="ticket.status" /></td>
                 <td>{{ ticket.assigneeId ? `#${ticket.assigneeId}` : "待分配" }}</td>
                 <td>{{ formatTime(ticket.updateTime) }}</td>
@@ -215,7 +212,7 @@ onMounted(load);
       <article class="panel oa-brief">
         <header class="panel-header">
           <div><Bot :size="15" /><h3>实时关注</h3></div>
-          <span class="panel-count">AI 运维摘要</span>
+          <span class="panel-count">规则汇总</span>
         </header>
         <div class="oa-brief-body">
           <p class="oa-brief-note">基于实时业务数据 · 不自动执行变更</p>

@@ -7,6 +7,8 @@ import MetricStrip from "@/components/MetricStrip.vue";
 import type { MetricStripItem } from "@/components/MetricStrip.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
+import FormField from "@/components/FormField.vue";
+import InlineNotice from "@/components/InlineNotice.vue";
 
 const consistency = ref<Record<string, unknown>>({});
 const failedTasks = ref<Record<string, unknown>[]>([]);
@@ -152,10 +154,10 @@ onMounted(load);
       </div>
     </section>
 
-    <DetailPanel v-if="repairOpen" title="维护工具" subtitle="KNOWLEDGE INDEX" @close="repairOpen = false">
-      <section class="maintenance-drawer-copy"><Wrench :size="20" /><div><h3>单文档修复</h3><p>重新投递指定文档的索引事件，适用于失败任务或人工核查后的补偿。</p></div></section>
+    <DetailPanel v-if="repairOpen" title="维护工具" subtitle="单文档索引修复" @close="repairOpen = false">
+      <InlineNotice title="单文档修复">重新投递指定文档的索引事件，适用于失败任务或人工核查后的补偿。</InlineNotice>
       <form class="index-repair-form drawer-form" @submit.prevent="repair()">
-        <label>文档 ID<input v-model.number="repairDocumentId" min="1" type="number" placeholder="输入正整数文档 ID" /></label>
+        <FormField label="文档 ID" help="输入需要重新投递索引事件的文档编号"><input v-model.number="repairDocumentId" min="1" type="number" placeholder="输入正整数文档 ID" /></FormField>
         <div><button type="button" class="button secondary" @click="repairOpen = false">取消</button><button class="button primary" :disabled="Boolean(busy) || !repairDocumentId"><RotateCw :size="15" />重新索引</button></div>
       </form>
     </DetailPanel>

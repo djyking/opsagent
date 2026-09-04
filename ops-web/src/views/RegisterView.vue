@@ -3,6 +3,7 @@ import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { Activity, ArrowLeft, UserPlus, Eye, EyeOff } from "@lucide/vue";
 import { authApi } from "@/api/modules";
+import InlineError from "@/components/InlineError.vue";
 const router = useRouter();
 const form = ref({ username: "", displayName: "", password: "", confirm: "" });
 const showPassword = ref(false);
@@ -55,7 +56,7 @@ async function submit() {
             <ArrowLeft :size="16" /> 返回登录
           </button>
           <h2>创建账号</h2>
-          <p>密码长度为 6～72 位</p>
+          <p>创建用于登录 OpsAgent 工作台的账号</p>
         </div>
         <label
           >用户名<input
@@ -70,6 +71,7 @@ async function submit() {
             placeholder="选填" /></label
         ><label
           >密码
+          <small class="field-help">使用 6～72 位字符</small>
           <div class="password-field">
             <input
               v-model="form.password"
@@ -110,7 +112,7 @@ async function submit() {
               />
             </button></div
         ></label>
-        <p v-if="error" class="form-error">{{ error }}</p>
+        <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
         <button class="button primary auth-submit" :disabled="busy">
           <UserPlus :size="18" />{{ busy ? "创建中…" : "创建账号" }}
         </button>

@@ -11,6 +11,7 @@ import {
   EyeOff,
 } from "@lucide/vue";
 import { useAuthStore } from "@/stores/auth";
+import InlineError from "@/components/InlineError.vue";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -91,7 +92,7 @@ async function submit() {
               <EyeOff v-if="showPassword" :size="18" /><Eye v-else :size="18" />
             </button></div
         ></label>
-        <p v-if="error" class="form-error">{{ error }}</p>
+        <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
         <button class="button primary auth-submit" :disabled="busy">
           {{ busy ? "正在验证…" : "进入工作台" }} <ArrowRight :size="18" />
         </button>

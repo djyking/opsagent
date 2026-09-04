@@ -15,6 +15,8 @@ defineProps<{
   activeDomain: string;
   isAdmin: boolean;
   initials: string;
+  username: string;
+  roleLabel: string;
 }>();
 
 const emit = defineEmits<{
@@ -33,7 +35,7 @@ const primary: Array<{ domain: string; label: string; icon: Component }> = [
 <template>
   <aside class="app-rail" aria-label="产品域导航">
     <button class="rail-logo" title="OpsAgent" @click="emit('select', 'overview')">
-      <Activity :size="21" />
+      <Activity :size="16" :stroke-width="1.75" />
     </button>
     <nav>
       <button
@@ -43,8 +45,7 @@ const primary: Array<{ domain: string; label: string; icon: Component }> = [
         :title="item.label"
         @click="emit('select', item.domain)"
       >
-        <component :is="item.icon" :size="20" />
-        <span>{{ item.label }}</span>
+        <component :is="item.icon" :size="16" :stroke-width="1.75" />
       </button>
     </nav>
     <div class="rail-bottom">
@@ -54,7 +55,7 @@ const primary: Array<{ domain: string; label: string; icon: Component }> = [
         title="通知"
         @click="emit('select', 'notifications')"
       >
-        <Bell :size="20" /><span>通知</span>
+        <Bell :size="16" :stroke-width="1.75" />
       </button>
       <button
         v-if="isAdmin"
@@ -62,11 +63,15 @@ const primary: Array<{ domain: string; label: string; icon: Component }> = [
         title="系统"
         @click="emit('select', 'system')"
       >
-        <Settings :size="20" /><span>系统</span>
+        <Settings :size="16" :stroke-width="1.75" />
       </button>
-      <button class="rail-avatar" title="退出登录" @click="emit('logout')">
-        <span>{{ initials }}</span><LogOut :size="15" />
-      </button>
+      <details class="rail-user-menu">
+        <summary class="rail-avatar" title="账号菜单" aria-label="打开账号菜单">{{ initials }}</summary>
+        <div class="rail-user-popover">
+          <strong>{{ username }}</strong><small>{{ roleLabel }}</small>
+          <button @click="emit('logout')"><LogOut :size="16" :stroke-width="1.75" />退出登录</button>
+        </div>
+      </details>
     </div>
   </aside>
 </template>

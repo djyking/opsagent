@@ -1,0 +1,108 @@
+.oncall-current-grid {
+  display: grid;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: var(--oa-space-3);
+}
+
+.oncall-card {
+  display: flex;
+    gap: 15px;
+    align-items: center;
+    padding: 20px;
+}
+
+.oncall-card > span {
+  width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--oa-radius-raised);
+    color: var(--oa-bg-surface);
+    background: var(--oa-primary);
+}
+
+.oncall-card > span.secondary {
+  background: var(--oa-purple);
+}
+
+.oncall-card > div {
+  display: grid;
+    gap: 4px;
+}
+
+.oncall-card small,.oncall-card p {
+  margin: 0;
+    color: var(--oa-primary);
+}
+
+@media (max-width: 760px) {
+  .itsm-split,.oncall-current-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.oncall-current-item {
+  min-width: 0;
+    padding: 14px 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--oa-space-3);
+    border: 1px solid var(--oa-border-subtle);
+    border-radius: var(--oa-radius-md);
+    background: var(--oa-bg-surface);
+}
+
+.oncall-current-item > span {
+  width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    border-radius: var(--oa-radius-sm);
+    color: var(--oa-primary);
+    background: var(--oa-primary-soft);
+}
+
+.oncall-current-item.warning > span {
+  color: var(--oa-warning);
+    background: var(--oa-warning-soft);
+}
+
+.oncall-current-item div {
+  min-width: 0;
+}
+
+.oncall-current-item small {
+  color: var(--oa-text-tertiary);
+    font-size: var(--oa-font-xs);
+}
+
+.oncall-current-item strong {
+  margin-top: 2px;
+    display: block;
+    color: var(--oa-text-primary);
+    font-size: var(--oa-font-size-body);
+}
+
+.oncall-current-item p {
+  margin: 3px 0 0;
+    color: var(--oa-text-secondary);
+    font-size: var(--oa-font-xs);
+}
+
+.oncall-view-switch {
+  width: fit-content;
+}
+
+.oncall-schedule-surface {
+  overflow: hidden;
+    border: 1px solid var(--oa-border-subtle);
+    border-radius: var(--oa-radius-md);
+    background: var(--oa-bg-surface);
+}
+
+@media (max-width: 760px) {
+  .oncall-current-grid {
+    grid-template-columns: 1fr;
+  }
+}

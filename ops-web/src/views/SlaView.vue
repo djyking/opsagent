@@ -7,6 +7,11 @@ import MetricStrip from "@/components/MetricStrip.vue";
 import type { MetricStripItem } from "@/components/MetricStrip.vue";
 import PageHeader from "@/components/PageHeader.vue";
 import PriorityIndicator from "@/components/PriorityIndicator.vue";
+import InlineError from "@/components/InlineError.vue";
+import LoadingState from "@/components/LoadingState.vue";
+import EmptyState from "@/components/EmptyState.vue";
+import ListSurface from "@/components/ListSurface.vue";
+import { statusLabel } from "@/ui/status-map";
 
 type SlaRow = Record<string, unknown>;
 type SlaView = "all" | "risk" | "breached";
@@ -65,10 +70,6 @@ function fullRemaining(value: unknown) {
   return `${milliseconds < 0 ? "已超时" : "剩余"} ${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分`;
 }
 
-function statusLabel(value: unknown) {
-  return ({ COMPLETED: "已完成", BREACHED: "已超时", RUNNING: "计时中", PENDING: "待开始" } as Record<string, string>)[String(value)] || String(value || "—");
-}
-
 function statusIcon(value: unknown) {
   if (value === "COMPLETED") return CheckCircle2;
   if (value === "BREACHED") return AlertTriangle;
@@ -101,38 +102,40 @@ onBeforeUnmount(() => window.clearInterval(timer));
         <button class="button secondary" :disabled="loading" @click="load"><RefreshCw :size="15" />{{ loading ? "刷新中…" : "刷新" }}</button>
       </template>
     </PageHeader>
-    <p v-if="error" class="inline-error">{{ error }}</p>
+    <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
     <MetricStrip :items="metrics" label="SLA 核心指标" />
 
-    <section class="sla-controls" aria-label="SLA 筛选">
-      <div class="segmented-control">
-        <button :class="{ active: view === 'all' }" @click="view = 'all'">全部</button>
-        <button :class="{ active: view === 'risk' }" @click="view = 'risk'">风险</button>
-        <button :class="{ active: view === 'breached' }" @click="view = 'breached'">已超时</button>
-      </div>
-      <select v-model="priority" aria-label="按优先级筛选"><option value="">全部优先级</option><option value="URGENT">紧急</option><option value="HIGH">高</option><option value="MEDIUM">中</option><option value="LOW">低</option></select>
-      <select v-model="service" aria-label="按服务筛选"><option value="">全部服务</option><option v-for="item in services" :key="item" :value="item">{{ item }}</option></select>
-      <label class="sla-search"><Search :size="15" /><input v-model.trim="keyword" placeholder="搜索工单或服务" /></label>
-    </section>
-
-    <section class="panel table-panel sla-table-panel">
-      <div class="responsive-table">
+    <ListSurface class="sla-data-surface">
+      <template #toolbar>
+        <section class="sla-controls" aria-label="SLA 筛选">
+          <div class="segmented-control">
+            <button :class="{ active: view === 'all' }" @click="view = 'all'">全部</button>
+            <button :class="{ active: view === 'risk' }" @click="view = 'risk'">风险</button>
+            <button :class="{ active: view === 'breached' }" @click="view = 'breached'">已超时</button>
+          </div>
+          <select v-model="priority" aria-label="按优先级筛选"><option value="">全部优先级</option><option value="URGENT">紧急</option><option value="HIGH">高</option><option value="MEDIUM">中</option><option value="LOW">低</option></select>
+          <select v-model="service" aria-label="按服务筛选"><option value="">全部服务</option><option v-for="item in services" :key="item" :value="item">{{ item }}</option></select>
+          <label class="sla-search"><Search :size="15" /><input v-model.trim="keyword" placeholder="搜索工单或服务" /></label>
+        </section>
+      </template>
+      <LoadingState v-if="loading && !rows.length" text="正在加载 SLA 计时…" />
+      <div v-else class="responsive-table">
         <table class="sla-table">
           <thead><tr><th>工单</th><th>优先级</th><th>受影响服务</th><th>响应 SLA</th><th>解决 SLA</th><th>时限</th><th>升级</th></tr></thead>
           <tbody>
             <tr v-for="row in filteredRows" :key="String(row.id)">
-              <td><RouterLink class="table-title" :to="`/tickets/${row.ticketId}`"><strong>{{ row.title }}</strong><span>{{ row.ticketNo }}</span></RouterLink></td>
+              <td><RouterLink class="table-title" :to="'/tickets/' + row.ticketId"><strong>{{ row.title }}</strong><span>{{ row.ticketNo }}</span></RouterLink></td>
               <td><PriorityIndicator :value="String(row.priority)" /></td>
               <td>{{ row.affectedCiCode || "未关联" }}</td>
-              <td><span class="sla-state" :class="`state-${String(row.responseStatus).toLowerCase()}`"><component :is="statusIcon(row.responseStatus)" :size="14" />{{ statusLabel(row.responseStatus) }}</span></td>
-              <td><span class="sla-state" :class="`state-${String(row.resolutionStatus).toLowerCase()}`"><component :is="statusIcon(row.resolutionStatus)" :size="14" />{{ statusLabel(row.resolutionStatus) }}</span></td>
+              <td><span class="sla-state" :class="'state-' + String(row.responseStatus).toLowerCase()"><component :is="statusIcon(row.responseStatus)" :size="14" />{{ statusLabel(row.responseStatus) }}</span></td>
+              <td><span class="sla-state" :class="'state-' + String(row.resolutionStatus).toLowerCase()"><component :is="statusIcon(row.resolutionStatus)" :size="14" />{{ statusLabel(row.resolutionStatus) }}</span></td>
               <td><span class="sla-deadline" :class="{ overdue: new Date(String(row.resolutionDeadline)).getTime() < now }" :title="fullRemaining(row.resolutionDeadline)">{{ compactRemaining(row.resolutionDeadline) }}</span></td>
               <td><span class="escalation-level">L{{ row.escalationLevel }}</span></td>
             </tr>
           </tbody>
         </table>
-        <div v-if="!filteredRows.length && !loading" class="inline-empty"><CheckCircle2 :size="17" />当前筛选下没有 SLA 记录</div>
+        <EmptyState v-if="!filteredRows.length" title="当前筛选下没有 SLA 记录" description="调整筛选条件后再查看" :icon="CheckCircle2" compact />
       </div>
-    </section>
+    </ListSurface>
   </div>
 </template>

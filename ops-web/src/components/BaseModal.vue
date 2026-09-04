@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
 import { X } from "@lucide/vue";
-defineProps<{ title: string; wide?: boolean }>();
+defineProps<{ title: string; description?: string; wide?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 function close() {
   emit("close");
@@ -23,11 +23,11 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
       >
         <header>
           <div>
-            <span class="eyebrow">OPSAGENT</span>
             <h2>{{ title }}</h2>
+            <p v-if="description">{{ description }}</p>
           </div>
           <button type="button" class="icon-button modal-close" aria-label="关闭" @click.stop="close">
-            <X :size="20" />
+            <X :size="16" :stroke-width="1.75" />
           </button>
         </header>
         <div class="modal-body"><slot /></div>

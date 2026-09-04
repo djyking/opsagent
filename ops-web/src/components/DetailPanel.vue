@@ -6,6 +6,7 @@ const props = defineProps<{
   title: string;
   subtitle?: string;
   fullPath?: string;
+  width?: "default" | "wide";
 }>();
 
 const emit = defineEmits<{ close: [] }>();
@@ -21,14 +22,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 <template>
   <Teleport to="body">
     <button class="detail-panel-mask" aria-label="关闭详情" @click="emit('close')" />
-    <aside class="detail-panel" role="dialog" aria-modal="true" :aria-label="title">
+    <aside class="detail-panel" :class="{ 'detail-panel-wide': width === 'wide' }" role="dialog" aria-modal="true" :aria-label="title">
       <header>
         <div><span v-if="subtitle">{{ subtitle }}</span><h2>{{ title }}</h2></div>
-        <button class="icon-button" title="关闭（Esc）" @click="emit('close')"><X :size="17" /></button>
+        <div class="detail-panel-header-actions">
+          <slot name="actions" />
+          <button class="icon-button" title="关闭（Esc）" @click="emit('close')"><X :size="16" :stroke-width="1.75" /></button>
+        </div>
       </header>
       <div class="detail-panel-body"><slot /></div>
-      <footer v-if="fullPath">
-        <RouterLink class="button primary" :to="props.fullPath || '/'">打开完整页面 <ArrowUpRight :size="15" /></RouterLink>
+      <footer v-if="fullPath || $slots.footer">
+        <slot name="footer">
+          <RouterLink class="button primary" :to="props.fullPath || '/'">打开完整页面 <ArrowUpRight :size="16" :stroke-width="1.75" /></RouterLink>
+        </slot>
       </footer>
     </aside>
   </Teleport>

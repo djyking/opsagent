@@ -1,0 +1,119 @@
+.sla-detail-card dl {
+  display: grid;
+    gap: 1px;
+    margin: 0;
+    background: var(--oa-border-subtle);
+}
+
+.sla-detail-card dl > div {
+  display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 15px;
+    background: var(--oa-bg-surface);
+}
+
+.sla-detail-card dt {
+  color: var(--oa-text-secondary);
+    font-size: var(--oa-font-size-xs);
+}
+
+.sla-detail-card dd {
+  margin: 0;
+    color: var(--oa-primary);
+    font-size: var(--oa-font-size-xs);
+    font-weight: 600;
+    text-align: right;
+}
+
+.sla-controls {
+  min-height: 60px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: auto 160px 160px minmax(260px, 1fr);
+  align-items: center;
+  gap: 8px;
+  background: var(--oa-bg-surface);
+}
+
+.sla-controls select, .sla-search input {
+  height: var(--oa-control-default);
+    padding-top: 0;
+    padding-bottom: 0;
+    background: var(--oa-bg-surface);
+}
+
+.sla-search {
+  position: relative;
+}
+
+.sla-search svg {
+  position: absolute;
+    top: 9px;
+    left: 10px;
+    color: var(--oa-text-tertiary);
+}
+
+.sla-search input {
+  padding-left: 32px;
+}
+
+.priority-indicator, .sla-state {
+  display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--oa-text-secondary);
+    font-size: var(--oa-font-size-xs);
+    white-space: nowrap;
+}
+
+.sla-state svg {
+  color: var(--oa-primary);
+}
+
+.sla-state.state-completed svg {
+  color: var(--oa-success);
+}
+
+.sla-state.state-breached svg {
+  color: var(--oa-danger);
+}
+
+.sla-deadline {
+  color: var(--oa-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.sla-deadline.overdue {
+  color: var(--oa-danger);
+    font-weight: 500;
+}
+
+.escalation-level {
+  color: var(--oa-text-tertiary);
+    font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+@media (max-width: 1100px) {
+  .sla-controls {
+    grid-template-columns: auto 1fr 1fr;
+  }
+}
+
+@media (max-width: 1100px) {
+  .sla-search {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 680px) {
+  .sla-controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .sla-controls > *, .sla-search {
+    grid-column: 1;
+  }
+}

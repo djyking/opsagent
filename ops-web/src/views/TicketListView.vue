@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Search, Plus, RotateCw, ArrowUpRight, TicketCheck } from "@lucide/vue";
 import { itsmApi, ticketApi } from "@/api/modules";
@@ -8,6 +8,18 @@ import BaseModal from "@/components/BaseModal.vue";
 import DetailPanel from "@/components/DetailPanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import PaginationBar from "@/components/PaginationBar.vue";
+import PageHeader from "@/components/PageHeader.vue";
+import FilterBar from "@/components/FilterBar.vue";
+import EmptyState from "@/components/EmptyState.vue";
+import LoadingState from "@/components/LoadingState.vue";
+import InlineError from "@/components/InlineError.vue";
+import ListSurface from "@/components/ListSurface.vue";
+import PriorityIndicator from "@/components/PriorityIndicator.vue";
+import DescriptionList from "@/components/DescriptionList.vue";
+import TechnicalMetadata from "@/components/TechnicalMetadata.vue";
+import InlineNotice from "@/components/InlineNotice.vue";
+import { formatDateTime, formatRelativeTime } from "@/utils/datetime";
+import { parseTicketDescription } from "@/utils/ticket-description";
 const route = useRoute();
 const router = useRouter();
 const page = ref<PageResponse<Ticket>>({
@@ -21,6 +33,8 @@ const error = ref("");
 const showCreate = ref(false);
 const creating = ref(false);
 const preview = ref<Ticket>();
+const previewDescription = computed(() => parseTicketDescription(preview.value?.description));
+function sourceTypeLabel(value: string) { return value === "ALERTMANAGER" ? "告警自动建单" : value || "人工创建"; }
 const filters = reactive({
   keyword: "",
   status: "",
@@ -90,17 +104,11 @@ onMounted(async () => {
 </script>
 <template>
   <div class="stack-page">
-    <section class="page-lead">
-      <div>
-        <span class="eyebrow">TICKET WORKSPACE</span>
-        <h2>工单中心</h2>
-        <p>创建、跟踪并完成每一个运维问题闭环。</p>
-      </div>
-      <button class="button primary" @click="showCreate = true">
-        <Plus :size="18" />新建工单
-      </button>
-    </section>
-    <section class="filter-bar">
+    <PageHeader title="工单中心" description="创建、跟踪并完成每一个运维问题闭环">
+      <template #actions><button class="button primary" @click="showCreate = true"><Plus :size="18" />新建工单</button></template>
+    </PageHeader>
+    <ListSurface>
+      <template #toolbar><FilterBar>
       <div class="search-box">
         <Search :size="18" /><input
           v-model.trim="filters.keyword"
@@ -141,15 +149,12 @@ onMounted(async () => {
       ><button class="button secondary" @click="reset">
         <RotateCw :size="16" />重置
       </button>
-    </section>
-    <section class="panel table-panel">
-      <div v-if="error" class="inline-error">{{ error }}</div>
-      <div v-if="loading" class="loading-state">正在加载工单…</div>
-      <div v-else-if="!page.records.length" class="empty-state">
-        <TicketCheck :size="38" /><strong>没有符合条件的工单</strong
-        ><span>调整筛选条件或创建一张新工单。</span>
-      </div>
-      <div v-else class="responsive-table">
+      </FilterBar></template>
+    <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
+
+      <LoadingState v-if="loading" text="正在加载工单…" />
+      <EmptyState v-else-if="!page.records.length" title="没有符合条件的工单" description="调整筛选条件或创建一张新工单" :icon="TicketCheck" />
+      <template v-else>
         <table>
           <thead>
             <tr>
@@ -176,7 +181,7 @@ onMounted(async () => {
                   ><span>{{ ticket.ticketNo }}</span></button
                 >
               </td>
-              <td><StatusBadge :value="ticket.priority" /></td>
+              <td><PriorityIndicator :value="ticket.priority" /></td>
               <td><StatusBadge :value="ticket.status" /></td>
               <td>
                 <span class="identity-pair"
@@ -186,7 +191,7 @@ onMounted(async () => {
                   }}</span
                 >
               </td>
-              <td>{{ new Date(ticket.updateTime).toLocaleString("zh-CN") }}</td>
+              <td><time :title="formatDateTime(ticket.updateTime)">{{ formatRelativeTime(ticket.updateTime) }}</time></td>
               <td>
                 <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`" @click.stop
                   ><ArrowUpRight :size="17"
@@ -195,20 +200,9 @@ onMounted(async () => {
             </tr>
           </tbody>
         </table>
-      </div>
-      <PaginationBar
-        v-if="page.total"
-        :page="filters.pageNum"
-        :page-size="filters.pageSize"
-        :total="page.total"
-        @change="
-          (p) => {
-            filters.pageNum = p;
-            load();
-          }
-        "
-      />
-    </section>
+      </template>
+      <template v-if="page.total" #footer><PaginationBar :page="filters.pageNum" :page-size="filters.pageSize" :total="page.total" @change="(p) => { filters.pageNum = p; load(); }" /></template>
+    </ListSurface>
     <DetailPanel
       v-if="preview"
       :title="preview.title"
@@ -217,18 +211,19 @@ onMounted(async () => {
       @close="preview = undefined"
     >
       <div class="ticket-preview-badges">
-        <StatusBadge :value="preview.priority" /><StatusBadge :value="preview.status" />
+        <PriorityIndicator :value="preview.priority" /><StatusBadge :value="preview.status" />
       </div>
-      <dl class="ticket-preview-meta">
-        <div><dt>负责人</dt><dd>{{ preview.assigneeId ? `#${preview.assigneeId}` : "待分配" }}</dd></div>
-        <div><dt>受影响服务</dt><dd>{{ preview.affectedCiCode || "未关联" }}</dd></div>
-        <div><dt>来源</dt><dd>{{ preview.sourceType }}</dd></div>
-        <div><dt>更新时间</dt><dd>{{ new Date(preview.updateTime).toLocaleString("zh-CN") }}</dd></div>
-      </dl>
+      <DescriptionList class="ticket-preview-meta">
+        <div><dt>负责人</dt><dd>{{ preview.assigneeId ? "#" + preview.assigneeId : "待分配" }}</dd></div>
+        <div><dt>受影响服务</dt><dd><code>{{ previewDescription.affectedService || preview.affectedCiCode || "未关联" }}</code></dd></div>
+        <div><dt>来源</dt><dd :title="preview.sourceType">{{ sourceTypeLabel(preview.sourceType) }}</dd></div>
+        <div><dt>更新时间</dt><dd>{{ formatDateTime(preview.updateTime) }}</dd></div>
+      </DescriptionList>
       <section class="ticket-preview-description">
-        <h3>问题描述</h3><p>{{ preview.description }}</p>
+        <h3>问题描述</h3><p>{{ previewDescription.text }}</p>
       </section>
-      <p class="ticket-preview-hint">完整页面包含 SLA、处理记录、关联告警、CMDB、附件与 AI 分析。</p>
+      <TechnicalMetadata :metadata="previewDescription.metadata" :preview-count="3" />
+      <InlineNotice>完整页面包含 SLA、处理记录、关联告警、CMDB、附件与 AI 分析。</InlineNotice>
     </DetailPanel>
     <BaseModal
       v-if="showCreate"

@@ -1,0 +1,1 @@
+import{d as o,o as n,c as s,s as l,a as e,t as c}from"./index-Da9_i_Iz.js";const i=o({__name:"LoadingState",props:{text:{},compact:{type:Boolean}},setup(a){return(p,t)=>(n(),s("div",{class:l(["oa-loading-state",{compact:a.compact}])},[t[0]||(t[0]=e("i",null,null,-1)),e("span",null,c(a.text||"正在加载…"),1)],2))}});export{i as _};

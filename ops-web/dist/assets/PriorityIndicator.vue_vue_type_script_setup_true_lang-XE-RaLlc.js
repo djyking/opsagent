@@ -1,0 +1,1 @@
+import{d as t,o as r,c as n,s as l,a as i,f as p,t as c}from"./index-Da9_i_Iz.js";const d=t({__name:"PriorityIndicator",props:{value:{}},setup(o){const e=o,s={LOW:"低",MEDIUM:"中",HIGH:"高",URGENT:"紧急"};return(u,a)=>(r(),n("span",{class:l(["priority-indicator",`priority-${e.value.toLowerCase()}`])},[a[0]||(a[0]=i("i",null,null,-1)),p(c(s[e.value]||e.value),1)],2))}});export{d as _};

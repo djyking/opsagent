@@ -1,0 +1,53 @@
+.notification-groups {
+  padding: 4px 0 8px;
+}
+
+.notification-group > h3 {
+  margin: 0;
+    padding: 12px 16px 7px;
+    color: var(--oa-text-secondary);
+    font-size: var(--oa-font-size-xs);
+    font-weight: 600;
+}
+
+.notification-row {
+  min-height: 64px;
+    padding: 9px 14px;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid var(--oa-border);
+    position: relative;
+}
+
+.notification-row:hover {
+  background: var(--oa-bg-subtle);
+}
+
+.notification-row .record-icon {
+  width: 30px;
+    height: 30px;
+}
+
+.notification-row .record-body p {
+  margin: 3px 0;
+}
+
+tr:hover .reveal-on-row, tr:focus-within .reveal-on-row, .notification-row:hover .reveal-on-row, .notification-row:focus-within .reveal-on-row {
+  opacity: 1;
+}
+
+.notification-surface > .oa-filter-bar {
+  border: 0;
+    border-bottom: 1px solid var(--oa-border-subtle);
+    border-radius: 0;
+}
+
+.notification-row:focus-within {
+  background: var(--oa-bg-hover);
+}
+
+.notification-row .row-actions {
+  margin-left: auto;
+}
