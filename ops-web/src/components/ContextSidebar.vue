@@ -4,7 +4,6 @@ import type { Component } from "vue";
 
 defineProps<{
   title: string;
-  subtitle: string;
   items: Array<{ to: string; label: string; icon: Component; exact?: boolean }>;
   collapsed: boolean;
   mobileOpen: boolean;
@@ -24,10 +23,7 @@ const emit = defineEmits<{
     aria-label="上下文导航"
   >
     <header>
-      <div>
-        <strong>{{ title }}</strong>
-        <span>{{ subtitle }}</span>
-      </div>
+      <strong>{{ title }}</strong>
       <button class="icon-button context-mobile-close" title="关闭导航" @click="emit('close')">
         <X :size="17" />
       </button>
@@ -47,7 +43,7 @@ const emit = defineEmits<{
         :title="item.label"
         @click="emit('close')"
       >
-        <component :is="item.icon" :size="17" />
+        <component :is="item.icon" :size="17" :stroke-width="1.7" />
         <span>{{ item.label }}</span>
       </RouterLink>
     </nav>

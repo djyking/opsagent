@@ -62,12 +62,10 @@ const domainConfig = computed(() => {
   const configs = {
     overview: {
       title: "总览",
-      subtitle: "Workspace",
       items: [{ to: "/dashboard", label: "运行总览", icon: LayoutDashboard }],
     },
     operations: {
       title: "运维",
-      subtitle: "Operations",
       items: [
         { to: "/tickets", label: "工单中心", icon: TicketCheck },
         ...(auth.isAdmin ? [{ to: "/itsm/alerts", label: "活动告警", icon: Siren }] : []),
@@ -78,12 +76,10 @@ const domainConfig = computed(() => {
     },
     observability: {
       title: "可观测",
-      subtitle: "Observability",
       items: [{ to: "/system/monitor", label: "系统监控", icon: Gauge }],
     },
     ai: {
       title: "AI 智能",
-      subtitle: "Intelligence",
       items: [
         { to: "/rag/chat", label: "智能问答", icon: Bot },
         { to: "/knowledge", label: "知识库", icon: BookOpen },
@@ -97,12 +93,10 @@ const domainConfig = computed(() => {
     },
     notifications: {
       title: "通知",
-      subtitle: "Inbox",
       items: [{ to: "/notifications", label: "通知中心", icon: Bell }],
     },
     system: {
       title: "系统",
-      subtitle: "Platform",
       items: [{ to: "/admin", label: "操作审计", icon: ShieldCheck }],
     },
   };
@@ -149,7 +143,6 @@ function logout() {
     />
     <ContextSidebar
       :title="domainConfig.title"
-      :subtitle="domainConfig.subtitle"
       :items="domainConfig.items"
       :collapsed="collapsed"
       :mobile-open="mobileOpen"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, ref } from "vue";
-import { Bot, Clock3, Copy, PanelRightClose, PanelRightOpen, RotateCw, Send } from "@lucide/vue";
+import { nextTick, ref, watch } from "vue";
+import { BookOpen, Bot, Clock3, Copy, PanelRightClose, PanelRightOpen, Plus, RotateCw, Send, Sparkles } from "@lucide/vue";
+import { useRoute } from "vue-router";
 import { streamRagAnswer } from "@/api/rag-stream";
 import type { AiReference } from "@/types/api";
 import AnswerContent from "@/components/AnswerContent.vue";
@@ -16,6 +17,24 @@ const progress = ref("");
 const busy = ref(false);
 const submittedQuestion = ref("");
 const contextOpen = ref(true);
+const route = useRoute();
+const suggestions = ["排查 Redis 连接超时", "分析 RabbitMQ 消息堆积", "查询 SLA 超时处理规范"];
+
+function newSession() {
+  question.value = "";
+  answer.value = "";
+  references.value = [];
+  model.value = "";
+  latencyMs.value = 0;
+  error.value = "";
+  progress.value = "";
+  submittedQuestion.value = "";
+}
+
+function askSuggestion(value: string) {
+  question.value = value;
+  ask();
+}
 
 async function ask() {
   const submitted = question.value.trim();
@@ -63,22 +82,24 @@ function retry() {
 async function copyAnswer() {
   if (answer.value) await navigator.clipboard.writeText(answer.value);
 }
+
+watch(() => route.query.new, (value) => {
+  if (value === "1" && !busy.value) newSession();
+}, { immediate: true });
 </script>
 
 <template>
   <section class="rag-three-pane" :class="{ 'context-closed': !contextOpen }">
-    <aside class="panel rag-conversations">
-      <header class="panel-header"><div><h3>会话</h3><span class="panel-count">当前浏览器</span></div></header>
+    <aside class="rag-conversations">
+      <header class="panel-header"><div><h3>会话</h3><span class="panel-count">当前浏览器</span></div><button class="icon-button" title="新会话" @click="newSession"><Plus :size="15" /></button></header>
       <button class="rag-session active"><Bot :size="16" /><span><strong>{{ submittedQuestion || "新会话" }}</strong><small>{{ answer ? "回答完成" : busy ? progress : "等待提问" }}</small></span></button>
-      <div class="empty-state small-empty"><span>历史会话接口尚未启用，本页不会伪造记录。</span></div>
+      <p class="rag-history-notice">历史记录暂未启用</p>
     </aside>
 
-    <main class="panel ai-panel rag-workspace">
+    <main class="ai-panel rag-workspace">
       <header class="panel-header">
-        <div><span class="eyebrow">RAG CHAT</span><h3>智能知识问答</h3></div>
-        <button class="icon-button rag-context-toggle" :title="contextOpen ? '收起检索上下文' : '展开检索上下文'" @click="contextOpen = !contextOpen">
-          <PanelRightClose v-if="contextOpen" :size="17" /><PanelRightOpen v-else :size="17" />
-        </button>
+        <div><Sparkles :size="15" /><h3>智能知识问答</h3></div>
+        <div class="rag-header-actions"><button class="button primary" @click="newSession"><Plus :size="15" />新会话</button><button class="icon-button rag-context-toggle" :title="contextOpen ? '收起检索上下文' : '展开检索上下文'" @click="contextOpen = !contextOpen"><PanelRightClose v-if="contextOpen" :size="17" /><PanelRightOpen v-else :size="17" /></button></div>
       </header>
       <div class="rag-chat-scroll">
         <div v-if="submittedQuestion" class="rag-user-message"><strong>你</strong><p>{{ submittedQuestion }}</p></div>
@@ -91,31 +112,31 @@ async function copyAnswer() {
           <AnswerContent v-if="answer" :content="answer" />
           <div v-else class="answer-skeleton"><i /><i /><i /></div>
         </div>
-        <div v-else class="empty-state rag-empty"><Bot :size="34" /><strong>输入问题开始检索</strong><span>系统会先寻找相关知识，再逐段展示模型回答。</span></div>
+        <div v-else class="rag-empty"><span class="rag-empty-icon"><Sparkles :size="22" /></span><strong>有什么运维问题？</strong><p>我会先检索知识库，再基于真实来源生成回答。</p><div class="suggested-prompts"><button v-for="item in suggestions" :key="item" @click="askSuggestion(item)">{{ item }}</button></div></div>
         <p v-if="error" class="inline-error rag-error">{{ error }}</p>
       </div>
-      <form class="question-form rag-question-form" @submit.prevent="ask">
+      <form class="question-form rag-question-form chat-composer" @submit.prevent="ask">
       <textarea
         v-model.trim="question"
         required
-        rows="4"
+        rows="3"
         maxlength="2000"
-        placeholder="输入运维问题，例如：生产服务器磁盘使用率超过 90% 应该如何处理？"
+        placeholder="输入运维问题…"
+        @keydown.enter.exact.prevent="ask"
       />
       <div class="question-submit-row">
-        <span>回答会引用内部知识库；30 秒内无首段响应将自动结束并提示。</span>
-        <button class="button primary" :disabled="busy || !question.trim()">
-          <Send :size="17" />{{ busy ? "生成中…" : "提问" }}
-        </button>
+        <span class="knowledge-scope"><BookOpen :size="14" />知识库</span>
+        <span class="composer-hint">Enter 发送 · Shift + Enter 换行</span>
+        <button class="composer-send" :disabled="busy || !question.trim()" :title="busy ? '生成中' : '发送问题'" aria-label="发送问题"><Send :size="16" /></button>
       </div>
       </form>
     </main>
 
-    <aside v-if="contextOpen" class="panel rag-context-panel">
+    <aside v-if="contextOpen" class="rag-context-panel">
       <header class="panel-header"><div><h3>检索上下文</h3><span class="panel-count">{{ references.length }} 条来源</span></div></header>
-      <p class="rag-context-note">仅展示后端实际返回的引用、相关度与检索通道。</p>
+      <p class="rag-context-note">来源、Chunk 与相关度均由检索接口返回。</p>
       <RagSources :references="references" />
-      <div v-if="!references.length" class="empty-state small-empty"><span>提问后在这里查看真实检索结果。</span></div>
+      <p v-if="!references.length" class="rag-context-empty">完成提问后，这里显示命中的知识片段。</p>
     </aside>
   </section>
 </template>

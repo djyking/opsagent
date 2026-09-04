@@ -14,6 +14,8 @@ import {
   UserRoundCheck,
 } from "@lucide/vue";
 import PageHeader from "@/components/PageHeader.vue";
+import MetricStrip from "@/components/MetricStrip.vue";
+import type { MetricStripItem } from "@/components/MetricStrip.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import { itsmApi, ticketApi } from "@/api/modules";
 import { request } from "@/api/http";
@@ -74,6 +76,53 @@ const onCallName = computed(
         "未排班",
     ),
 );
+const overviewMetrics = computed<MetricStripItem[]>(() => [
+  {
+    key: "priority",
+    label: "活跃 P1/P2",
+    value: highPriority.value,
+    meta: "高优先级未关闭工单",
+    to: "/tickets?priority=HIGH",
+    icon: ShieldAlert,
+    tone: highPriority.value ? "warning" : "default",
+  },
+  {
+    key: "sla",
+    label: "SLA 风险",
+    value: slaRisk.value,
+    meta: "2 小时内可能超时",
+    to: "/itsm/sla?view=risk",
+    icon: Clock3,
+    tone: slaRisk.value ? "danger" : "default",
+  },
+  ...(auth.isAdmin
+    ? [{
+        key: "alerts",
+        label: "未恢复告警",
+        value: firingAlerts.value,
+        meta: "Alertmanager firing",
+        to: "/itsm/alerts",
+        icon: Radio,
+        tone: firingAlerts.value ? "warning" as const : "default" as const,
+      }]
+    : []),
+  {
+    key: "processing",
+    label: "处理中",
+    value: processing.value,
+    meta: "已接单及处理中",
+    to: "/tickets?status=PROCESSING",
+    icon: Activity,
+  },
+  {
+    key: "oncall",
+    label: "当前值班",
+    value: onCallName.value,
+    meta: "查看排班与升级策略",
+    to: "/itsm/oncall",
+    icon: UserRoundCheck,
+  },
+]);
 
 function priorityWeight(priority: string) {
   return { URGENT: 4, HIGH: 3, MEDIUM: 2, LOW: 1 }[priority] || 0;
@@ -134,33 +183,7 @@ onMounted(load);
 
     <p v-if="error" class="inline-error">{{ error }}</p>
 
-    <section class="oa-kpi-strip" aria-label="核心运维指标">
-      <RouterLink to="/tickets?priority=HIGH" class="oa-kpi">
-        <span><ShieldAlert :size="17" />活跃 P1/P2</span>
-        <strong>{{ highPriority }}</strong>
-        <small>高优先级未关闭工单</small>
-      </RouterLink>
-      <RouterLink to="/itsm/sla" class="oa-kpi" :class="{ risk: slaRisk > 0 }">
-        <span><Clock3 :size="17" />SLA Risk</span>
-        <strong>{{ slaRisk }}</strong>
-        <small>2 小时内可能超时</small>
-      </RouterLink>
-      <RouterLink v-if="auth.isAdmin" to="/itsm/alerts" class="oa-kpi">
-        <span><Radio :size="17" />未恢复告警</span>
-        <strong>{{ firingAlerts }}</strong>
-        <small>Alertmanager firing</small>
-      </RouterLink>
-      <RouterLink to="/tickets?status=PROCESSING" class="oa-kpi">
-        <span><Activity :size="17" />处理中</span>
-        <strong>{{ processing }}</strong>
-        <small>已接单及处理中</small>
-      </RouterLink>
-      <RouterLink to="/itsm/oncall" class="oa-kpi oa-kpi-oncall">
-        <span><UserRoundCheck :size="17" />当前值班</span>
-        <strong>{{ onCallName }}</strong>
-        <small>查看排班与升级策略</small>
-      </RouterLink>
-    </section>
+    <MetricStrip :items="overviewMetrics" label="核心运维指标" />
 
     <section class="oa-dashboard-grid">
       <article class="panel oa-active-work">
@@ -191,11 +214,11 @@ onMounted(load);
 
       <article class="panel oa-brief">
         <header class="panel-header">
-          <div><span class="oa-ai-label"><Bot :size="14" />智能运维摘要</span><h3>实时关注</h3></div>
-          <span class="oa-fact-label">事实聚合</span>
+          <div><Bot :size="15" /><h3>实时关注</h3></div>
+          <span class="panel-count">AI 运维摘要</span>
         </header>
         <div class="oa-brief-body">
-          <p class="oa-brief-note">当前内容由实时业务数据和确定性规则生成，未调用模型，也不会自动执行变更。</p>
+          <p class="oa-brief-note">基于实时业务数据 · 不自动执行变更</p>
           <RouterLink v-if="highPriority" to="/tickets" class="oa-brief-item">
             <ShieldAlert :size="17" /><span><strong>{{ highPriority }} 个高优先级工单仍活跃</strong><small>建议优先确认负责人和处理进展</small></span><ArrowUpRight :size="14" />
           </RouterLink>
@@ -212,8 +235,8 @@ onMounted(load);
       </article>
     </section>
 
-    <section class="oa-dashboard-lower">
-      <article class="panel oa-health-card">
+    <section class="panel oa-dashboard-lower">
+      <article class="oa-health-card">
         <header class="panel-header"><div><h3>服务健康</h3><span class="panel-count">Prometheus 实时抓取</span></div><RouterLink class="text-button" to="/system/monitor">深度监控 <ArrowUpRight :size="15" /></RouterLink></header>
         <div class="oa-health-summary"><strong>{{ healthyServices }}/{{ monitor?.services.length || 0 }}</strong><span>服务正常</span></div>
         <div class="oa-health-list">
@@ -221,13 +244,13 @@ onMounted(load);
           <span v-if="!monitor?.services.length" class="muted">暂无监控目标数据</span>
         </div>
       </article>
-      <article class="panel oa-status-card">
+      <article class="oa-status-card">
         <header class="panel-header"><div><h3>工单状态分布</h3><span class="panel-count">真实工单数据</span></div></header>
         <div class="oa-bars">
           <div v-for="item in statusMetrics" :key="item.label"><span>{{ item.label }}</span><i><b :style="{ width: `${(item.value / maxStatusMetric) * 100}%` }" /></i><strong>{{ item.value }}</strong></div>
         </div>
       </article>
-      <article class="panel oa-recent-card">
+      <article class="oa-recent-card">
         <header class="panel-header"><div><h3>最近活动</h3><span class="panel-count">按工单更新时间</span></div></header>
         <div v-if="!tickets.length" class="empty-state small-empty">暂无活动记录</div>
         <RouterLink v-for="ticket in tickets.slice(0, 4)" :key="ticket.id" :to="`/tickets/${ticket.id}`" class="oa-activity-row"><i /><span><strong>{{ ticket.title }}</strong><small>{{ ticket.ticketNo }} · {{ formatTime(ticket.updateTime) }}</small></span></RouterLink>

@@ -1,26 +1,34 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { DatabaseZap, RefreshCw, RotateCw, Wrench } from "@lucide/vue";
+import { AlertTriangle, Check, ChevronDown, DatabaseZap, RefreshCw, RotateCw, Wrench } from "@lucide/vue";
 import { adminApi } from "@/api/modules";
+import DetailPanel from "@/components/DetailPanel.vue";
+import MetricStrip from "@/components/MetricStrip.vue";
+import type { MetricStripItem } from "@/components/MetricStrip.vue";
+import PageHeader from "@/components/PageHeader.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 
 const consistency = ref<Record<string, unknown>>({});
 const failedTasks = ref<Record<string, unknown>[]>([]);
 const reindexTask = ref<Record<string, unknown>>();
 const repairDocumentId = ref<number>();
+const repairOpen = ref(false);
 const busy = ref("");
 const error = ref("");
 const success = ref("");
 
-const counts = computed(() => [
-  ["已发布文档", Number(consistency.value.publishedDocumentCount || 0)],
-  ["ES 已索引文档", Number(consistency.value.indexedDocumentCount || 0)],
-  ["Qdrant 向量点", Number(consistency.value.vectorPointCount || 0)],
-  ["待处理", Number(consistency.value.pendingDocumentCount || 0)],
-  ["失败", Number(consistency.value.failedDocumentCount || 0)],
-  ["ES 孤儿文档", Number(consistency.value.orphanEsDocumentCount || 0)],
-  ["Qdrant 缺失点", Number(consistency.value.missingQdrantPointCount || 0)],
-  ["Qdrant 孤儿点", Number(consistency.value.orphanQdrantPointCount || 0)],
+const healthMetrics = computed<MetricStripItem[]>(() => [
+  { key: "published", label: "已发布", value: Number(consistency.value.publishedDocumentCount || 0), meta: "MySQL 发布文档", icon: DatabaseZap },
+  { key: "indexed", label: "ES 文档", value: Number(consistency.value.indexedDocumentCount || 0), meta: "Elasticsearch 已索引", icon: DatabaseZap },
+  { key: "vectors", label: "Qdrant Points", value: Number(consistency.value.vectorPointCount || 0), meta: "当前 Alias 向量点", icon: DatabaseZap },
+  { key: "pending", label: "待处理", value: Number(consistency.value.pendingDocumentCount || 0), meta: "等待索引管线处理", tone: Number(consistency.value.pendingDocumentCount || 0) ? "warning" : "default", icon: DatabaseZap },
+  { key: "failed", label: "失败", value: Number(consistency.value.failedDocumentCount || 0), meta: "需要人工补偿", tone: Number(consistency.value.failedDocumentCount || 0) ? "danger" : "default", icon: AlertTriangle },
+]);
+
+const checks = computed(() => [
+  { label: "Elasticsearch 无孤儿文档", count: Number(consistency.value.orphanEsDocumentCount || 0), unit: "篇" },
+  { label: "Qdrant 无缺失向量", count: Number(consistency.value.missingQdrantPointCount || 0), unit: "points" },
+  { label: "Qdrant 无孤儿向量", count: Number(consistency.value.orphanQdrantPointCount || 0), unit: "points" },
 ]);
 
 async function load() {
@@ -49,8 +57,7 @@ async function startReindex() {
     success.value = `Reindex 任务 #${taskId} 已提交`;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       reindexTask.value = await adminApi.knowledgeReindexTask(taskId);
-      const status = String(reindexTask.value.status || "");
-      if (["SUCCESS", "FAILED"].includes(status)) break;
+      if (["SUCCESS", "FAILED"].includes(String(reindexTask.value.status || ""))) break;
       await new Promise((resolve) => window.setTimeout(resolve, 2_000));
     }
     await load();
@@ -73,6 +80,7 @@ async function repair(documentId?: number) {
     const taskId = await adminApi.repairKnowledgeIndex(id);
     success.value = `文档 #${id} 的索引修复任务 #${taskId} 已进入 Outbox 队列`;
     repairDocumentId.value = undefined;
+    repairOpen.value = false;
     await load();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "索引修复失败";
@@ -86,63 +94,55 @@ onMounted(load);
 
 <template>
   <div class="index-admin-page">
-    <section class="panel index-overview">
-      <header class="panel-header">
-        <div>
-          <span class="eyebrow">RAG INDEX OPERATIONS</span>
-          <h3>知识索引管理</h3>
-          <p>核对 MySQL 发布状态、Elasticsearch BM25 与 Qdrant 向量数据。</p>
-        </div>
-        <div class="row-actions">
-          <button class="button secondary" :disabled="busy === 'load'" @click="load">
-            <RefreshCw :size="16" />刷新
-          </button>
-          <button class="button primary" :disabled="Boolean(busy)" @click="startReindex">
-            <RotateCw :size="16" />{{ busy === "reindex" ? "重建中…" : "全量 Reindex" }}
-          </button>
-        </div>
-      </header>
-      <p v-if="error" class="inline-error">{{ error }}</p>
-      <p v-if="success" class="inline-success">{{ success }}</p>
-      <div class="index-metric-grid">
-        <article v-for="item in counts" :key="String(item[0])">
-          <DatabaseZap :size="19" /><strong>{{ item[1] }}</strong><span>{{ item[0] }}</span>
-        </article>
+    <PageHeader title="知识索引" description="检查 MySQL、Elasticsearch 与 Qdrant 的发布一致性">
+      <template #actions>
+        <button class="button secondary" :disabled="busy === 'load'" @click="load"><RefreshCw :size="15" />{{ busy === "load" ? "检查中…" : "刷新" }}</button>
+        <details class="maintenance-menu">
+          <summary class="button secondary">维护操作<ChevronDown :size="14" /></summary>
+          <div>
+            <button @click="load"><RefreshCw :size="15" /><span><strong>重新检查一致性</strong><small>刷新当前索引健康状态</small></span></button>
+            <button @click="repairOpen = true"><Wrench :size="15" /><span><strong>单文档修复</strong><small>重新投递指定文档</small></span></button>
+            <button class="danger" :disabled="Boolean(busy)" @click="startReindex"><RotateCw :size="15" /><span><strong>全量 Reindex</strong><small>重建索引并切换 Alias</small></span></button>
+          </div>
+        </details>
+      </template>
+    </PageHeader>
+
+    <p v-if="error" class="inline-error">{{ error }}</p>
+    <p v-if="success" class="inline-success">{{ success }}</p>
+
+    <section class="panel index-health-surface">
+      <header class="section-header"><div><h3>索引健康</h3><p>来自后端一致性检查的实时结果</p></div><span class="health-indicator" :class="{ issue: checks.some((item) => item.count) }"><i />{{ checks.some((item) => item.count) ? "需要处理" : "一致" }}</span></header>
+      <MetricStrip :items="healthMetrics" label="索引健康指标" />
+      <div class="index-details-grid">
+        <section>
+          <header class="section-header compact"><div><h3>索引配置</h3><p>当前读写 Alias 与物理资源</p></div></header>
+          <dl class="index-definition-list">
+            <div><dt>读取 Alias</dt><dd>{{ consistency.indexAlias || "-" }}</dd></div>
+            <div><dt>写入 Alias</dt><dd>{{ consistency.writeAlias || "-" }}</dd></div>
+            <div><dt>ES Index</dt><dd>{{ consistency.physicalIndex || consistency.currentIndex || "-" }}</dd></div>
+            <div><dt>Qdrant Alias</dt><dd>{{ consistency.vectorAlias || "-" }}</dd></div>
+            <div><dt>Qdrant Collection</dt><dd>{{ consistency.physicalCollection || "-" }}</dd></div>
+            <div><dt>Embedding</dt><dd>{{ consistency.embeddingModel || "-" }}</dd></div>
+          </dl>
+        </section>
+        <section>
+          <header class="section-header compact"><div><h3>一致性检查</h3><p>孤儿数据与缺失向量</p></div></header>
+          <div class="consistency-checklist">
+            <div v-for="item in checks" :key="item.label" :class="{ issue: item.count }"><span><Check v-if="!item.count" :size="15" /><AlertTriangle v-else :size="15" /></span><strong>{{ item.count ? `${item.label.replace('无', '')} ${item.count} ${item.unit}` : item.label }}</strong><button v-if="item.count" class="text-button" @click="repairOpen = true">处理</button></div>
+          </div>
+        </section>
       </div>
-      <dl class="index-metadata">
-        <div><dt>读 Alias</dt><dd>{{ consistency.indexAlias || "-" }}</dd></div>
-        <div><dt>写 Alias</dt><dd>{{ consistency.writeAlias || "-" }}</dd></div>
-        <div><dt>ES 物理索引</dt><dd>{{ consistency.physicalIndex || consistency.currentIndex || "-" }}</dd></div>
-        <div><dt>Qdrant Alias</dt><dd>{{ consistency.vectorAlias || "-" }}</dd></div>
-        <div><dt>Qdrant Collection</dt><dd>{{ consistency.physicalCollection || "-" }}</dd></div>
-        <div><dt>已发布切片</dt><dd>{{ consistency.publishedChunkCount || 0 }}</dd></div>
-        <div><dt>Embedding 模型</dt><dd>{{ consistency.embeddingModel || "-" }}</dd></div>
-      </dl>
     </section>
 
-    <section v-if="reindexTask" class="panel reindex-progress">
-      <header class="panel-header"><div><span class="eyebrow">LATEST TASK</span><h3>Reindex 任务 #{{ reindexTask.id }}</h3></div><StatusBadge :value="String(reindexTask.status)" /></header>
-      <div class="index-metric-grid compact-grid">
-        <article><strong>{{ reindexTask.document_success || 0 }}</strong><span>成功文档</span></article>
-        <article><strong>{{ reindexTask.document_failure || 0 }}</strong><span>失败文档</span></article>
-        <article><strong>{{ reindexTask.chunk_total || 0 }}</strong><span>索引切片</span></article>
-      </div>
+    <section v-if="reindexTask" class="panel reindex-progress compact-surface">
+      <header class="section-header"><div><h3>最近 Reindex 任务 #{{ reindexTask.id }}</h3><p>成功 {{ reindexTask.document_success || 0 }} 篇 · 失败 {{ reindexTask.document_failure || 0 }} 篇 · 切片 {{ reindexTask.chunk_total || 0 }}</p></div><StatusBadge :value="String(reindexTask.status)" /></header>
       <p v-if="reindexTask.error_message" class="inline-error">{{ reindexTask.error_message }}</p>
     </section>
 
-    <section class="panel">
-      <header class="panel-header">
-        <div><span class="eyebrow">TARGETED REPAIR</span><h3>单文档修复</h3><p>重新投递指定文档的索引事件，适用于 FAILED 或人工核查后的补偿。</p></div>
-      </header>
-      <form class="index-repair-form" @submit.prevent="repair()">
-        <input v-model.number="repairDocumentId" min="1" type="number" placeholder="文档 ID" />
-        <button class="button primary" :disabled="Boolean(busy) || !repairDocumentId"><Wrench :size="16" />提交修复</button>
-      </form>
-    </section>
-
-    <section class="panel">
-      <header class="panel-header"><div><span class="eyebrow">FAILED TASKS</span><h3>失败索引任务</h3></div><span class="panel-count">{{ failedTasks.length }}</span></header>
-      <div v-if="!failedTasks.length" class="empty-state">当前没有失败的索引任务</div>
+    <section class="panel failed-task-surface">
+      <header class="section-header"><div><h3>失败任务</h3><p>索引管线中等待人工处理的任务</p></div><span class="panel-count">{{ failedTasks.length }}</span></header>
+      <div v-if="!failedTasks.length" class="inline-empty"><Check :size="17" />当前没有失败的索引任务</div>
       <div v-else class="index-task-table">
         <article v-for="task in failedTasks" :key="String(task.id)">
           <code>#{{ task.id }}</code>
@@ -151,5 +151,13 @@ onMounted(load);
         </article>
       </div>
     </section>
+
+    <DetailPanel v-if="repairOpen" title="维护工具" subtitle="KNOWLEDGE INDEX" @close="repairOpen = false">
+      <section class="maintenance-drawer-copy"><Wrench :size="20" /><div><h3>单文档修复</h3><p>重新投递指定文档的索引事件，适用于失败任务或人工核查后的补偿。</p></div></section>
+      <form class="index-repair-form drawer-form" @submit.prevent="repair()">
+        <label>文档 ID<input v-model.number="repairDocumentId" min="1" type="number" placeholder="输入正整数文档 ID" /></label>
+        <div><button type="button" class="button secondary" @click="repairOpen = false">取消</button><button class="button primary" :disabled="Boolean(busy) || !repairDocumentId"><RotateCw :size="15" />重新索引</button></div>
+      </form>
+    </DetailPanel>
   </div>
 </template>
