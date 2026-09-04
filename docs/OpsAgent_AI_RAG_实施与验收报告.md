@@ -4,9 +4,9 @@
 
 ## 1. 结论
 
-本轮已完成 OpenAI、DeepSeek、Kimi 三 Provider 抽象与真实调用，完成 OpenAI Embedding、Elasticsearch `dense_vector`、检索前数据权限、版本化 Prompt、Citation 校验、用量审计、真实 SSE、Sentinel 限流、文档删除补偿、管理员诊断和前端接入。
+本轮已完成 OpenAI、DeepSeek、Kimi 三 Provider 抽象与真实调用，完成 OpenAI Embedding、Elasticsearch SmartCN/BM25、Qdrant 向量检索、检索前数据权限、版本化 Prompt、Citation 校验、用量审计、真实 SSE、Sentinel 限流、文档删除补偿、管理员诊断和前端接入。
 
-三家生成模型均已通过真实 `OK` 请求；完整 RAG 使用无敏感合成 Runbook 验收成功。用户已明确授权把 21 篇内部文档发送给 OpenAI `text-embedding-3-small`，全量重建现已完成：数据库中 22 篇可用文档、25 个切片全部为 `INDEXED`，ES 中为 25 条向量；多出的 1 篇是此前的无敏感合成验收文档。另有 1 篇故意损坏 PDF 保持 `FAILED`。
+三家生成模型均曾通过真实 `OK` 请求；完整 RAG 使用无敏感合成 Runbook 验收成功。用户已明确授权把最初 21 篇内部文档发送给 OpenAI `text-embedding-3-small`。截至 2026-09-04，本机数据库有 32 篇未删除文档，其中 26 篇已发布、49 个有效切片；已有 49 个向量已在不再次调用外部 Embedding 的前提下从旧 ES 向量索引迁入 Qdrant。当前 Compose 容器未注入三家 API Key，因此运行态会降级为 retrieval-only；把 Key 通过不提交 Git 的 `.env` 注入并重建应用容器后才会恢复生成式回答。
 
 ## 2. 架构
 
@@ -17,10 +17,10 @@ Browser
       → 凭据索取拦截 / Sentinel FlowRule
       → Knowledge Service（Bearer Token 透传）
           → Query Embedding（text-embedding-3-small）
-          → Elasticsearch KNN
-          → PUBLIC / owner / ADMIN + documentId 过滤
-          → 最低相似度 0.72
-          → 无命中时使用权限 MySQL 关键词降级
+          → Elasticsearch SmartCN/BM25
+          → Qdrant kNN + PUBLIC / owner / ADMIN + documentId 过滤
+          → 应用层 RRF 融合与最低相似度 0.72
+          → 向量侧不可用时降级到 BM25，检索侧不可用时再降级到权限 MySQL 关键词检索
       → PromptBuilder（版本化 YAML + 上下文预算）
       → LlmClientRouter
           ├─ OpenAI Responses API
@@ -43,7 +43,8 @@ Browser
 | Kimi Provider | 已实现并实测 | `kimi-k2.6`，显式关闭 thinking，避免输出预算被推理耗尽 |
 | Provider 配置切换 | 已实现 | `OPS_AI_PROVIDER=openai/deepseek/kimi`，业务代码不变 |
 | Embedding | 已实现并实测 | OpenAI `text-embedding-3-small`，固定 1536 维，文档与查询同模型 |
-| Elasticsearch 向量索引 | 已实现并实测 | 索引 `opsagent-knowledge-v1`，确定性 `_id`，重复索引幂等 |
+| Elasticsearch 文本索引 | 已实现并实测 | SmartCN/BM25，版本化索引与读写 Alias，确定性 `_id`，重复索引幂等 |
+| Qdrant 向量索引 | 已实现并实测 | 1536 维 cosine、权限 Payload、稳定 Chunk ID、版本化 Collection 与读 Alias |
 | RBAC / 数据权限 | 已实现并测试 | `PUBLIC`、创建者、ADMIN；过滤发生在 Prompt 之前 |
 | 单文档范围 | 已实现 | `/api/rag/ask` 可选 `documentId`，Knowledge 与 ES 双层限定 |
 | Prompt 管理 | 已实现 | `prompts/rag-answer.yml`，系统规则不硬编码到业务类 |
@@ -58,7 +59,7 @@ Browser
 | 管理员诊断 | 已实现并实测 | 配置状态和真实 probe；响应脱敏，不包含 Key/Authorization |
 | SSE 流式问答 | 已实现并实测 | `/api/rag/stream` 返回 status/token/sources/done/error，真实 Token 非事后切串 |
 | 前端问答 | 已实现并构建 | Fetch 读取 POST SSE，逐 Token 显示并以 `done.answer` 覆盖最终校验文本 |
-| 文档删除补偿 | 已实现并故障实测 | 创建人/ADMIN 软删除；ES 失败持久化重试，最多 10 次 |
+| 文档删除补偿 | 已实现并故障测试 | 创建人/ADMIN 软删除；ES 文本和 Qdrant 向量任一侧失败均持久化重试，最多 10 次 |
 | MySQL 关键词降级 | 已保留 | ES 无高质量命中或不可用时仍执行相同权限条件 |
 
 ## 4. 数据库与中间件变更
@@ -67,11 +68,11 @@ Browser
 - 新增 `ops_rag.ai_usage_log`。
 - `ops_knowledge.knowledge_document` 新增 `visibility` 和权限索引。
 - `ops_knowledge.knowledge_chunk` 新增 `embedding_model`、`indexed_at`。
-- `ops_knowledge.knowledge_index_task` 保存 ES DELETE 补偿状态、重试次数和下次执行时间。
-- Elasticsearch 新增 `opsagent-knowledge-v1`，Embedding 字段为 1536 维 cosine `dense_vector`。
+- `ops_knowledge.knowledge_index_task` 保存 ES/Qdrant DELETE 补偿状态、重试次数和下次执行时间。
+- Elasticsearch 当前正式索引只保存 SmartCN/BM25 文本字段；Qdrant Collection 保存 1536 维 cosine 向量和权限 Payload。
 - 新增迁移脚本 `sql/08_ops_ai_rag.sql` 和 `sql/09_knowledge_index_compensation.sql`；脚本重复执行不会删除已有数据。
 
-当前未删除文档为 22 篇 `INDEXED`、1 篇预期 `FAILED`；25 个有效切片的模型均为 `text-embedding-3-small`，Elasticsearch `_count=25`。删除补偿验收临时文档 ID `1024` 已软删除，不计入上述可用文档。
+当前未删除文档为 32 篇，其中 26 篇已发布；49 个有效切片的模型均标记为 `text-embedding-3-small`。Qdrant `ops_knowledge_vector_read` Alias 已指向 `ops_knowledge_vector_v1`，精确计数为 49；旧 `opsagent-knowledge-v1` 仅作为本次离线迁移来源保留，运行期不再承担向量检索。
 
 ## 5. 真实测试结果
 
@@ -84,7 +85,8 @@ Browser
 | DeepSeek Java probe | 通过 | 返回 `OK` |
 | Kimi Java probe | 通过 | 关闭 thinking 后返回 `OK` |
 | 文档 Embedding | 通过 | `text-embedding-3-small`，数据库状态 `INDEXED` |
-| Elasticsearch 索引 | 通过 | `opsagent-knowledge-v1/_count = 25` |
+| Qdrant 向量迁移 | 通过 | 49 个已有向量迁入 `ops_knowledge_vector_v1`，Alias 查询精确计数 49 |
+| Qdrant kNN 与权限 Payload | 通过 | 自相似查询命中同一 Chunk，score=1.0，`reviewStatus=PUBLISHED` 过滤生效 |
 | 明确答案 RAG | 通过 | 命中 `chunk:1025`，回答“先确认 Sentinel 主从切换” |
 | Prompt Injection | 通过 | 仅把恶意语句作为文档数据解释，`keyLeak=false` |
 | 密码索取 | 通过（最终策略） | 直接证据不足，Provider `none`、Sources `0`、不产生 AI Usage |
@@ -94,7 +96,7 @@ Browser
 | DeepSeek SSE | 通过 | `ST`、`REAM`、`_OK` 三个真实 delta；首字节 0.72s，总耗时 1.63s |
 | SSE 正常结束 | 通过 | HTTP 200、完整 `done`，无 chunked transfer 错误 |
 | Sentinel FlowRule | 通过 | 12 并发中 6 个放行、6 个拦截；规则已从 Nacos 推送 |
-| ES 删除补偿 | 通过 | ES 停止后为 RETRYING；恢复后 SUCCESS，向量 1→0，数据库 deleted=1 |
+| 双索引删除补偿 | 通过（自动化测试） | ES/Qdrant 任一侧失败进入 RETRYING；恢复后继续清理，数据库保持软删除事实源 |
 
 OpenAI 首次 Java probe 曾连接超时。根因是 Windows 启用了 `127.0.0.1:7890` HTTPS 代理，而 Java 默认直连到了不可用的 DNS 地址。启动脚本现会自动读取 Windows 当前代理并给 Java HTTPS 请求使用，localhost 配置为不走代理；修复后 OpenAI probe 通过。
 
@@ -142,6 +144,6 @@ OpenAI 首次 Java probe 曾连接超时。根因是 Windows 启用了 `127.0.0.
 
 ## 9. 2026-09-04 RAG 技术增强补充
 
-本节覆盖前文基于旧 `opsagent-knowledge-v1` 索引的历史结论。当前已升级为结构化切片、SmartCN BM25、kNN、RRF、可选 BGE Cross-Encoder、Context Token Budget、`[Sx]` Citation、独立索引 Outbox/DLQ 和版本化 Alias。管理员页面新增一致性检查、全量 Reindex、失败任务和单文档修复。
+本节覆盖前文基于旧 `opsagent-knowledge-v1` 单体向量索引的历史结论。当前已升级为结构化切片、Elasticsearch SmartCN/BM25、Qdrant kNN、应用层 RRF、可选 BGE Cross-Encoder、Context Token Budget、`[Sx]` Citation、独立索引 Outbox/DLQ，以及 ES 版本化索引和 Qdrant 版本化 Collection/Alias。管理员页面新增一致性检查、全量 Reindex、失败任务和单文档修复。
 
-本机 BGE `BAAI/bge-reranker-v2-m3` 已完成真实 CPU 推理；Java → BGE 隔离测试中 5/5 来源具有 Rerank 分数。实时库现有 26 篇已发布文档，而明确的 OpenAI Embedding 授权范围为 21 篇，所以本次没有把新增 5 篇外发，新的 `ops_knowledge_chunk_read/write` Alias 暂未完成全量向量重建。完整现状、架构和不编造数字的评测报告见 `docs/rag/`。
+本机 BGE `BAAI/bge-reranker-v2-m3` 已完成真实 CPU 推理；Java → BGE 隔离测试中 5/5 来源具有 Rerank 分数。实时库现有 26 篇已发布文档，而明确的 OpenAI Embedding 外发授权范围为最初 21 篇，因此本次没有把新增文档再次发送给 OpenAI；改为复用本机旧 ES 中已有的 49 个向量完成 Qdrant 数据迁移。完整现状、架构和不编造数字的评测报告见 `docs/rag/`。

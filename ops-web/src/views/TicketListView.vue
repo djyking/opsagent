@@ -5,6 +5,7 @@ import { Search, Plus, RotateCw, ArrowUpRight, TicketCheck } from "@lucide/vue";
 import { itsmApi, ticketApi } from "@/api/modules";
 import type { PageResponse, Ticket } from "@/types/api";
 import BaseModal from "@/components/BaseModal.vue";
+import DetailPanel from "@/components/DetailPanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import PaginationBar from "@/components/PaginationBar.vue";
 const route = useRoute();
@@ -19,6 +20,7 @@ const loading = ref(false);
 const error = ref("");
 const showCreate = ref(false);
 const creating = ref(false);
+const preview = ref<Ticket>();
 const filters = reactive({
   keyword: "",
   status: "",
@@ -77,6 +79,9 @@ watch(
   { immediate: true },
 );
 onMounted(async () => {
+  filters.keyword = String(route.query.keyword || "");
+  filters.status = String(route.query.status || "");
+  if (route.query.priority === "HIGH") filters.priority = "HIGH";
   await Promise.all([
     load(),
     itsmApi.cis({ type: "SERVICE" }).then((rows) => (cis.value = rows)),
@@ -157,11 +162,18 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="ticket in page.records" :key="ticket.id">
+            <tr
+              v-for="ticket in page.records"
+              :key="ticket.id"
+              class="ticket-table-row"
+              tabindex="0"
+              @click="preview = ticket"
+              @keydown.enter="preview = ticket"
+            >
               <td>
-                <RouterLink class="table-title" :to="`/tickets/${ticket.id}`"
+                <button class="table-title table-title-button" @click.stop="preview = ticket"
                   ><strong>{{ ticket.title }}</strong
-                  ><span>{{ ticket.ticketNo }}</span></RouterLink
+                  ><span>{{ ticket.ticketNo }}</span></button
                 >
               </td>
               <td><StatusBadge :value="ticket.priority" /></td>
@@ -176,7 +188,7 @@ onMounted(async () => {
               </td>
               <td>{{ new Date(ticket.updateTime).toLocaleString("zh-CN") }}</td>
               <td>
-                <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`"
+                <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`" @click.stop
                   ><ArrowUpRight :size="17"
                 /></RouterLink>
               </td>
@@ -197,6 +209,27 @@ onMounted(async () => {
         "
       />
     </section>
+    <DetailPanel
+      v-if="preview"
+      :title="preview.title"
+      :subtitle="preview.ticketNo"
+      :full-path="`/tickets/${preview.id}`"
+      @close="preview = undefined"
+    >
+      <div class="ticket-preview-badges">
+        <StatusBadge :value="preview.priority" /><StatusBadge :value="preview.status" />
+      </div>
+      <dl class="ticket-preview-meta">
+        <div><dt>负责人</dt><dd>{{ preview.assigneeId ? `#${preview.assigneeId}` : "待分配" }}</dd></div>
+        <div><dt>受影响服务</dt><dd>{{ preview.affectedCiCode || "未关联" }}</dd></div>
+        <div><dt>来源</dt><dd>{{ preview.sourceType }}</dd></div>
+        <div><dt>更新时间</dt><dd>{{ new Date(preview.updateTime).toLocaleString("zh-CN") }}</dd></div>
+      </dl>
+      <section class="ticket-preview-description">
+        <h3>问题描述</h3><p>{{ preview.description }}</p>
+      </section>
+      <p class="ticket-preview-hint">完整页面包含 SLA、处理记录、关联告警、CMDB、附件与 AI 分析。</p>
+    </DetailPanel>
     <BaseModal
       v-if="showCreate"
       title="新建运维工单"

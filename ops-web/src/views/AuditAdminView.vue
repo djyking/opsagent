@@ -74,19 +74,21 @@ onMounted(load);
       <div v-else-if="!audits.records.length" class="empty-state">
         <ClipboardList :size="36" /><strong>暂无审计记录</strong>
       </div>
-      <div v-else class="record-list">
-        <article v-for="item in audits.records" :key="item.id">
-          <div class="record-icon"><ClipboardList :size="20" /></div>
-          <div class="record-body">
-            <header>
-              <strong>{{ item.operationType }}</strong>
-              <span class="mono">{{ item.bizType }} #{{ item.bizId }}</span>
-            </header>
-            <p>{{ item.content }}</p>
-            <span>{{ item.serviceName }} · 操作人 #{{ item.operator }} · {{ new Date(item.createTime).toLocaleString("zh-CN") }}</span>
-          </div>
-          <div class="row-actions"><button class="icon-button" title="查看事件详情" @click="selected = item"><Eye :size="17" /></button><button class="icon-button" title="进入对应工单" @click="router.push(`/tickets/${item.bizId}`)"><ExternalLink :size="17" /></button></div>
-        </article>
+      <div v-else class="responsive-table">
+        <table class="audit-table">
+          <thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>业务对象</th><th>服务</th><th>Trace ID</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="item in audits.records" :key="item.id" tabindex="0" @click="selected = item" @keydown.enter="selected = item">
+              <td>{{ new Date(item.createTime).toLocaleString("zh-CN") }}</td>
+              <td>#{{ item.operator }}</td>
+              <td><strong>{{ item.operationType }}</strong></td>
+              <td class="mono">{{ item.bizType }} #{{ item.bizId }}</td>
+              <td>{{ item.serviceName }}</td>
+              <td class="mono trace-cell">{{ item.traceId || "未记录" }}</td>
+              <td><div class="row-actions"><button class="icon-button" title="查看事件详情" @click.stop="selected = item"><Eye :size="17" /></button><button v-if="item.bizType === 'TICKET'" class="icon-button" title="进入对应工单" @click.stop="router.push(`/tickets/${item.bizId}`)"><ExternalLink :size="17" /></button></div></td>
+            </tr>
+          </tbody>
+        </table>
       </div>
       <PaginationBar
         v-if="audits.total"

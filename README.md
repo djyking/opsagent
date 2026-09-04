@@ -2,7 +2,7 @@
 
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-当前已形成“Prometheus / Alertmanager → CMDB Lite → 自动建单 → 值班 → SLA → Outbox / RabbitMQ → 人工处置 → 知识审核 → RAG”的企业 ITSM 闭环，并保留文档软删除和 Elasticsearch 持久化补偿。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus、Alertmanager 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于进程启动时注入。
+当前已形成“Prometheus / Alertmanager → CMDB Lite → 自动建单 → 值班 → SLA → Outbox / RabbitMQ → 人工处置 → 知识审核 → RAG”的企业 ITSM 闭环，并保留文档软删除及 Elasticsearch、Qdrant 双索引持久化补偿。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Qdrant、Prometheus、Alertmanager、Grafana、六个 Java 服务和 Nginx 前端均可由 Docker Compose 统一运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于容器启动时注入。
 
 ## 项目结构
 
@@ -18,7 +18,8 @@ opsagent
 ├─ ops-web                    Vue 3 前端项目
 ├─ demo-data                  企业 Runbook、附件和一键初始化脚本
 ├─ sql                        分库初始化脚本
-├─ compose.yaml               全部中间件容器（不包含 Java 应用）
+├─ compose.yaml               中间件与 apps profile 全栈容器
+├─ Dockerfile                 六个 Java 服务的统一多阶段镜像
 ├─ opsAgent使用文档.md          完整功能使用说明
 └─ pom.xml                     后端 Maven 配置
 ```
@@ -51,7 +52,8 @@ powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
 | Prometheus | `http://127.0.0.1:9090/targets` | 六个 Java 服务抓取状态 |
 | Alertmanager | `http://127.0.0.1:9093/` | 告警路由和恢复状态 |
 | Grafana | `http://127.0.0.1:3000/` | `OpsAgent Overview` 与 `OpsAgent ITSM Overview` |
-| Elasticsearch | `http://127.0.0.1:9200/_cluster/health` | `dense_vector` 知识检索索引 |
+| Elasticsearch | `http://127.0.0.1:9200/_cluster/health` | SmartCN 与 BM25 文本检索 |
+| Qdrant | `http://127.0.0.1:6333/dashboard` | 向量、权限 Payload 与 kNN |
 
 账号和密码不写入 Git 文档，统一查看本机仓库外文件 `D:\middleware\docs\OpsAgent本地地址与密码.md`。
 
@@ -136,8 +138,10 @@ GET  /api/knowledge/documents/{id}/review-history
 问答默认经过以下链路：
 
 ```text
-Document → Parse/Chunk → text-embedding-3-small → Elasticsearch dense_vector
-Question → 同模型 Embedding → RBAC/文档范围过滤 → TopK/最低相似度
+Document → Parse/Chunk → text-embedding-3-small → Qdrant Vector
+                                  └────────────→ Elasticsearch BM25
+Question → 同模型 Embedding → Qdrant 权限过滤与 TopK/最低相似度
+         → Elasticsearch SmartCN/BM25 → RRF 融合
 → 版本化 YAML Prompt → OpenAI / DeepSeek / Kimi → Citation 校验 → Answer + Sources
 ```
 
@@ -145,7 +149,7 @@ OpenAI 使用 Responses API，DeepSeek 和 Kimi 使用兼容 Chat Completions。
 
 `POST /api/rag/ask` 可选传 `documentId`，用于把问答严格限定在用户有权访问的单个文档。文档访问规则为：`PUBLIC` 对已认证用户可见，`PRIVATE` 仅创建者和 ADMIN 可见；权限过滤在内容进入 Prompt 之前完成。
 
-删除文档时数据库立即写入 `deleted=1/status=DELETED`，并创建 `knowledge_index_task`。ES 同步删除失败时任务按指数退避重试，最多 10 次；本地原文件暂时保留，供恢复或后续保留期清理任务使用。
+删除文档时数据库立即写入 `deleted=1/status=DELETED`，并创建 `knowledge_index_task`。Elasticsearch 文本和 Qdrant 向量任一侧删除失败时，任务都会按指数退避重试，最多 10 次；本地原文件暂时保留，供恢复或后续保留期清理任务使用。
 
 ## 配置
 
@@ -168,7 +172,9 @@ SENTINEL_EAGER                 默认 false
 SENTINEL_DASHBOARD             默认 localhost:8858
 SENTINEL_RULE_DATA_ID          默认 ops-rag-sentinel-flow-rules
 OPS_VECTOR_ENABLED             是否启用 Embedding/向量检索
-OPS_ES_URL / OPS_ES_KNOWLEDGE_INDEX / OPS_VECTOR_MINIMUM_SCORE
+OPS_ES_URL / OPS_ES_KNOWLEDGE_INDEX
+OPS_QDRANT_URL / OPS_QDRANT_COLLECTION / OPS_QDRANT_ALIAS / OPS_QDRANT_API_KEY
+OPS_VECTOR_MINIMUM_SCORE
 OPS_AI_ENABLED / OPS_AI_PROVIDER
 OPENAI_API_KEY / OPENAI_MODEL / OPENAI_EMBEDDING_MODEL
 DEEPSEEK_API_KEY / DEEPSEEK_MODEL
@@ -191,16 +197,27 @@ $env:OPS_AI_PROVIDER = 'openai' # openai、deepseek 或 kimi，修改后重启 R
 - Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
 - 本地演示账号由 SQL 初始化，账号列表及本地密码只记录在仓库外密码文档中。
 
-`compose.yaml` 只包含中间件：MySQL、Redis、Nacos、Sentinel、RabbitMQ、SmartCN Elasticsearch、Prometheus、Alertmanager、Grafana，以及可选的 BGE Reranker，不包含 Java 服务。
+`compose.yaml` 默认启动中间件；`apps` profile 额外启动六个 Java 服务和 Nginx 前端，`rerank` profile 启动 BGE Reranker。MySQL 继续保存业务事实，Elasticsearch 只做 SmartCN/BM25，Qdrant 专门保存 1536 维向量和权限 Payload。
 
 `ops_rag.ai_usage_log` 仅记录用户 ID、Provider、模型、问题 SHA-256、Token、耗时、成功状态和脱敏错误码，不保存问题正文、Prompt、回答或 Key。
 
 解析新文档时，启用向量功能会自动生成 Embedding 并索引。2026-09-03 曾在明确授权范围内完成一批 `text-embedding-3-small` 向量化；2026-09-04 实时库已有 26 篇已发布文档，其中新增 5 篇不在原 21 篇外发授权内，因此新版本 Alias 的全量 Reindex 暂未执行。今后再次导入内部文档时仍需单独确认数据分级和第三方处理范围；生成阶段会把检索上下文发送给当前 `OPS_AI_PROVIDER`，不要把 Embedding 授权等同于任意生成 Provider 授权。
 
 ```powershell
+# 只启动中间件
 docker compose up -d
-docker compose ps
+
+# 首次构建并启动完整系统
+.\scripts\start-containers.ps1 -Build -WithReranker
+
+# 后续直接启动；停止不会删除 named volumes
+.\scripts\start-containers.ps1 -WithReranker
+.\scripts\stop-containers.ps1
 ```
+
+容器运行时，Spring `${NAME:default}` 读取的是容器环境变量，不会自动继承宿主机全部变量。Compose 已把 `OPS_RAG_NEIGHBOR_WINDOW: ${OPS_RAG_NEIGHBOR_WINDOW:-1}` 等参数显式传入；迁移时复制代码和 Compose，在新主机创建不提交 Git 的 `.env` 即可继续生效。真实密码和 API Key 不进入 Dockerfile、镜像或仓库。
+
+监控服务使用 `OPS_PROMETHEUS_URL` / `OPS_GRAFANA_URL` 访问 Docker 内部服务，页面跳转使用 `OPS_PROMETHEUS_PUBLIC_URL` / `OPS_GRAFANA_PUBLIC_URL`。迁移到其他机器时，在 `.env` 将两个 Public URL 改为新机器的 IP 或域名。
 
 推荐使用 `D:\middleware\scripts\start-opsagent.ps1` 启动全部中间件和本机应用；只启动中间件时添加 `-MiddlewareOnly`。停止脚本不会删除 Docker named volumes。
 
@@ -217,7 +234,7 @@ BGE Reranker 镜像存在时，启动脚本会自动启动 `reranker` profile，
 D:\middleware\scripts\start-opsagent.ps1
 ```
 
-后端是六个独立进程，分别运行各模块 `target` 下的可执行 Jar。统一 API 入口为 `http://localhost:18080`。
+推荐部署方式是六个独立 Java 容器和一个 Nginx 前端容器，统一 API 入口为 `http://localhost:18080`，页面入口为 `http://localhost:5173`。宿主机 JAR/Vite 启动方式继续保留用于开发调试，不要与 `apps` profile 同时运行，以免端口冲突。
 
 只有修改前端源码并需要热更新时，才单独启动 Vite：
 
@@ -236,7 +253,7 @@ cd ops-web
 pnpm build
 ```
 
-构建结果位于 `ops-web/dist`，前端应由 Nginx 或静态站点独立发布；当前 Maven 不会把它打入某个业务服务 Jar。
+构建结果位于 `ops-web/dist`；生产镜像使用 Nginx 提供静态资源，并把 `/api` 反向代理到 Gateway，SSE 路径关闭代理缓冲。
 
 项目默认启用 `local` Profile，也可以用 `SPRING_PROFILES_ACTIVE` 覆盖。接口访问日志只记录请求方法、路径、响应状态、耗时和 Trace ID，不记录请求体、密码或完整 JWT。
 
@@ -249,3 +266,15 @@ RAG 技术资料：
 - [真实验收与评测报告](docs/rag/evaluation-report.md)
 
 管理员登录后可从“索引管理”查看 MySQL/ES 一致性、提交全量 Reindex、查看失败任务并按文档 ID 修复。问答引用展示 `[S1]`、文档、章节、页码和检索通道；RRF/Rerank 分数只对管理员显示。
+
+## 前端工作台
+
+前端采用 Vue 3、Pinia、Vue Router、Element Plus、Lucide 和 ECharts。2026-09-04 起使用企业 SaaS 工作台布局：桌面端为 `64px App Rail + 224px Context Navigation + Workspace`，上下文导航可折叠；窄屏通过抽屉同时提供产品域和当前业务域入口。
+
+- 总览：真实 API 驱动的 P1/P2、SLA 风险、活动告警、处理中、当前值班、服务健康和工单分布。
+- 运维：工单、告警、SLA、值班和 CMDB；工单列表点击行先打开快速详情侧栏，Esc 可关闭，再按需进入完整页。
+- 可观测：OpsAgent 服务健康聚合，并跳转已配置的 Prometheus 与 Grafana。
+- AI：三栏 RAG 工作区、知识库、知识审核和索引管理；窄屏自动收为单栏。
+- 系统：分组通知和高密度审计表；只有工单类审计记录才显示工单跳转。
+
+导航和统计只展示已有路由、权限及真实 API 数据。Agent、Workflow、用户/角色配置等尚无完整后端能力的页面没有伪造入口。全局搜索当前明确为工单搜索，回车后进入工单中心并带入关键词。

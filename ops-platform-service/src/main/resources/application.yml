@@ -47,6 +47,8 @@ ops:
   monitor:
     prometheus-url: ${OPS_PROMETHEUS_URL:http://localhost:9090}
     grafana-url: ${OPS_GRAFANA_URL:http://localhost:3000}
+    prometheus-public-url: ${OPS_PROMETHEUS_PUBLIC_URL:http://localhost:9090}
+    grafana-public-url: ${OPS_GRAFANA_PUBLIC_URL:http://localhost:3000}
 management:
   endpoints:
     web:

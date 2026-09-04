@@ -4,7 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 管理知识向量化、Embedding 模型和 Elasticsearch 索引参数。
+ * 管理知识向量化、Embedding、Elasticsearch 文本索引和 Qdrant 参数。
  *
  * @author heyu
  * @since 2026/8/29
@@ -18,6 +18,10 @@ public class VectorProperties {
     private String readAlias = "ops_knowledge_chunk_read";
     private String writeAlias = "ops_knowledge_chunk_write";
     private String analyzer = "smartcn";
+    private String qdrantUrl = "http://localhost:6333";
+    private String qdrantCollection = "ops_knowledge_vector_v1";
+    private String qdrantAlias = "ops_knowledge_vector_read";
+    private String qdrantApiKey = "";
     private int dimensions = 1536;
     private double minimumScore = 0.72D;
     private String embeddingBaseUrl = "https://api.openai.com/v1";
@@ -80,6 +84,38 @@ public class VectorProperties {
 
     public void setAnalyzer(String analyzer) {
         this.analyzer = analyzer;
+    }
+
+    public String getQdrantUrl() {
+        return qdrantUrl;
+    }
+
+    public void setQdrantUrl(String qdrantUrl) {
+        this.qdrantUrl = qdrantUrl;
+    }
+
+    public String getQdrantCollection() {
+        return qdrantCollection;
+    }
+
+    public void setQdrantCollection(String qdrantCollection) {
+        this.qdrantCollection = qdrantCollection;
+    }
+
+    public String getQdrantAlias() {
+        return qdrantAlias;
+    }
+
+    public void setQdrantAlias(String qdrantAlias) {
+        this.qdrantAlias = qdrantAlias;
+    }
+
+    public String getQdrantApiKey() {
+        return qdrantApiKey;
+    }
+
+    public void setQdrantApiKey(String qdrantApiKey) {
+        this.qdrantApiKey = qdrantApiKey;
     }
 
     public int getDimensions() {

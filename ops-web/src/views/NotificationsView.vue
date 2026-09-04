@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { Bell, CheckCheck, CheckCircle2, ExternalLink, Mail } from "@lucide/vue";
 import { useRouter } from "vue-router";
 import { adminApi } from "@/api/modules";
@@ -18,6 +18,23 @@ const unreadTotal = ref(0);
 const error = ref("");
 const busy = ref<number>();
 const router = useRouter();
+const groups = computed(() => {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const key = (value: Date) => `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`;
+  const labels = new Map<string, string>([
+    [key(today), "今天"],
+    [key(yesterday), "昨天"],
+  ]);
+  const result = new Map<string, NotificationRecord[]>();
+  for (const item of data.value.records) {
+    const date = new Date(item.createTime);
+    const group = labels.get(key(date)) || date.toLocaleDateString("zh-CN");
+    result.set(group, [...(result.get(group) || []), item]);
+  }
+  return [...result.entries()].map(([label, records]) => ({ label, records }));
+});
 async function load() {
   try {
     const result = await adminApi.notifications({
@@ -82,8 +99,11 @@ onMounted(load);
       <div v-if="!data.records.length" class="empty-state">
         <Bell :size="36" /><strong>暂无通知记录</strong>
       </div>
-      <div v-else class="record-list">
-        <article v-for="item in data.records" :key="item.id">
+      <div v-else class="notification-groups">
+        <section v-for="group in groups" :key="group.label" class="notification-group">
+          <h3>{{ group.label }}</h3>
+        <article v-for="item in group.records" :key="item.id" class="notification-row">
+          <i v-if="item.status === 'UNREAD'" class="notification-unread-dot" />
           <div class="record-icon"><Bell :size="20" /></div>
           <div class="record-body">
             <header>
@@ -109,6 +129,7 @@ onMounted(load);
           </div>
           <div v-else class="row-actions"><button class="icon-button" title="标记未读" :disabled="busy === item.id" @click="updateStatus(item, 'UNREAD')"><Mail :size="17" /></button><button class="icon-button" title="进入对应工单" @click="router.push(`/tickets/${item.ticketId}`)"><ExternalLink :size="17" /></button></div>
         </article>
+        </section>
       </div>
       <PaginationBar
         v-if="data.total"

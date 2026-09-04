@@ -274,15 +274,21 @@ public class KnowledgeService {
         Map<String, Long> database = repo.indexStatusCounts();
         Map<String, Object> index = indexService.indexMetadata();
         long indexed = ((Number) index.get("indexedDocumentCount")).longValue();
+        long vectorPoints = ((Number) index.get("vectorPointCount")).longValue();
         long published = database.get("published");
+        long publishedChunks = database.get("publishedChunks");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("publishedDocumentCount", published);
+        result.put("publishedChunkCount", publishedChunks);
         result.put("indexedDocumentCount", database.get("indexed"));
         result.put("pendingDocumentCount", database.get("pending"));
         result.put("failedDocumentCount", database.get("failed"));
         result.put("orphanEsDocumentCount", Math.max(0L, indexed - published));
+        result.put("missingQdrantPointCount", Math.max(0L, publishedChunks - vectorPoints));
+        result.put("orphanQdrantPointCount", Math.max(0L, vectorPoints - publishedChunks));
         result.putAll(index);
-        consistencyGap.set(Math.abs(published - indexed));
+        consistencyGap.set(Math.max(
+                Math.abs(published - indexed), Math.abs(publishedChunks - vectorPoints)));
         return result;
     }
 

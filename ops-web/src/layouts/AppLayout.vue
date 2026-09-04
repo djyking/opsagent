@@ -2,125 +2,174 @@
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
-  LayoutDashboard,
-  TicketCheck,
   Bell,
-  ShieldCheck,
-  LogOut,
-  Menu,
-  X,
-  Activity,
+  BookCheck,
   BookOpen,
   Bot,
-  Monitor,
-  Network,
   CalendarClock,
-  TimerReset,
-  Siren,
-  BookCheck,
   DatabaseZap,
+  Gauge,
+  LayoutDashboard,
+  Network,
+  ShieldCheck,
+  Siren,
+  TicketCheck,
+  TimerReset,
 } from "@lucide/vue";
+import AppRail from "@/components/AppRail.vue";
+import ContextSidebar from "@/components/ContextSidebar.vue";
+import GlobalTopbar from "@/components/GlobalTopbar.vue";
 import { useAuthStore } from "@/stores/auth";
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const open = ref(false);
-const title = computed(
-  () =>
-    ({
-      dashboard: "运行总览",
-      tickets: "工单中心",
-      "ticket-detail": "工单详情",
-      knowledge: "知识库",
-      "rag-chat": "智能问答",
-      monitor: "系统监控",
-      cmdb: "服务目录与拓扑",
-      oncall: "值班排班",
-      sla: "SLA 看板",
-      alerts: "活动告警",
-      "knowledge-review": "知识审核",
-      "knowledge-index-admin": "知识索引管理",
-      notifications: "通知中心",
-      admin: "操作审计",
-    })[String(route.name)] || "OpsAgent",
+const mobileOpen = ref(false);
+const collapsed = ref(localStorage.getItem("opsagent-context-collapsed") === "true");
+
+const pageTitles: Record<string, string> = {
+  dashboard: "运行总览",
+  tickets: "工单中心",
+  "ticket-detail": "工单详情",
+  knowledge: "知识库",
+  "rag-chat": "智能问答",
+  monitor: "系统监控",
+  cmdb: "服务目录与拓扑",
+  oncall: "值班排班",
+  sla: "SLA 看板",
+  alerts: "活动告警",
+  "knowledge-review": "知识审核",
+  "knowledge-index-admin": "知识索引管理",
+  notifications: "通知中心",
+  admin: "操作审计",
+};
+
+const activeDomain = computed(() => {
+  const name = String(route.name || "");
+  if (name === "dashboard") return "overview";
+  if (["tickets", "ticket-detail", "cmdb", "oncall", "sla", "alerts"].includes(name)) {
+    return "operations";
+  }
+  if (name === "monitor") return "observability";
+  if (["knowledge", "rag-chat", "knowledge-review", "knowledge-index-admin"].includes(name)) {
+    return "ai";
+  }
+  if (name === "notifications") return "notifications";
+  return "system";
+});
+
+const domainConfig = computed(() => {
+  const configs = {
+    overview: {
+      title: "总览",
+      subtitle: "Workspace",
+      items: [{ to: "/dashboard", label: "运行总览", icon: LayoutDashboard }],
+    },
+    operations: {
+      title: "运维",
+      subtitle: "Operations",
+      items: [
+        { to: "/tickets", label: "工单中心", icon: TicketCheck },
+        ...(auth.isAdmin ? [{ to: "/itsm/alerts", label: "活动告警", icon: Siren }] : []),
+        { to: "/itsm/sla", label: "SLA 看板", icon: TimerReset },
+        { to: "/itsm/oncall", label: "值班排班", icon: CalendarClock },
+        { to: "/itsm/cmdb", label: "服务目录", icon: Network },
+      ],
+    },
+    observability: {
+      title: "可观测",
+      subtitle: "Observability",
+      items: [{ to: "/system/monitor", label: "系统监控", icon: Gauge }],
+    },
+    ai: {
+      title: "AI 智能",
+      subtitle: "Intelligence",
+      items: [
+        { to: "/rag/chat", label: "智能问答", icon: Bot },
+        { to: "/knowledge", label: "知识库", icon: BookOpen },
+        ...(auth.isAdmin
+          ? [
+              { to: "/knowledge/review", label: "知识审核", icon: BookCheck },
+              { to: "/knowledge/index-admin", label: "索引管理", icon: DatabaseZap },
+            ]
+          : []),
+      ],
+    },
+    notifications: {
+      title: "通知",
+      subtitle: "Inbox",
+      items: [{ to: "/notifications", label: "通知中心", icon: Bell }],
+    },
+    system: {
+      title: "系统",
+      subtitle: "Platform",
+      items: [{ to: "/admin", label: "操作审计", icon: ShieldCheck }],
+    },
+  };
+  return configs[activeDomain.value as keyof typeof configs] || configs.overview;
+});
+
+const pageTitle = computed(() => pageTitles[String(route.name)] || "OpsAgent");
+const initials = computed(
+  () => auth.user?.displayName?.slice(0, 1) || auth.user?.username?.slice(0, 1) || "O",
 );
-const nav = computed(() => [
-  { to: "/dashboard", label: "运行总览", icon: LayoutDashboard },
-  { to: "/tickets", label: "工单中心", icon: TicketCheck },
-  { to: "/knowledge", label: "知识库", icon: BookOpen },
-  { to: "/rag/chat", label: "智能问答", icon: Bot },
-  { to: "/system/monitor", label: "系统监控", icon: Monitor },
-  { to: "/itsm/cmdb", label: "服务目录", icon: Network },
-  { to: "/itsm/oncall", label: "值班排班", icon: CalendarClock },
-  { to: "/itsm/sla", label: "SLA 看板", icon: TimerReset },
-  ...(auth.isAdmin
-    ? [
-        { to: "/itsm/alerts", label: "活动告警", icon: Siren },
-        { to: "/knowledge/review", label: "知识审核", icon: BookCheck },
-        { to: "/knowledge/index-admin", label: "索引管理", icon: DatabaseZap },
-        { to: "/notifications", label: "通知中心", icon: Bell },
-        { to: "/admin", label: "操作审计", icon: ShieldCheck },
-      ]
-    : []),
-]);
+
+function selectDomain(domain: string) {
+  const targets: Record<string, string> = {
+    overview: "/dashboard",
+    operations: "/tickets",
+    observability: "/system/monitor",
+    ai: "/rag/chat",
+    notifications: "/notifications",
+    system: "/admin",
+  };
+  mobileOpen.value = false;
+  router.push(targets[domain] || "/dashboard");
+}
+
+function toggleContext() {
+  collapsed.value = !collapsed.value;
+  localStorage.setItem("opsagent-context-collapsed", String(collapsed.value));
+}
+
 function logout() {
   auth.logout();
   router.push("/login");
 }
 </script>
+
 <template>
-  <div class="app-shell">
-    <aside class="sidebar" :class="{ open }">
-      <div class="brand">
-        <div class="brand-mark"><Activity :size="22" /></div>
-        <div><strong>OpsAgent</strong><span>智能运维中枢</span></div>
-        <button class="mobile-close icon-button" @click="open = false">
-          <X :size="20" />
-        </button>
-      </div>
-      <nav>
-        <span class="nav-label">工作空间</span
-        ><RouterLink
-          v-for="item in nav"
-          :key="item.to"
-          :to="item.to"
-          @click="open = false"
-          ><component :is="item.icon" :size="19" /><span>{{
-            item.label
-          }}</span></RouterLink
-        >
-      </nav>
-      <div class="sidebar-profile">
-        <div class="avatar">
-          {{
-            auth.user?.displayName?.slice(0, 1) ||
-            auth.user?.username.slice(0, 1)
-          }}
-        </div>
-        <div>
-          <strong>{{ auth.user?.displayName || auth.user?.username }}</strong
-          ><span>{{
-            auth.isAdmin ? "系统管理员" : auth.isOps ? "运维工程师" : "普通用户"
-          }}</span>
-        </div>
-        <button class="icon-button" title="退出登录" @click="logout">
-          <LogOut :size="18" />
-        </button>
-      </div>
-    </aside>
-    <div v-if="open" class="sidebar-mask" @click="open = false" />
+  <div class="app-shell" :class="{ 'context-is-collapsed': collapsed }">
+    <AppRail
+      :active-domain="activeDomain"
+      :is-admin="auth.isAdmin"
+      :initials="initials"
+      @select="selectDomain"
+      @logout="logout"
+    />
+    <ContextSidebar
+      :title="domainConfig.title"
+      :subtitle="domainConfig.subtitle"
+      :items="domainConfig.items"
+      :collapsed="collapsed"
+      :mobile-open="mobileOpen"
+      :is-admin="auth.isAdmin"
+      @toggle="toggleContext"
+      @close="mobileOpen = false"
+    />
+    <button
+      v-if="mobileOpen"
+      class="context-mask"
+      aria-label="关闭导航"
+      @click="mobileOpen = false"
+    />
     <main class="main-area">
-      <header class="topbar">
-        <button class="menu-button icon-button" @click="open = true">
-          <Menu :size="21" />
-        </button>
-        <div>
-          <span class="breadcrumb">OPSAGENT / WORKSPACE</span>
-          <h1>{{ title }}</h1>
-        </div>
-        <div class="system-state"><i />服务运行中</div>
-      </header>
+      <GlobalTopbar
+        :domain-title="domainConfig.title"
+        :page-title="pageTitle"
+        :is-admin="auth.isAdmin"
+        @menu="mobileOpen = true"
+      />
       <div class="page-content"><RouterView /></div>
     </main>
   </div>

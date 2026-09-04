@@ -14,10 +14,13 @@ const success = ref("");
 
 const counts = computed(() => [
   ["已发布文档", Number(consistency.value.publishedDocumentCount || 0)],
-  ["已索引文档", Number(consistency.value.indexedDocumentCount || 0)],
+  ["ES 已索引文档", Number(consistency.value.indexedDocumentCount || 0)],
+  ["Qdrant 向量点", Number(consistency.value.vectorPointCount || 0)],
   ["待处理", Number(consistency.value.pendingDocumentCount || 0)],
   ["失败", Number(consistency.value.failedDocumentCount || 0)],
   ["ES 孤儿文档", Number(consistency.value.orphanEsDocumentCount || 0)],
+  ["Qdrant 缺失点", Number(consistency.value.missingQdrantPointCount || 0)],
+  ["Qdrant 孤儿点", Number(consistency.value.orphanQdrantPointCount || 0)],
 ]);
 
 async function load() {
@@ -37,7 +40,7 @@ async function load() {
 
 async function startReindex() {
   if (busy.value) return;
-  if (!confirm("全量重建会创建新物理索引，校验成功后原子切换 Alias。确认继续吗？")) return;
+  if (!confirm("全量重建会创建新的 ES 索引和 Qdrant Collection，校验成功后协调切换两侧 Alias。确认继续吗？")) return;
   busy.value = "reindex";
   error.value = "";
   success.value = "";
@@ -88,7 +91,7 @@ onMounted(load);
         <div>
           <span class="eyebrow">RAG INDEX OPERATIONS</span>
           <h3>知识索引管理</h3>
-          <p>核对 MySQL 发布状态与 Elasticsearch Alias 中的实际索引数据。</p>
+          <p>核对 MySQL 发布状态、Elasticsearch BM25 与 Qdrant 向量数据。</p>
         </div>
         <div class="row-actions">
           <button class="button secondary" :disabled="busy === 'load'" @click="load">
@@ -109,7 +112,10 @@ onMounted(load);
       <dl class="index-metadata">
         <div><dt>读 Alias</dt><dd>{{ consistency.indexAlias || "-" }}</dd></div>
         <div><dt>写 Alias</dt><dd>{{ consistency.writeAlias || "-" }}</dd></div>
-        <div><dt>物理索引</dt><dd>{{ consistency.physicalIndex || consistency.currentIndex || "-" }}</dd></div>
+        <div><dt>ES 物理索引</dt><dd>{{ consistency.physicalIndex || consistency.currentIndex || "-" }}</dd></div>
+        <div><dt>Qdrant Alias</dt><dd>{{ consistency.vectorAlias || "-" }}</dd></div>
+        <div><dt>Qdrant Collection</dt><dd>{{ consistency.physicalCollection || "-" }}</dd></div>
+        <div><dt>已发布切片</dt><dd>{{ consistency.publishedChunkCount || 0 }}</dd></div>
         <div><dt>Embedding 模型</dt><dd>{{ consistency.embeddingModel || "-" }}</dd></div>
       </dl>
     </section>

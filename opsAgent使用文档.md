@@ -14,13 +14,13 @@ OpsAgent 当前是一个 Java 17 / Spring Boot 3.5 微服务项目，用于演�
     → Platform（8105）
 ```
 
-Java 服务和 Vue 前端运行在 Windows 宿主机。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus、Grafana 由 Docker Compose 运行。
+推荐模式下，六个 Java 服务、Vue/Nginx 前端、MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Qdrant、Prometheus 和 Grafana 都由 Docker Compose 运行。宿主机 Java/Vite 模式只保留用于开发调试。
 
 当前两条主要闭环是：
 
 ```text
 工单操作 → 事务内 Outbox → RabbitMQ → Platform 消费幂等 → 操作审计
-文档上传 → RabbitMQ 异步解析 → 切片 → Embedding → Elasticsearch → 权限检索 → LLM → 引用
+文档上传 → RabbitMQ 异步解析 → 切片 → ES BM25 + Qdrant Vector → 权限检索 → LLM → 引用
 ```
 
 本地地址、账号和密码统一保存在仓库外的 `D:\middleware\docs\OpsAgent本地地址与密码.md`。不要把该文件复制到项目或提交到 GitHub。
@@ -37,7 +37,18 @@ Java 服务和 Vue 前端运行在 Windows 宿主机。MySQL、Redis、Nacos、S
 
 ## 3. 启动、查看状态和停止
 
-首次启动或 Java 代码修改后，先停止旧进程，再构建并启动：
+推荐的全容器启动方式：
+
+```powershell
+cd D:\myselfProject\opsagent
+Copy-Item .env.example .env
+# 编辑本机 .env，填入密码和需要启用的 Provider Key；.env 不会提交 Git
+.\scripts\start-containers.ps1 -Build -WithReranker
+```
+
+代码未变化时省略 `-Build`。停止命令为 `scripts\stop-containers.ps1`，不会删除 named volume。若使用原生命令，对应命令是 `docker compose --profile apps --profile rerank up -d --build`。
+
+宿主机开发模式仍可使用原脚本。首次启动或 Java 代码修改后，先停止旧进程，再构建并启动：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
@@ -160,7 +171,7 @@ DELETE /api/knowledge/documents/{documentId}
 GET    /api/knowledge/internal/index-tasks/{taskId}  # 仅 ADMIN
 ```
 
-只有文档创建人或 ADMIN 可以删除。接口先把数据库记录软删除，再同步尝试 ES `_delete_by_query`；失败时 `knowledge_index_task` 进入 `RETRYING` 并按指数退避自动补偿，最多 10 次。本地上传原文件暂不物理删除，后续可按审计保留期增加清理任务。
+只有文档创建人或 ADMIN 可以删除。接口先把数据库记录软删除，再清理 Elasticsearch 文本和 Qdrant 向量；任一侧失败时 `knowledge_index_task` 进入 `RETRYING` 并按指数退避自动补偿，最多 10 次。本地上传原文件暂不物理删除，后续可按审计保留期增加清理任务。
 
 ## 8. 智能问答
 
@@ -182,8 +193,10 @@ GET    /api/knowledge/internal/index-tasks/{taskId}  # 仅 ADMIN
 ```text
 问题校验/Sentinel QPS 限流
   → Query Embedding
-  → Elasticsearch KNN
-  → PUBLIC/创建人/ADMIN 权限过滤
+  → Qdrant Vector Search
+  → PUBLIC/创建人/ADMIN 权限 Payload 过滤
+  → Elasticsearch SmartCN/BM25
+  → 应用层 RRF 融合
   → 最低相似度 0.72 与 TopK
   → 无高质量向量结果时回退到权限关键词检索
   → YAML Prompt 与上下文预算
@@ -259,13 +272,15 @@ Sentinel 客户端已接入六个 Java 服务。启动脚本启用 eager 模式�
 
 当前 Nacos 中已持久化 RAG FlowRule：每实例 5 QPS，超过后返回“问答请求过于频繁”。2026-09-03 使用 12 个并发请求实测，6 个放行、6 个被拦截；请求跨越 1 秒统计边界，因此放行数可能不是严格 5。需要明确：Nacos 只负责统一下发规则，普通 Sentinel 客户端仍在各实例本地计数；多实例要共享严格总额度，必须再部署 Sentinel Cluster Token Server。熔断、热点参数和授权规则尚未配置。
 
-## 11. RabbitMQ、Prometheus、Grafana 和 Elasticsearch
+## 11. RabbitMQ、Prometheus、Grafana、Elasticsearch 和 Qdrant
 
 - RabbitMQ 管理页可查看 `ops.platform.audit.queue`、`ops.platform.audit.dlq`、`ops.knowledge.parse.queue` 和 `ops.knowledge.parse.dlq`。
 - Prometheus 的 `/targets` 页面应显示六个 Java job 全部 `UP`。
 - Grafana 已预置 `OpsAgent Overview`，包含 Outbox、MQ 消费和文档解析指标。
 - OpsAgent“系统监控”页会通过 Platform 服务实时读取 Prometheus Targets 和 Grafana 健康状态，并提供直达链接；不是静态占位页。
-- Elasticsearch `_cluster/health` 当前应为 green，`opsagent-knowledge-v1` 保存已向量化切片。
+- 容器内部探测地址与浏览器公开地址是两套配置。迁移后若页面能显示状态但链接打不开，请在 `.env` 设置 `OPS_PROMETHEUS_PUBLIC_URL` 和 `OPS_GRAFANA_PUBLIC_URL` 为新主机的 IP 或域名，然后重建 `ops-platform-app`。
+- Elasticsearch `_cluster/health` 应为 green，只保存可分词文本和 BM25 元数据。
+- Qdrant `http://127.0.0.1:6333/dashboard` 保存向量及检索前权限 Payload；默认 Alias 为 `ops_knowledge_vector_read`。
 - Prometheus 可查询 `opsagent_ai_requests_total` 和 `opsagent_ai_request_duration_seconds`。
 - `ops_rag.ai_usage_log` 保存不含问题正文的模型用量审计。
 
@@ -341,7 +356,7 @@ cd D:\myselfProject\opsagent
 |---|---|
 | 严格全局分布式限流 | 已用 Nacos 持久化 Sentinel 规则，但当前仍是每实例计数；多实例共享总额度需部署 Sentinel Cluster Token Server |
 | 多 Provider 自动 Fallback | 默认关闭，避免供应商故障时未经确认把同一上下文发送给另一家；当前支持显式配置切换 |
-| 生成数据授权 | 22 篇可用文档已获准发送 OpenAI Embedding；检索上下文发送给 DeepSeek/Kimi 属于不同处理目的，生产使用前应另行确认 |
+| 生成数据授权 | 21 篇内部文档已获准发送 OpenAI Embedding；检索上下文发送给 DeepSeek/Kimi 属于不同处理目的，生产使用前应另行确认 |
 | Sentinel 其他治理规则 | RAG FlowRule 已持久化；熔断、热点参数和授权规则尚未配置 |
 | OCR | 扫描 PDF 需要 Tesseract 或云 OCR |
 | Java 虚拟线程 | Java 17 不支持正式 API，需升级 Java 21 |
@@ -357,7 +372,7 @@ cd D:\myselfProject\opsagent
 ### 16.1 工单处理流程
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[用户新建工单] --> B[运维接单]
     B --> C[开始处理]
     C --> D[填写诊断/动作/证据]
@@ -376,7 +391,7 @@ flowchart LR
 ### 16.2 知识发布流程
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[创建知识库] --> B[拖拽上传文档]
     B --> C[异步解析]
     C --> D[查看结构化 Chunk]
@@ -384,7 +399,7 @@ flowchart LR
     E --> F{OPS/ADMIN 审核}
     F -->|驳回| B
     F -->|通过| G[PUBLISHED]
-    G --> H[Outbox + RabbitMQ 索引]
+    G --> H[Outbox 和 RabbitMQ 索引]
     H --> I[index_status=SUCCESS]
     I --> J[RAG 可检索]
 ```
@@ -394,12 +409,13 @@ flowchart LR
 ### 16.3 RAG 查询流程
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[输入问题] --> B[权限与发布过滤]
     B --> C[BM25]
-    B --> D[Query Embedding + kNN]
+    B --> D[Query Embedding]
+    D --> Q[Qdrant 向量检索]
     C --> E[RRF]
-    D --> E
+    Q --> E
     E --> F[BGE Rerank 可选]
     F --> G[Context 预算与来源编号]
     G --> H[LLM SSE]
@@ -407,7 +423,7 @@ flowchart LR
     I --> J[逐段答案 + 引用卡片]
 ```
 
-页面 30 秒没有收到首个 Token 会终止并提示检查 AI 服务。Embedding/ES/Reranker/LLM 任一环节故障时按配置降级，不能把“降级可回答”误认为全部链路正常。
+页面 30 秒没有收到首个 Token 会终止并提示检查 AI 服务。Embedding/Qdrant/Elasticsearch/Reranker/LLM 任一环节故障时按配置降级，不能把“降级可回答”误认为全部链路正常。
 
 ### 16.4 删除、修复和 Reindex
 
@@ -415,13 +431,13 @@ flowchart LR
 flowchart TD
     A{操作类型} -->|删除/归档| B[MySQL 状态先提交]
     B --> C[DELETE 补偿任务]
-    C --> D[清理 ES 文档]
+    C --> D[清理 ES 文本和 Qdrant 向量]
     A -->|单篇失败| E[索引管理输入文档 ID]
     E --> F[重新投递 Outbox]
     A -->|Mapping/模型升级| G[全量 Reindex]
-    G --> H[新物理索引]
-    H --> I[数量校验]
-    I --> J[Alias 原子切换]
+    G --> H[新 ES 索引和 Qdrant Collection]
+    H --> I[两侧数量校验]
+    I --> J[协调切换两侧 Alias，失败时回滚]
 ```
 
 管理员操作路径：登录 → 左侧“索引管理” → 先刷新一致性 → 根据失败任务做单文档修复；只有 Mapping、Embedding 模型或切片策略整体升级时才执行全量 Reindex。
@@ -436,4 +452,41 @@ flowchart TD
 - 离线评测：`rag-eval/scripts/evaluate.py`。
 - 架构、审计和真实测试结果：`docs/rag/`。
 
-注意：实时库目前有 26 篇已发布文档，已获得的 OpenAI Embedding 明确授权范围只有 21 篇。新增 5 篇未经明确授权前，不执行全量外部向量化；这不会影响 SQL fallback 和 SSE 功能验收，但会影响新 Alias 下的 Hybrid/Rerank 质量评测。
+注意：实时库目前有 26 篇已发布文档，49 个本机已有向量已离线迁入 Qdrant，当前 Hybrid 检索可使用这些数据。已获得的 OpenAI Embedding 明确外发授权范围只有最初 21 篇；新增文档未经明确授权前，不执行调用 OpenAI 的全量 Reindex。切片策略或 Embedding 模型变化后仍需重新获得授权并完成质量评测。
+
+## 18. 新版工作台导航与操作
+
+桌面端左侧第一列是产品域，第二列是当前业务域菜单。产品域依次为“总览、运维、可观测、AI、通知、系统”；点击第二列底部“收起导航”可释放 CMDB、监控和 RAG 的工作空间。浏览器宽度低于 900px 时，点击顶栏菜单按钮打开抽屉，抽屉顶部可切换产品域，下面是当前域的真实功能入口。
+
+```mermaid
+flowchart TD
+    A[登录工作台] --> B[总览识别高优先级和 SLA 风险]
+    B --> C[运维域打开工单中心]
+    C --> D[点击工单行打开快速详情]
+    D --> E{是否需要完整处理}
+    E -->|是| F[打开完整工单页面]
+    F --> G[处理记录、附件、RAG、状态流转]
+    E -->|否| C
+    G --> H[可观测域核对服务健康]
+    H --> I[通知和审计核对业务留痕]
+```
+
+### 18.1 运行总览
+
+首页不再展示大欢迎横幅。顶部五项指标、活跃工单、服务健康和状态分布均来自现有 API。右侧“智能运维摘要”当前明确标记为“事实聚合”：它使用确定性规则汇总真实数据，未调用模型，也不会自动执行变更，避免把规则判断伪装成 AI 结论。
+
+### 18.2 工单快速详情
+
+进入“运维 → 工单中心”，点击任意工单行或标题可打开右侧快速详情。侧栏展示优先级、状态、负责人、受影响服务、来源、更新时间和问题描述；点击遮罩、右上角关闭按钮或按 Esc 均可关闭。需要执行接单、处理、回复、解决和关闭时，点击“打开完整页面”。
+
+### 18.3 RAG 三栏工作区
+
+进入“AI → 智能问答”。桌面宽屏从左到右为当前会话、问答正文、检索上下文；窄屏自动变为单栏。回答区继续使用 SSE 逐 Token 更新，完成后可复制或重新生成；右栏只展示后端真实返回的来源、分数和检索通道。当前没有会话历史 API，因此左栏会明确说明，不生成虚假历史记录。
+
+### 18.4 通知与审计
+
+通知按“今天、昨天、日期”分组，未读项使用左侧圆点提示，可单条切换已读状态或全部标记已读。操作审计使用高密度表格显示时间、操作人、动作、业务对象、服务和 Trace ID；点击行查看完整载荷。只有 `TICKET` 类型记录显示“进入工单”，CMDB 和值班等记录不再错误跳转到工单路由。
+
+### 18.5 当前 UI 边界
+
+全局搜索当前只搜索工单；Agent、Workflow、审批队列、模型配置、用户和角色管理没有完整后端 API，因此导航默认隐藏。后续补齐真实 API 和权限后，再按 `App Rail → Context Navigation → Workspace` 的结构增加入口，不应先创建只有静态演示数据的页面。

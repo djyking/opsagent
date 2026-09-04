@@ -76,6 +76,10 @@ ops:
       read-alias: ${OPS_ES_KNOWLEDGE_READ_ALIAS:ops_knowledge_chunk_read}
       write-alias: ${OPS_ES_KNOWLEDGE_WRITE_ALIAS:ops_knowledge_chunk_write}
       analyzer: ${OPS_ES_ANALYZER:smartcn}
+      qdrant-url: ${OPS_QDRANT_URL:http://localhost:6333}
+      qdrant-collection: ${OPS_QDRANT_COLLECTION:ops_knowledge_vector_v1}
+      qdrant-alias: ${OPS_QDRANT_ALIAS:ops_knowledge_vector_read}
+      qdrant-api-key: ${OPS_QDRANT_API_KEY:}
       dimensions: ${OPS_EMBEDDING_DIMENSIONS:1536}
       minimum-score: ${OPS_VECTOR_MINIMUM_SCORE:0.72}
       embedding-base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}

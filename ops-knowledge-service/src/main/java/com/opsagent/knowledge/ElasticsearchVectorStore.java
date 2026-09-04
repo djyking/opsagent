@@ -1,5 +1,6 @@
 package com.opsagent.knowledge;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -17,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 管理 Elasticsearch dense_vector 索引、幂等写入和带权限过滤的 KNN 检索。
+ * 管理 Elasticsearch 中文文本索引、幂等写入和带权限过滤的 BM25 检索。
  *
  * @author heyu
  * @since 2026/8/31
@@ -25,6 +26,7 @@ import java.util.Map;
 @Component
 public class ElasticsearchVectorStore {
     private static final Logger LOG = LoggerFactory.getLogger(ElasticsearchVectorStore.class);
+    private static final TypeReference<Map<String, Object>> SOURCE_MAP_TYPE = new TypeReference<>() {};
     private final VectorProperties properties;
     private final ObjectMapper mapper;
     private final RestClient client;
@@ -40,9 +42,7 @@ public class ElasticsearchVectorStore {
         if (indexReady) {
             return;
         }
-        if (indexExists(properties.getIndexName())) {
-            validateDimensions(properties.getIndexName());
-        } else {
+        if (!indexExists(properties.getIndexName())) {
             createIndex(properties.getIndexName());
         }
         ensureAlias(properties.getReadAlias(), properties.getIndexName(), false);
@@ -167,42 +167,7 @@ public class ElasticsearchVectorStore {
         }
     }
 
-    List<SearchHit> vectorSearch(
-            List<Double> queryVector,
-            RetrievalRequest request,
-            int topK) {
-        ensureIndex();
-        Map<String, Object> knn = new LinkedHashMap<>();
-        knn.put("field", "embedding");
-        knn.put("query_vector", queryVector);
-        knn.put("k", topK);
-        knn.put("num_candidates", Math.max(topK, properties.getVectorCandidates()));
-        List<Map<String, Object>> filters = mandatoryFilters(request);
-        if (filters.size() == 1) {
-            knn.put("filter", filters.get(0));
-        } else if (!filters.isEmpty()) {
-            knn.put("filter", Map.of("bool", Map.of("must", filters)));
-        }
-        JsonNode response = client.post()
-                .uri("/" + properties.getReadAlias() + "/_search")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(Map.of("size", topK, "knn", knn))
-                .retrieve()
-                .body(JsonNode.class);
-        List<SearchHit> rows = new ArrayList<>();
-        response.path("hits").path("hits").forEach(hit -> {
-            double score = hit.path("_score").asDouble();
-            if (score < properties.getMinimumScore()) {
-                return;
-            }
-            Map<String, Object> source = mapper.convertValue(hit.path("_source"), Map.class);
-            source.remove("embedding");
-            rows.add(new SearchHit(hit.path("_id").asText(), score, source));
-        });
-        return rows;
-    }
-
-    List<SearchHit> bm25Search(String query, RetrievalRequest request, int topK) {
+    List<RetrievalHit> bm25Search(String query, RetrievalRequest request, int topK) {
         ensureIndex();
         List<Map<String, Object>> should = new ArrayList<>();
         should.add(Map.of("multi_match", Map.of(
@@ -227,8 +192,7 @@ public class ElasticsearchVectorStore {
                 .body(Map.of(
                         "size", topK,
                         "track_total_hits", false,
-                        "query", Map.of("bool", bool),
-                        "_source", Map.of("excludes", List.of("embedding"))))
+                        "query", Map.of("bool", bool)))
                 .retrieve()
                 .body(JsonNode.class);
         return parseHits(response);
@@ -263,11 +227,6 @@ public class ElasticsearchVectorStore {
         fields.put("documentName", textField);
         fields.put("headingPath", textField);
         fields.put("content", Map.of("type", "text", "analyzer", analyzer));
-        fields.put("embedding", Map.of(
-                "type", "dense_vector",
-                "dims", properties.getDimensions(),
-                "index", true,
-                "similarity", "cosine"));
         fields.put("page", Map.of("type", "integer"));
         fields.put("pageStart", Map.of("type", "integer"));
         fields.put("pageEnd", Map.of("type", "integer"));
@@ -308,12 +267,12 @@ public class ElasticsearchVectorStore {
         return new BulkIndexResult(List.copyOf(succeeded), Map.copyOf(failures));
     }
 
-    private List<SearchHit> parseHits(JsonNode response) {
-        List<SearchHit> rows = new ArrayList<>();
+    private List<RetrievalHit> parseHits(JsonNode response) {
+        List<RetrievalHit> rows = new ArrayList<>();
         response.path("hits").path("hits").forEach(hit -> {
-            Map<String, Object> source = mapper.convertValue(hit.path("_source"), Map.class);
+            Map<String, Object> source = mapper.convertValue(hit.path("_source"), SOURCE_MAP_TYPE);
             source.remove("embedding");
-            rows.add(new SearchHit(
+            rows.add(new RetrievalHit(
                     hit.path("_id").asText(), hit.path("_score").asDouble(), source));
         });
         return rows;
@@ -392,23 +351,6 @@ public class ElasticsearchVectorStore {
         }
     }
 
-    private void validateDimensions(String indexName) {
-        JsonNode mapping = client.get()
-                .uri("/" + indexName + "/_mapping")
-                .retrieve()
-                .body(JsonNode.class);
-        int actual = mapping.path(indexName)
-                .path("mappings")
-                .path("properties")
-                .path("embedding")
-                .path("dims")
-                .asInt(-1);
-        if (actual != properties.getDimensions()) {
-            throw new IllegalStateException(
-                    "Elasticsearch 向量维度不匹配，配置=" + properties.getDimensions() + "，索引=" + actual);
-        }
-    }
-
     private void ensureAlias(String alias, String indexName, boolean writeAlias) {
         try {
             client.get().uri("/_alias/" + alias).retrieve().toBodilessEntity();
@@ -453,11 +395,4 @@ public class ElasticsearchVectorStore {
      */
     record BulkIndexResult(List<Long> succeededChunkIds, Map<Long, String> failures) {}
 
-    /**
-     * 描述 Elasticsearch 单路检索命中的稳定标识、原始分数和源数据。
-     *
-     * @author heyu
-     * @since 2026/9/3
-     */
-    record SearchHit(String id, double score, Map<String, Object> source) {}
 }

@@ -32,15 +32,22 @@ class HybridRetrievalTest {
 
     @Test
     void shouldBuildMandatoryPermissionFiltersBeforeSearch() {
+        VectorProperties properties = new VectorProperties();
         ElasticsearchVectorStore store = new ElasticsearchVectorStore(
-                new VectorProperties(), new ObjectMapper());
+                properties, new ObjectMapper());
+        QdrantVectorStore qdrantStore = new QdrantVectorStore(
+                properties, new ObjectMapper());
         RetrievalRequest request = request(5);
 
         List<Map<String, Object>> filters = store.mandatoryFilters(request);
+        Map<String, Object> vectorFilters = qdrantStore.mandatoryFilters(request);
 
         assertThat(filters.toString())
                 .contains("PUBLISHED", "documentId=9", "knowledgeBaseId=3")
                 .contains("knowledgeBaseId=[", "3", "4", "PUBLIC", "createBy=7");
+        assertThat(vectorFilters.toString())
+                .contains("PUBLISHED", "documentId", "knowledgeBaseId")
+                .contains("any", "PUBLIC", "createBy");
         assertThat(store.exactIdentifiers("OPS-SCENE-1007 order.cache.ttl.strategy 429"))
                 .containsExactly("OPS-SCENE-1007", "order.cache.ttl.strategy", "429");
     }
@@ -53,15 +60,16 @@ class HybridRetrievalTest {
                 properties,
                 mock(EmbeddingClient.class),
                 mock(ElasticsearchVectorStore.class),
+                mock(QdrantVectorStore.class),
                 mock(KnowledgeRepository.class),
                 new ObjectMapper(),
                 new ApproxTokenCounter(),
                 new QueryNormalizer(),
                 new SimpleMeterRegistry());
-        List<ElasticsearchVectorStore.SearchHit> bm25 = List.of(
+        List<RetrievalHit> bm25 = List.of(
                 hit("1:1:0", 10, 10.0D),
                 hit("1:1:1", 11, 5.0D));
-        List<ElasticsearchVectorStore.SearchHit> vector = List.of(
+        List<RetrievalHit> vector = List.of(
                 hit("1:1:1", 11, 0.90D),
                 hit("1:1:2", 12, 0.85D));
 
@@ -84,8 +92,8 @@ class HybridRetrievalTest {
                 false, 7L, false, resultSize);
     }
 
-    private ElasticsearchVectorStore.SearchHit hit(String id, long chunkId, double score) {
-        return new ElasticsearchVectorStore.SearchHit(id, score, Map.of(
+    private RetrievalHit hit(String id, long chunkId, double score) {
+        return new RetrievalHit(id, score, Map.of(
                 "chunkId", chunkId,
                 "documentId", 1L,
                 "chunkIndex", (int) chunkId,

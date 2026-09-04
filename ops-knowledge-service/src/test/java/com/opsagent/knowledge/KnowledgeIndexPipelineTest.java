@@ -62,6 +62,7 @@ class KnowledgeIndexPipelineTest {
     void shouldDispatchIndexCompensationWithoutDeletingDocument() {
         KnowledgeRepository repository = mock(KnowledgeRepository.class);
         ElasticsearchVectorStore vectorStore = mock(ElasticsearchVectorStore.class);
+        QdrantVectorStore qdrantStore = mock(QdrantVectorStore.class);
         KnowledgeIndexService indexService = mock(KnowledgeIndexService.class);
         when(repository.indexTask(9L)).thenReturn(Map.of(
                 "status", "PENDING",
@@ -71,7 +72,11 @@ class KnowledgeIndexPipelineTest {
         when(repository.claimIndexTask(9L)).thenReturn(1);
         when(repository.validDocumentVersion(1001L, 3)).thenReturn(true);
         KnowledgeIndexCompensationService service = new KnowledgeIndexCompensationService(
-                repository, vectorStore, indexService, new SimpleMeterRegistry());
+                repository,
+                vectorStore,
+                qdrantStore,
+                indexService,
+                new SimpleMeterRegistry());
 
         assertThat(service.process(9L)).isEqualTo("SUCCESS");
 

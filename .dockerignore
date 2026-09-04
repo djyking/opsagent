@@ -1,0 +1,10 @@
+.git
+.idea
+.vscode
+**/target
+ops-web/node_modules
+ops-web/dist
+data
+.env
+*.log
+rag-eval/scripts/__pycache__

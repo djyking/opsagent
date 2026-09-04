@@ -70,7 +70,7 @@ class EmbeddingAndIndexTest {
     }
 
     @Test
-    void shouldBuildSmartCnDenseVectorMapping() {
+    void shouldBuildSmartCnTextMappingWithoutDenseVector() {
         VectorProperties properties = new VectorProperties();
         properties.setDimensions(768);
         ElasticsearchVectorStore store = new ElasticsearchVectorStore(properties, mapper);
@@ -80,8 +80,7 @@ class EmbeddingAndIndexTest {
         JsonNode fields = definition.path("mappings").path("properties");
         assertThat(fields.path("content").path("analyzer").asText()).isEqualTo("smartcn");
         assertThat(fields.path("content").path("type").asText()).isEqualTo("text");
-        assertThat(fields.path("embedding").path("type").asText()).isEqualTo("dense_vector");
-        assertThat(fields.path("embedding").path("dims").asInt()).isEqualTo(768);
+        assertThat(fields.has("embedding")).isFalse();
         assertThat(fields.path("documentName").path("fields").path("raw").path("type").asText())
                 .isEqualTo("keyword");
     }

@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 后台重建版本化 Elasticsearch 索引，并在校验成功后原子切换读写 Alias。
+ * 后台重建版本化 ES 索引和 Qdrant Collection，并在校验后切换 Alias。
  *
  * @author heyu
  * @since 2026/9/3
@@ -26,6 +26,7 @@ public class KnowledgeReindexService {
     private final KnowledgeRepository repository;
     private final KnowledgeIndexService indexService;
     private final ElasticsearchVectorStore vectorStore;
+    private final QdrantVectorStore qdrantStore;
     private final RedissonClient redisson;
     private final MeterRegistry metrics;
     private final AtomicInteger running = new AtomicInteger();
@@ -34,11 +35,13 @@ public class KnowledgeReindexService {
             KnowledgeRepository repository,
             KnowledgeIndexService indexService,
             ElasticsearchVectorStore vectorStore,
+            QdrantVectorStore qdrantStore,
             RedissonClient redisson,
             MeterRegistry metrics) {
         this.repository = repository;
         this.indexService = indexService;
         this.vectorStore = vectorStore;
+        this.qdrantStore = qdrantStore;
         this.redisson = redisson;
         this.metrics = metrics;
         Gauge.builder("rag.reindex.running", running, AtomicInteger::get).register(metrics);
@@ -58,10 +61,15 @@ public class KnowledgeReindexService {
         }
         running.set(1);
         String targetIndex = "";
+        String targetCollection = "";
+        String previousCollection = "";
         try {
             List<Long> documentIds = repository.indexableDocumentIds();
+            previousCollection = qdrantStore.physicalCollection();
             targetIndex = vectorStore.createVersionedIndex();
-            if (repository.claimReindexTask(taskId, targetIndex, documentIds.size()) == 0) {
+            targetCollection = qdrantStore.createVersionedCollection();
+            String target = "es=" + targetIndex + ";qdrant=" + targetCollection;
+            if (repository.claimReindexTask(taskId, target, documentIds.size()) == 0) {
                 return;
             }
             int success = 0;
@@ -69,7 +77,8 @@ public class KnowledgeReindexService {
             int chunks = 0;
             for (Long documentId : documentIds) {
                 try {
-                    chunks += indexService.indexDocumentTo(documentId, targetIndex);
+                    chunks += indexService.indexDocumentTo(
+                            documentId, targetIndex, targetCollection);
                     success++;
                 } catch (RuntimeException exception) {
                     failure++;
@@ -86,19 +95,46 @@ public class KnowledgeReindexService {
                 throw new IllegalStateException(
                         "新索引抽样校验失败，预期文档=" + success + "，实际=" + actualDocuments);
             }
-            vectorStore.switchAliases(targetIndex);
+            long vectorPoints = qdrantStore.pointCount(targetCollection);
+            if (vectorPoints != chunks) {
+                throw new IllegalStateException(
+                        "新向量 Collection 校验失败，预期点=" + chunks + "，实际=" + vectorPoints);
+            }
+            switchAliasesWithRollback(targetIndex, targetCollection, previousCollection);
             documentIds.forEach(repository::markIndexSuccess);
             repository.completeReindexTask(taskId);
             metrics.counter("rag.reindex.document").increment(success);
             metrics.counter("rag.reindex.chunk").increment(chunks);
         } catch (RuntimeException exception) {
             repository.failReindexTask(taskId, exception.getMessage());
-            LOG.error("知识索引全量重建失败，taskId={}，targetIndex={}", taskId, targetIndex, exception);
+            LOG.error(
+                    "知识索引全量重建失败，taskId={}，targetIndex={}，targetCollection={}",
+                    taskId,
+                    targetIndex,
+                    targetCollection,
+                    exception);
         } finally {
             running.set(0);
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
+        }
+    }
+
+    private void switchAliasesWithRollback(
+            String targetIndex, String targetCollection, String previousCollection) {
+        qdrantStore.switchAlias(targetCollection);
+        try {
+            vectorStore.switchAliases(targetIndex);
+        } catch (RuntimeException exception) {
+            if (!previousCollection.isBlank()) {
+                try {
+                    qdrantStore.switchAlias(previousCollection);
+                } catch (RuntimeException rollbackException) {
+                    exception.addSuppressed(rollbackException);
+                }
+            }
+            throw exception;
         }
     }
 }

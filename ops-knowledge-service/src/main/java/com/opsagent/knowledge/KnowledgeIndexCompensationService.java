@@ -8,9 +8,10 @@ import org.springframework.stereotype.Service;
 import io.micrometer.core.instrument.MeterRegistry;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * 执行并重试持久化的 Elasticsearch 文档删除补偿任务。
+ * 执行并重试 Elasticsearch 与 Qdrant 的索引补偿任务。
  *
  * @author heyu
  * @since 2026/9/3
@@ -22,18 +23,24 @@ public class KnowledgeIndexCompensationService {
     private static final int MAXIMUM_ATTEMPTS = 10;
     private final KnowledgeRepository repository;
     private final ElasticsearchVectorStore vectorStore;
+    private final QdrantVectorStore qdrantStore;
     private final KnowledgeIndexService indexService;
     private final MeterRegistry metrics;
+    private final AtomicInteger pendingTaskCount;
 
     KnowledgeIndexCompensationService(
             KnowledgeRepository repository,
             ElasticsearchVectorStore vectorStore,
+            QdrantVectorStore qdrantStore,
             KnowledgeIndexService indexService,
             MeterRegistry metrics) {
         this.repository = repository;
         this.vectorStore = vectorStore;
+        this.qdrantStore = qdrantStore;
         this.indexService = indexService;
         this.metrics = metrics;
+        this.pendingTaskCount = metrics.gauge(
+                "rag.index.task.pending", new AtomicInteger());
     }
 
     String process(long taskId) {
@@ -54,6 +61,7 @@ public class KnowledgeIndexCompensationService {
         try {
             if ("DELETE".equals(operation)) {
                 vectorStore.deleteDocument(documentId);
+                qdrantStore.deleteDocument(documentId);
             } else if ("INDEX".equals(operation)) {
                 int version = (int) number(task, "document_version", "documentVersion");
                 if (!repository.validDocumentVersion(documentId, version)) {
@@ -68,7 +76,7 @@ public class KnowledgeIndexCompensationService {
         } catch (RuntimeException exception) {
             repository.indexTaskFailure(taskId, exception.getMessage(), MAXIMUM_ATTEMPTS);
             metrics.counter("rag.index.retry", "operation", operation).increment();
-            LOG.warn("ES 文档删除暂时失败，taskId={}，将按退避策略重试", taskId);
+            LOG.warn("知识索引补偿暂时失败，taskId={}，将按退避策略重试", taskId);
             return text(repository.indexTask(taskId), "status");
         }
     }
@@ -76,7 +84,7 @@ public class KnowledgeIndexCompensationService {
     @Scheduled(fixedDelayString = "${ops.knowledge.index-compensation-delay-ms:10000}")
     void retryDueTasks() {
         var taskIds = repository.dueIndexTaskIds(50);
-        metrics.gauge("rag.index.task.pending", taskIds.size());
+        pendingTaskCount.set(taskIds.size());
         for (Long taskId : taskIds) {
             process(taskId);
         }

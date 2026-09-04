@@ -11,13 +11,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * 编排文档切片 Embedding、Elasticsearch 写入和查询向量检索。
+ * 编排文档 Embedding、Elasticsearch BM25、Qdrant 向量写入和混合检索。
  *
  * @author heyu
  * @since 2026/8/31
@@ -27,6 +28,7 @@ public class KnowledgeIndexService {
     private final VectorProperties properties;
     private final EmbeddingClient embeddingClient;
     private final ElasticsearchVectorStore vectorStore;
+    private final QdrantVectorStore qdrantStore;
     private final KnowledgeRepository repository;
     private final ObjectMapper mapper;
     private final TokenCounter tokenCounter;
@@ -37,6 +39,7 @@ public class KnowledgeIndexService {
             VectorProperties properties,
             EmbeddingClient embeddingClient,
             ElasticsearchVectorStore vectorStore,
+            QdrantVectorStore qdrantStore,
             KnowledgeRepository repository,
             ObjectMapper mapper,
             TokenCounter tokenCounter,
@@ -45,6 +48,7 @@ public class KnowledgeIndexService {
         this.properties = properties;
         this.embeddingClient = embeddingClient;
         this.vectorStore = vectorStore;
+        this.qdrantStore = qdrantStore;
         this.repository = repository;
         this.mapper = mapper;
         this.tokenCounter = tokenCounter;
@@ -61,14 +65,18 @@ public class KnowledgeIndexService {
     }
 
     void indexDocument(long documentId) {
-        indexDocument(documentId, null, true);
+        indexDocument(documentId, null, null, true);
     }
 
-    int indexDocumentTo(long documentId, String targetIndex) {
-        return indexDocument(documentId, targetIndex, false);
+    int indexDocumentTo(long documentId, String targetIndex, String targetCollection) {
+        return indexDocument(documentId, targetIndex, targetCollection, false);
     }
 
-    private int indexDocument(long documentId, String targetIndex, boolean updateStatus) {
+    private int indexDocument(
+            long documentId,
+            String targetIndex,
+            String targetCollection,
+            boolean updateStatus) {
         if (!embeddingEnabled()) {
             throw new IllegalStateException("Embedding Provider 尚未配置");
         }
@@ -103,7 +111,8 @@ public class KnowledgeIndexService {
                 }
             }
         }
-        List<ElasticsearchVectorStore.IndexDocument> indexDocuments = new ArrayList<>();
+        List<ElasticsearchVectorStore.IndexDocument> keywordDocuments = new ArrayList<>();
+        List<QdrantVectorStore.IndexPoint> vectorPoints = new ArrayList<>();
         for (int index = 0; index < chunks.size(); index++) {
             Map<String, Object> chunk = chunks.get(index);
             long chunkId = number(chunk, "id").longValue();
@@ -139,23 +148,44 @@ public class KnowledgeIndexService {
             source.put("createBy", number(document, "create_by", "createBy").longValue());
             source.put("embeddingModel", embeddingClient.model());
             source.put("embeddingDimensions", embeddingClient.dimensions());
-            source.put("embedding", vectors.get(index));
-            indexDocuments.add(new ElasticsearchVectorStore.IndexDocument(
+            keywordDocuments.add(new ElasticsearchVectorStore.IndexDocument(
                     documentId + ":" + documentVersion + ":" + chunkIndex,
                     chunkId,
                     source));
+            vectorPoints.add(new QdrantVectorStore.IndexPoint(
+                    chunkId, vectors.get(index), new LinkedHashMap<>(source)));
         }
         List<Long> indexedChunkIds = new ArrayList<>();
         int bulkSize = Math.max(1, properties.getBulkSize());
-        for (int start = 0; start < indexDocuments.size(); start += bulkSize) {
-            int end = Math.min(start + bulkSize, indexDocuments.size());
+        for (int start = 0; start < keywordDocuments.size(); start += bulkSize) {
+            int end = Math.min(start + bulkSize, keywordDocuments.size());
             List<ElasticsearchVectorStore.IndexDocument> batch =
-                    indexDocuments.subList(start, end);
-            ElasticsearchVectorStore.BulkIndexResult result = targetIndex == null
-                    ? vectorStore.bulkIndex(batch)
-                    : vectorStore.bulkIndex(targetIndex, batch);
-            indexedChunkIds.addAll(result.succeededChunkIds());
-            failures.putAll(result.failures());
+                    keywordDocuments.subList(start, end);
+            List<QdrantVectorStore.IndexPoint> pointBatch = vectorPoints.subList(start, end);
+            ElasticsearchVectorStore.BulkIndexResult keywordResult;
+            QdrantVectorStore.BulkUpsertResult vectorResult;
+            try {
+                keywordResult = targetIndex == null
+                        ? vectorStore.bulkIndex(batch)
+                        : vectorStore.bulkIndex(targetIndex, batch);
+            } catch (RuntimeException exception) {
+                keywordResult = new ElasticsearchVectorStore.BulkIndexResult(
+                        List.of(), batchFailures(batch, "Elasticsearch", exception));
+            }
+            try {
+                vectorResult = targetCollection == null
+                        ? qdrantStore.bulkUpsert(pointBatch)
+                        : qdrantStore.bulkUpsert(targetCollection, pointBatch);
+            } catch (RuntimeException exception) {
+                vectorResult = new QdrantVectorStore.BulkUpsertResult(
+                        List.of(), pointFailures(pointBatch, "Qdrant", exception));
+            }
+            failures.putAll(keywordResult.failures());
+            failures.putAll(vectorResult.failures());
+            Set<Long> vectorSucceeded = new HashSet<>(vectorResult.succeededChunkIds());
+            keywordResult.succeededChunkIds().stream()
+                    .filter(vectorSucceeded::contains)
+                    .forEach(indexedChunkIds::add);
         }
         if (updateStatus) {
             repository.markIndexResults(
@@ -166,6 +196,7 @@ public class KnowledgeIndexService {
         }
         if (targetIndex == null) {
             vectorStore.deleteOlderVersions(documentId, number(document, "version").intValue());
+            qdrantStore.deleteOlderVersions(documentId, number(document, "version").intValue());
         }
         return indexedChunkIds.size();
     }
@@ -188,11 +219,11 @@ public class KnowledgeIndexService {
                 rawRequest.resultSize());
         Map<String, Long> durations = new LinkedHashMap<>();
         long started = System.nanoTime();
-        List<ElasticsearchVectorStore.SearchHit> bm25 = vectorStore.bm25Search(
+        List<RetrievalHit> bm25 = vectorStore.bm25Search(
                 query, request, Math.max(1, properties.getBm25TopK()));
         recordStage("bm25", started, bm25.size(), durations);
 
-        List<ElasticsearchVectorStore.SearchHit> vector = List.of();
+        List<RetrievalHit> vector = List.of();
         String degraded = null;
         if (embeddingEnabled()) {
             long embeddingStarted = System.nanoTime();
@@ -200,7 +231,7 @@ public class KnowledgeIndexService {
                 List<Double> queryVector = embeddingClient.embed(List.of(query)).get(0);
                 recordStage("embedding", embeddingStarted, 1, durations);
                 long vectorStarted = System.nanoTime();
-                vector = vectorStore.vectorSearch(
+                vector = qdrantStore.vectorSearch(
                         queryVector, request, Math.max(1, properties.getVectorTopK()));
                 recordStage("vector", vectorStarted, vector.size(), durations);
             } catch (RuntimeException exception) {
@@ -254,12 +285,16 @@ public class KnowledgeIndexService {
                 "indexAlias", properties.getReadAlias(),
                 "writeAlias", properties.getWriteAlias(),
                 "physicalIndex", vectorStore.physicalIndex(),
-                "indexedDocumentCount", vectorStore.indexedDocumentCount());
+                "indexedDocumentCount", vectorStore.indexedDocumentCount(),
+                "vectorDatabase", "Qdrant",
+                "vectorAlias", properties.getQdrantAlias(),
+                "physicalCollection", qdrantStore.physicalCollection(),
+                "vectorPointCount", qdrantStore.pointCount());
     }
 
     List<RetrievedChunk> fuse(
-            List<ElasticsearchVectorStore.SearchHit> bm25,
-            List<ElasticsearchVectorStore.SearchHit> vector,
+            List<RetrievalHit> bm25,
+            List<RetrievalHit> vector,
             RetrievalRequest request,
             String degraded) {
         Map<String, Candidate> candidates = new LinkedHashMap<>();
@@ -278,12 +313,12 @@ public class KnowledgeIndexService {
 
     private void addRank(
             Map<String, Candidate> candidates,
-            List<ElasticsearchVectorStore.SearchHit> hits,
+            List<RetrievalHit> hits,
             RetrievalChannel channel,
             int window) {
         int maximum = Math.min(window, hits.size());
         for (int index = 0; index < maximum; index++) {
-            ElasticsearchVectorStore.SearchHit hit = hits.get(index);
+            RetrievalHit hit = hits.get(index);
             Candidate candidate = candidates.computeIfAbsent(
                     hit.id(), ignored -> new Candidate(hit.source()));
             candidate.channels.add(channel);
@@ -296,7 +331,7 @@ public class KnowledgeIndexService {
         }
     }
 
-    private List<Long> ranks(List<ElasticsearchVectorStore.SearchHit> hits) {
+    private List<Long> ranks(List<RetrievalHit> hits) {
         return hits.stream()
                 .map(hit -> number(hit.source(), "chunkId").longValue())
                 .toList();
@@ -372,6 +407,26 @@ public class KnowledgeIndexService {
     private String safeMessage(RuntimeException exception) {
         String message = exception.getMessage();
         return message == null || message.isBlank() ? exception.getClass().getSimpleName() : message;
+    }
+
+    private Map<Long, String> batchFailures(
+            List<ElasticsearchVectorStore.IndexDocument> documents,
+            String store,
+            RuntimeException exception) {
+        Map<Long, String> result = new LinkedHashMap<>();
+        documents.forEach(document -> result.put(
+                document.chunkId(), store + ": " + safeMessage(exception)));
+        return result;
+    }
+
+    private Map<Long, String> pointFailures(
+            List<QdrantVectorStore.IndexPoint> points,
+            String store,
+            RuntimeException exception) {
+        Map<Long, String> result = new LinkedHashMap<>();
+        points.forEach(point -> result.put(
+                point.chunkId(), store + ": " + safeMessage(exception)));
+        return result;
     }
 
     private String text(Map<String, Object> row, String... keys) {

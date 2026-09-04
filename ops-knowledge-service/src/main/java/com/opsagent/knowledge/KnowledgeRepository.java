@@ -565,11 +565,16 @@ public class KnowledgeRepository {
         long failed = count(
                 "SELECT COUNT(*) FROM knowledge_document WHERE deleted=0"
                         + " AND review_status='PUBLISHED' AND index_status='FAILED'");
+        long publishedChunks = count(
+                "SELECT COUNT(*) FROM knowledge_chunk c JOIN knowledge_document d"
+                        + " ON d.id=c.document_id WHERE d.deleted=0"
+                        + " AND d.review_status='PUBLISHED'");
         return Map.of(
                 "published", published,
                 "indexed", indexed,
                 "pending", pending,
-                "failed", failed);
+                "failed", failed,
+                "publishedChunks", publishedChunks);
     }
 
     List<Map<String, Object>> failedIndexTasks() {

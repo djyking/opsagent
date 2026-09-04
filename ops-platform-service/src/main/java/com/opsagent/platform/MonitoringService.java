@@ -35,6 +35,12 @@ public class MonitoringService {
     @Value("${ops.monitor.grafana-url:http://localhost:3000}")
     private String grafanaUrl;
 
+    @Value("${ops.monitor.prometheus-public-url:http://localhost:9090}")
+    private String prometheusPublicUrl;
+
+    @Value("${ops.monitor.grafana-public-url:http://localhost:3000}")
+    private String grafanaPublicUrl;
+
     MonitoringService(ObjectMapper json) {
         this.json = json;
     }
@@ -58,8 +64,10 @@ public class MonitoringService {
         }
 
         Map<String, Object> grafana = new LinkedHashMap<>();
-        grafana.put("url", grafanaUrl);
-        grafana.put("dashboardUrl", grafanaUrl + "/d/opsagent-overview/opsagent-overview");
+        grafana.put("url", grafanaPublicUrl);
+        grafana.put(
+                "dashboardUrl",
+                grafanaPublicUrl + "/d/opsagent-overview/opsagent-overview");
         try {
             JsonNode health = get(grafanaUrl + "/api/health");
             grafana.put("healthy", "ok".equalsIgnoreCase(health.path("database").asText()));
@@ -71,8 +79,8 @@ public class MonitoringService {
 
         long up = services.stream().filter(item -> "up".equals(item.get("health"))).count();
         Map<String, Object> prometheus = new LinkedHashMap<>();
-        prometheus.put("url", prometheusUrl);
-        prometheus.put("targetsUrl", prometheusUrl + "/targets");
+        prometheus.put("url", prometheusPublicUrl);
+        prometheus.put("targetsUrl", prometheusPublicUrl + "/targets");
         prometheus.put("healthy", prometheusError == null);
         prometheus.put("targetCount", services.size());
         prometheus.put("upCount", up);
