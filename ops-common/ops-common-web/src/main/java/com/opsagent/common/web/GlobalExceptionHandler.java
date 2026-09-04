@@ -5,9 +5,11 @@ import com.opsagent.common.core.*;
 import jakarta.validation.ConstraintViolationException;
 
 import org.slf4j.*;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * 将校验异常、业务异常和系统异常转换为统一 API 响应。
@@ -32,6 +34,20 @@ public class GlobalExceptionHandler {
     })
     ApiResponse<Void> validation(Exception e) {
         return ApiResponse.failure(ErrorCode.VALIDATION.code(), e.getMessage());
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    ResponseEntity<ApiResponse<Void>> responseStatus(ResponseStatusException exception) {
+        int code = switch (exception.getStatusCode().value()) {
+            case 401 -> ErrorCode.UNAUTHENTICATED.code();
+            case 403 -> ErrorCode.FORBIDDEN.code();
+            case 404 -> ErrorCode.NOT_FOUND.code();
+            case 409 -> ErrorCode.CONFLICT.code();
+            case 503 -> ErrorCode.MIDDLEWARE_UNAVAILABLE.code();
+            default -> ErrorCode.VALIDATION.code();
+        };
+        return ResponseEntity.status(exception.getStatusCode())
+                .body(ApiResponse.failure(code, exception.getReason()));
     }
 
     @ExceptionHandler(Exception.class)

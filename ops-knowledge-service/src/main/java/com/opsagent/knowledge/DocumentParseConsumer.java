@@ -3,6 +3,7 @@ package com.opsagent.knowledge;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsagent.common.mq.MqNames;
+import com.rabbitmq.client.Channel;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -45,7 +46,7 @@ public class DocumentParseConsumer {
     }
 
     @RabbitListener(queues = MqNames.DOCUMENT_PARSE_QUEUE)
-    public void consume(Message message) {
+    public void consume(Message message, Channel channel) {
         Timer.Sample sample = Timer.start();
         long documentId = 0;
         long taskId = 0;
@@ -57,6 +58,7 @@ public class DocumentParseConsumer {
             if (service.completeParse(event.path("eventId").asText(), taskId, parsed)) {
                 success.increment();
             }
+            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
         } catch (Exception exception) {
             failure.increment();
             if (taskId > 0) {

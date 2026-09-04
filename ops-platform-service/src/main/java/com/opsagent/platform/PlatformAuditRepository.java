@@ -45,6 +45,23 @@ public class PlatformAuditRepository {
                 detailJson);
     }
 
+    void addPlatform(
+            String bizType,
+            String bizId,
+            String operation,
+            long userId,
+            String detailJson) {
+        jdbc.update(
+                "INSERT INTO operation_audit(service_name,biz_type,biz_id,operation,user_id,"
+                        + "trace_id,request_id,detail_json,create_time)"
+                        + " VALUES('ops-platform-service',?,?,?,?,NULL,NULL,?,NOW())",
+                bizType,
+                bizId,
+                operation,
+                userId,
+                detailJson);
+    }
+
     void addNotification(
             String sourceKey, long ticketId, Long receiverId, String title, String content) {
         jdbc.update(

@@ -76,7 +76,9 @@ services:
       retries: 20
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+    build:
+      context: D:/middleware/elasticsearch
+    image: opsagent/elasticsearch:8.19.0-smartcn
     restart: unless-stopped
     environment:
       discovery.type: single-node
@@ -100,7 +102,21 @@ services:
       - "9090:9090"
     volumes:
       - D:/middleware/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - D:/middleware/config/opsagent-alerts.yml:/etc/prometheus/opsagent-alerts.yml:ro
       - prometheus-data:/prometheus
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    ports:
+      - "9093:9093"
+    volumes:
+      - D:/middleware/config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - D:/middleware/config/alertmanager-webhook-token.txt:/run/secrets/opsagent-webhook-token:ro
+      - alertmanager-data:/alertmanager
     extra_hosts:
       - host.docker.internal:host-gateway
 
@@ -120,10 +136,32 @@ services:
     depends_on:
       - prometheus
 
+  reranker:
+    profiles: ["rerank"]
+    build:
+      context: ./rag-inference/reranker
+    image: opsagent/bge-reranker-v2-m3:1.0.0
+    restart: unless-stopped
+    environment:
+      MODEL_NAME: ${OPS_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      HF_HOME: /models
+    ports:
+      - "8010:8010"
+    volumes:
+      - reranker-models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 5m
+
 volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
   elasticsearch-data:
   prometheus-data:
+  alertmanager-data:
   grafana-data:
+  reranker-models:

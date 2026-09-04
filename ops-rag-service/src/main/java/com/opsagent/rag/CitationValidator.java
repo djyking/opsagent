@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
 @Component
 public class CitationValidator {
     private static final Pattern CITATION = Pattern.compile("\\[chunk:(\\d+)]");
+    private static final Pattern SOURCE = Pattern.compile("\\[S(\\d+)]");
 
     String validate(String answer, List<RetrievedChunk> chunks) {
         Set<Long> allowed = chunks.stream().map(RetrievedChunk::chunkId).collect(Collectors.toSet());
@@ -28,5 +29,35 @@ public class CitationValidator {
         }
         matcher.appendTail(safe);
         return safe.toString();
+    }
+
+    Validation validateContext(
+            String answer, List<ContextAssembler.ContextSource> sources) {
+        Set<String> allowed = sources.stream()
+                .map(ContextAssembler.ContextSource::sourceId)
+                .collect(Collectors.toSet());
+        Matcher matcher = SOURCE.matcher(answer);
+        StringBuilder safe = new StringBuilder();
+        int invalid = 0;
+        while (matcher.find()) {
+            String sourceId = "S" + matcher.group(1);
+            if (allowed.contains(sourceId)) {
+                matcher.appendReplacement(safe, matcher.group());
+            } else {
+                matcher.appendReplacement(safe, "[无效引用已移除]");
+                invalid++;
+            }
+        }
+        matcher.appendTail(safe);
+        return new Validation(safe.toString(), invalid);
+    }
+
+    /**
+     * 返回移除伪造 Source ID 后的回答和无效引用数量。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record Validation(String answer, int invalidCount) {
     }
 }

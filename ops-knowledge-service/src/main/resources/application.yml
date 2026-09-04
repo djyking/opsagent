@@ -23,6 +23,7 @@ spring:
     connection-timeout: 3s
     listener:
       simple:
+        acknowledge-mode: manual
         default-requeue-rejected: false
         retry:
           enabled: true
@@ -30,6 +31,12 @@ spring:
           initial-interval: 1s
           multiplier: 2
           max-interval: 5s
+  data:
+    redis:
+      host: ${OPS_REDIS_HOST:localhost}
+      port: ${OPS_REDIS_PORT:6379}
+      password: ${OPS_REDIS_PASSWORD:opsagent_local}
+      database: ${OPS_REDIS_DATABASE:0}
   cloud:
     nacos:
       config:
@@ -56,16 +63,34 @@ ops:
   knowledge:
     storage-root: ${OPS_UPLOAD_DIR:./data/uploads}
     max-file-size-bytes: ${OPS_KNOWLEDGE_MAX_FILE_SIZE_BYTES:10485760}
+    chunk:
+      target-tokens: ${OPS_CHUNK_TARGET_TOKENS:500}
+      max-tokens: ${OPS_CHUNK_MAX_TOKENS:800}
+      min-tokens: ${OPS_CHUNK_MIN_TOKENS:100}
+      overlap-tokens: ${OPS_CHUNK_OVERLAP_TOKENS:80}
+      strategy-version: ${OPS_CHUNK_STRATEGY_VERSION:structure-v1}
     vector:
       enabled: ${OPS_VECTOR_ENABLED:false}
       elasticsearch-url: ${OPS_ES_URL:http://localhost:9200}
-      index-name: ${OPS_ES_KNOWLEDGE_INDEX:opsagent-knowledge-v1}
+      index-name: ${OPS_ES_KNOWLEDGE_INDEX:ops_knowledge_chunk_v2}
+      read-alias: ${OPS_ES_KNOWLEDGE_READ_ALIAS:ops_knowledge_chunk_read}
+      write-alias: ${OPS_ES_KNOWLEDGE_WRITE_ALIAS:ops_knowledge_chunk_write}
+      analyzer: ${OPS_ES_ANALYZER:smartcn}
       dimensions: ${OPS_EMBEDDING_DIMENSIONS:1536}
       minimum-score: ${OPS_VECTOR_MINIMUM_SCORE:0.72}
       embedding-base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
       embedding-api-key: ${OPENAI_API_KEY:}
       embedding-model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
       timeout-seconds: ${OPS_EMBEDDING_TIMEOUT_SECONDS:30}
+      embedding-batch-size: ${OPS_EMBEDDING_BATCH_SIZE:32}
+      embedding-batch-max-tokens: ${OPS_EMBEDDING_BATCH_MAX_TOKENS:12000}
+      bulk-size: ${OPS_ES_BULK_SIZE:100}
+      bm25-top-k: ${OPS_RAG_BM25_TOP_K:50}
+      vector-top-k: ${OPS_RAG_VECTOR_TOP_K:50}
+      vector-candidates: ${OPS_RAG_VECTOR_CANDIDATES:100}
+      rrf-window: ${OPS_RAG_RRF_WINDOW:50}
+      rrf-rank-constant: ${OPS_RAG_RRF_RANK_CONSTANT:60}
+      hybrid-candidates: ${OPS_RAG_HYBRID_CANDIDATES:30}
 management:
   endpoints:
     web:

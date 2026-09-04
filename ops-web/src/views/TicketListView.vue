@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Search, Plus, RotateCw, ArrowUpRight, TicketCheck } from "@lucide/vue";
-import { ticketApi } from "@/api/modules";
+import { itsmApi, ticketApi } from "@/api/modules";
 import type { PageResponse, Ticket } from "@/types/api";
 import BaseModal from "@/components/BaseModal.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
@@ -26,7 +26,13 @@ const filters = reactive({
   pageNum: 1,
   pageSize: 10,
 });
-const form = reactive({ title: "", description: "", priority: "MEDIUM" });
+const cis = ref<Record<string, unknown>[]>([]);
+const form = reactive({
+  title: "",
+  description: "",
+  priority: "MEDIUM",
+  affectedCiCode: "",
+});
 async function load() {
   loading.value = true;
   error.value = "";
@@ -70,7 +76,12 @@ watch(
   },
   { immediate: true },
 );
-onMounted(load);
+onMounted(async () => {
+  await Promise.all([
+    load(),
+    itsmApi.cis({ type: "SERVICE" }).then((rows) => (cis.value = rows)),
+  ]);
+});
 </script>
 <template>
   <div class="stack-page">
@@ -203,6 +214,13 @@ onMounted(load);
             <option value="MEDIUM">中</option>
             <option value="HIGH">高</option>
             <option value="URGENT">紧急</option>
+          </select></label
+        ><label
+          >受影响 CI<select v-model="form.affectedCiCode">
+            <option value="">暂不关联</option>
+            <option v-for="ci in cis" :key="String(ci.ciCode)" :value="ci.ciCode">
+              {{ ci.ciName }}（{{ ci.ciCode }}）
+            </option>
           </select></label
         ><label class="full"
           >问题描述<textarea

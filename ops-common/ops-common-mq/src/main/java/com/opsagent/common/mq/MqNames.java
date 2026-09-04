@@ -20,6 +20,11 @@ public final class MqNames {
     public static final String DOCUMENT_PARSE_DLX = "ops.knowledge.parse.dlx";
     public static final String DOCUMENT_PARSE_DLQ = "ops.knowledge.parse.dlq";
     public static final String DOCUMENT_PARSE_DEAD_ROUTING_KEY = "knowledge.document.parse.dead";
+    public static final String DOCUMENT_INDEX_ROUTING_KEY = "knowledge.document.index.requested";
+    public static final String DOCUMENT_INDEX_QUEUE = "ops.knowledge.index.queue";
+    public static final String DOCUMENT_INDEX_DLX = "ops.knowledge.index.dlx";
+    public static final String DOCUMENT_INDEX_DLQ = "ops.knowledge.index.dlq";
+    public static final String DOCUMENT_INDEX_DEAD_ROUTING_KEY = "knowledge.document.index.dead";
 
     private MqNames() {}
 }

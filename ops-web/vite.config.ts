@@ -11,8 +11,8 @@ export default defineConfig({
     port: 5173,
     open: false,
     proxy: {
-      "/api": { target: "http://localhost:8080", changeOrigin: true },
-      "/actuator": { target: "http://localhost:8080", changeOrigin: true },
+      "/api": { target: "http://localhost:18080", changeOrigin: true },
+      "/actuator": { target: "http://localhost:18080", changeOrigin: true },
     },
   },
 });

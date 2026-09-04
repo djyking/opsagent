@@ -17,6 +17,12 @@ spring:
     publisher-confirm-type: correlated
     publisher-returns: true
     connection-timeout: 3s
+  data:
+    redis:
+      host: ${OPS_REDIS_HOST:localhost}
+      port: ${OPS_REDIS_PORT:6379}
+      password: ${OPS_REDIS_PASSWORD:opsagent_local}
+      timeout: 2s
   cloud:
     nacos:
       config:
@@ -43,6 +49,13 @@ ops:
       - /actuator/health
       - /actuator/info
       - /actuator/prometheus
+      - /api/integrations/alertmanager/webhook
+  alertmanager:
+    enabled: ${OPS_ALERTMANAGER_ENABLED:false}
+    webhook-token: ${OPS_ALERTMANAGER_WEBHOOK_TOKEN:}
+  sla:
+    scanner-enabled: ${OPS_SLA_SCANNER_ENABLED:true}
+    scan-delay-millis: ${OPS_SLA_SCAN_DELAY_MILLIS:10000}
 management:
   endpoints:
     web:

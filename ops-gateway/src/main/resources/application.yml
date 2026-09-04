@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${OPS_GATEWAY_PORT:18080}
 spring:
   application:
     name: ops-gateway
@@ -30,6 +30,10 @@ spring:
               uri: lb://ops-ticket-service
               predicates:
                 - Path=/api/tickets/**
+            - id: integrations
+              uri: lb://ops-ticket-service
+              predicates:
+                - Path=/api/integrations/**
             - id: knowledge
               uri: lb://ops-knowledge-service
               predicates:
@@ -46,6 +50,11 @@ ops:
   gateway:
     security:
       jwt-secret: ${OPS_JWT_SECRET:}
+      # 仅跳过用户 JWT；工单服务仍用独立、常量时间比较的 Bearer Token 鉴权。
+      public-paths:
+        - /api/auth/login
+        - /api/auth/refresh
+        - /api/integrations/alertmanager/webhook
 management:
   endpoints:
     web:

@@ -144,7 +144,15 @@ function normalizeReferences(rows?: Record<string, unknown>[]): AiReference[] {
     documentId: Number(row.documentId),
     chunkIndex: Number(row.chunkIndex),
     documentName: String(row.documentName || `文档 #${row.documentId}`),
-    pageNumber: row.page == null ? undefined : Number(row.page),
+    pageNumber: row.pageStart == null && row.page == null ? undefined : Number(row.pageStart ?? row.page),
     relevanceScore: Number(row.score || 0),
+    sourceId: row.sourceId == null ? undefined : String(row.sourceId),
+    headingPath: row.headingPath == null ? undefined : String(row.headingPath),
+    pageStart: row.pageStart == null ? undefined : Number(row.pageStart),
+    pageEnd: row.pageEnd == null ? undefined : Number(row.pageEnd),
+    rrfScore: row.rrfScore == null ? undefined : Number(row.rrfScore),
+    rerankScore: row.rerankScore == null ? undefined : Number(row.rerankScore),
+    retrievalChannels: Array.isArray(row.retrievalChannels) ? row.retrievalChannels.map(String) : [],
+    neighbor: Boolean(row.neighbor),
   }));
 }

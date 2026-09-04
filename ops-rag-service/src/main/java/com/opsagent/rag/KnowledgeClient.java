@@ -19,6 +19,12 @@ interface KnowledgeClient {
             @RequestParam int topK,
             @RequestParam(required = false) Long documentId);
 
+    @GetMapping("/api/knowledge/internal/debug/search")
+    Envelope<Map<String, Object>> debugSearch(
+            @RequestParam String query,
+            @RequestParam int topK,
+            @RequestParam(required = false) Long documentId);
+
     /**
      * 知识服务统一响应包装。
      *

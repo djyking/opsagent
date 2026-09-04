@@ -1,0 +1,10 @@
+{
+  "status": "firing",
+  "alerts": [{
+    "status": "firing",
+    "labels": {"alertname": "UnknownServiceUnavailable", "service": "legacy-unknown-service", "severity": "warning"},
+    "annotations": {"summary": "未登记服务不可用", "description": "用于验证 CMDB 映射缺失时仍会保留告警并创建工单。"},
+    "startsAt": "2026-09-04T04:00:00Z",
+    "fingerprint": "opsagent-demo-unknown-service-v1"
+  }]
+}

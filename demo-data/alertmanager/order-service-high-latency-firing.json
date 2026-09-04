@@ -1,0 +1,10 @@
+{
+  "status": "firing",
+  "alerts": [{
+    "status": "firing",
+    "labels": {"alertname": "OrderServiceHighLatency", "service": "order-service", "severity": "critical"},
+    "annotations": {"summary": "订单服务 P99 延迟超过 2 秒", "description": "持续五分钟超过阈值，请检查下游库存、支付和数据库连接池。"},
+    "startsAt": "2026-09-04T04:00:00Z",
+    "fingerprint": "opsagent-demo-order-latency-v1"
+  }]
+}

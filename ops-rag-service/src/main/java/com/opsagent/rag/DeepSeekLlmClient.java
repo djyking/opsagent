@@ -2,6 +2,8 @@ package com.opsagent.rag;
 
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
+
 /**
  * 通过兼容协议调用 DeepSeek 模型。
  *
@@ -20,5 +22,10 @@ public class DeepSeekLlmClient extends ChatCompletionsLlmClient {
     @Override
     public String provider() {
         return "deepseek";
+    }
+
+    @Override
+    protected Map<String, Object> additionalBody() {
+        return Map.of("thinking", Map.of("type", "disabled"));
     }
 }

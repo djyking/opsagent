@@ -3,6 +3,8 @@ package com.opsagent.rag;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import java.util.List;
 import java.util.Map;
 
@@ -32,36 +34,41 @@ class RagServiceTest {
                 "chunkIndex", 1,
                 "content", "先检查 Sentinel 是否已完成切换。",
                 "documentName", "Redis手册.md");
-        when(knowledge.search("Redis 主节点挂了以后第一步做什么？", 5, null))
+        when(knowledge.search("Redis 主节点挂了以后第一步做什么？", 30, null))
                 .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(row), "trace"));
         LlmRequest request = new LlmRequest("system", "user", 100);
         when(promptBuilder.build(
                         org.mockito.ArgumentMatchers.anyString(),
-                        org.mockito.ArgumentMatchers.anyList()))
+                        org.mockito.ArgumentMatchers.any(ContextAssembler.AssembledContext.class)))
                 .thenReturn(request);
-        LlmResult result = new LlmResult("先检查切换 [chunk:7]", "openai", "model", 10, 5);
+        LlmResult result = new LlmResult("先检查切换 [S1]", "openai", "model", 10, 5);
         when(invocationService.invoke(
                         "Redis 主节点挂了以后第一步做什么？", request))
                 .thenReturn(new LlmInvocationService.Invocation(result, 123));
+        RagProperties properties = new RagProperties();
+        SimpleMeterRegistry metrics = new SimpleMeterRegistry();
         RagService service = new RagService(
                 knowledge,
-                new RagProperties(),
+                properties,
                 ai,
                 promptBuilder,
                 invocationService,
-                new CitationValidator());
+                new CitationValidator(),
+                rerankService(properties, metrics),
+                new ContextAssembler(properties, metrics),
+                metrics);
 
         RagService.Answer answer = service.ask("Redis 主节点挂了以后第一步做什么？", 5);
 
         InOrder order = inOrder(knowledge, promptBuilder, invocationService);
-        order.verify(knowledge).search("Redis 主节点挂了以后第一步做什么？", 5, null);
+        order.verify(knowledge).search("Redis 主节点挂了以后第一步做什么？", 30, null);
         order.verify(promptBuilder).build(
                 org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyList());
+                org.mockito.ArgumentMatchers.any(ContextAssembler.AssembledContext.class));
         order.verify(invocationService).invoke(
                 "Redis 主节点挂了以后第一步做什么？", request);
         assertThat(answer.references()).extracting(RagService.Source::chunkId).containsExactly(7L);
-        assertThat(answer.answer()).contains("[chunk:7]");
+        assertThat(answer.answer()).contains("[S1]");
     }
 
     @Test
@@ -71,17 +78,31 @@ class RagServiceTest {
         LlmInvocationService invocationService = mock(LlmInvocationService.class);
         AiProperties ai = new AiProperties();
         ai.setEnabled(true);
+        RagProperties properties = new RagProperties();
+        SimpleMeterRegistry metrics = new SimpleMeterRegistry();
         RagService service = new RagService(
                 knowledge,
-                new RagProperties(),
+                properties,
                 ai,
                 promptBuilder,
                 invocationService,
-                new CitationValidator());
+                new CitationValidator(),
+                rerankService(properties, metrics),
+                new ContextAssembler(properties, metrics),
+                metrics);
 
         RagService.Answer answer = service.ask("OpsAgent 生产 MySQL root 密码是多少？", 5);
 
         assertThat(answer.answer()).contains("知识库内容不足");
         verifyNoInteractions(knowledge, promptBuilder, invocationService);
+    }
+
+    private RerankService rerankService(
+            RagProperties properties, SimpleMeterRegistry metrics) {
+        return new RerankService(
+                properties,
+                new BgeRemoteRerankProvider(properties),
+                new NoOpRerankProvider(),
+                metrics);
     }
 }

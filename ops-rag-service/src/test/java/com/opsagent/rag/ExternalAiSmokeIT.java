@@ -52,6 +52,24 @@ class ExternalAiSmokeIT {
     }
 
     @Test
+    @EnabledIfEnvironmentVariable(named = "DEEPSEEK_API_KEY", matches = ".+")
+    void deepSeekStreamShouldProduceVisibleText() {
+        AiProperties properties = properties(
+                "deepseek",
+                "https://api.deepseek.com",
+                "DEEPSEEK_API_KEY",
+                "deepseek-v4-flash");
+        StringBuilder streamed = new StringBuilder();
+        LlmResult result = new DeepSeekLlmClient(
+                        properties,
+                        new AiHttpExecutor(),
+                        new AiStreamHttpExecutor(new ObjectMapper()))
+                .stream(request(), streamed::append);
+        assertThat(streamed).isNotEmpty();
+        assertThat(result.text()).isEqualToIgnoringCase("OK");
+    }
+
+    @Test
     @EnabledIfEnvironmentVariable(named = "MOONSHOT_API_KEY", matches = ".+")
     void kimiShouldAnswerOk() {
         AiProperties properties = properties(

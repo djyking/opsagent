@@ -6,7 +6,7 @@ OpsAgent 当前是一个 Java 17 / Spring Boot 3.5 微服务项目，用于演�
 
 ```text
 浏览器（5173）
-  → Gateway（8080）
+  → Gateway（18080）
     → Auth（8101）
     → Ticket（8102）
     → Knowledge（8103）
@@ -33,7 +33,7 @@ Java 服务和 Vue 前端运行在 Windows 宿主机。MySQL、Redis、Nacos、S
 - 项目位于 `D:\myselfProject\opsagent`；
 - 中间件目录位于 `D:\middleware`。
 
-启动前确保端口 `3000`、`3306`、`5173`、`5672`、`6379`、`8080`、`8101`—`8105`、`8848`、`8849`、`8858`、`9090`、`9200`、`9848`、`15672` 未被其他程序占用。
+启动前确保端口 `3000`、`3306`、`5173`、`5672`、`6379`、`8101`—`8105`、`8848`、`8849`、`8858`、`9090`、`9093`、`9200`、`9848`、`15672`、`18080` 未被其他程序占用。当前 Gateway 使用 `18080`，因为本机 `8080` 已被另一个项目占用。
 
 ## 3. 启动、查看状态和停止
 
@@ -171,7 +171,7 @@ GET    /api/knowledge/internal/index-tasks/{taskId}  # 仅 ADMIN
 | Provider | 默认模型 | 协议 | 切换值 |
 |---|---|---|---|
 | OpenAI | `gpt-5.6-luna` | Responses API | `OPS_AI_PROVIDER=openai` |
-| DeepSeek | `deepseek-v4-flash` | Chat Completions | `OPS_AI_PROVIDER=deepseek` |
+| DeepSeek | `deepseek-v4-flash` | Chat Completions，关闭 thinking | `OPS_AI_PROVIDER=deepseek` |
 | Kimi | `kimi-k2.6` | Chat Completions，关闭 thinking | `OPS_AI_PROVIDER=kimi` |
 | Embedding | `text-embedding-3-small` | OpenAI Embeddings | 不随生成 Provider 切换 |
 
@@ -222,7 +222,7 @@ POST /api/rag/admin/providers/kimi/probe
 $body = @{ question = '请只回答 STREAM_OK'; topK = 1 } | ConvertTo-Json
 curl.exe --http1.1 -N -H "Authorization: Bearer $($login.data.accessToken)" `
   -H 'Content-Type: application/json' -H 'Accept: text/event-stream' `
-  --data-binary $body http://127.0.0.1:8080/api/rag/stream
+  --data-binary $body http://127.0.0.1:18080/api/rag/stream
 ```
 
 ## 9. Nacos 操作与实际接入程度
@@ -311,7 +311,31 @@ cd D:\myselfProject\opsagent\ops-web
 
 RabbitMQ 临时不可用时，工单主事务仍可成功，Outbox 会记录失败并自动重试。历史日志中的连接失败需要结合时间判断；只要 RabbitMQ 已恢复、主队列无积压且 Outbox 全部为 `SENT`，就不属于当前故障。
 
-## 14. 当前未完成项
+## 14. ITSM 事故闭环操作
+
+本轮新增的主业务链路为：
+
+```text
+Alertmanager firing → fingerprint 去重 → CMDB 映射 → 自动建单
+→ 值班与 SLA → 预警/超时/升级 → 运维处置与 RAG
+→ Alertmanager resolved → 人工解决/关闭 → 知识审核发布
+```
+
+页面新增“服务目录”“值班排班”“SLA 看板”“活动告警”和“知识审核”。ADMIN 可以维护 CI、依赖和值班班次；OPS/ADMIN 可以审核知识。RAG 的 SQL 和 Elasticsearch 检索都只允许 `PUBLISHED` 文档。
+
+Alertmanager 演示命令：
+
+```powershell
+$env:OPS_ALERTMANAGER_WEBHOOK_TOKEN = (Get-Content -Raw `
+  D:\middleware\config\alertmanager-webhook-token.txt).Trim()
+cd D:\myselfProject\opsagent
+.\demo-data\scripts\demo-alertmanager-firing.ps1
+.\demo-data\scripts\demo-alertmanager-resolved.ps1
+```
+
+完整演示路线、验收点和设计边界见 `docs\OpsAgent_ITSM演示与验收手册.md`。Grafana 已新增 `OpsAgent ITSM Overview`，展示 SLA、活动告警和值班/知识治理指标。
+
+## 15. 当前未完成项
 
 | 项目 | 当前情况 |
 |---|---|
@@ -321,6 +345,95 @@ RabbitMQ 临时不可用时，工单主事务仍可成功，Outbox 会记录失�
 | Sentinel 其他治理规则 | RAG FlowRule 已持久化；熔断、热点参数和授权规则尚未配置 |
 | OCR | 扫描 PDF 需要 Tesseract 或云 OCR |
 | Java 虚拟线程 | Java 17 不支持正式 API，需升级 Java 21 |
-| Alertmanager | 缺少 SLO、联系人和企业通知渠道 |
+| Sentinel 全局共享额度 | 当前为 Nacos 集中下发、各实例本地计数；需要 Sentinel Cluster Token Server |
+| 企业通知渠道 | 站内通知和 RabbitMQ 已完成；短信、电话和企业 IM 需要真实账号与网关 |
+| SLO 与错误预算 | 当前实现工单 SLA，尚未建立按服务统计的 SLI/SLO 和错误预算策略 |
+| 复盘草稿自动生成 | 知识审核闭环已完成；关闭工单后由 LLM 自动生成复盘草稿仍是后续增强项 |
 
-已实现但当前默认不使用的能力：旧 `/api/rag/chat` 仅作为兼容别名；Kimi K3 因当前账号模型列表不可见而未配置。2026-09-03 已完成 22 篇可用文档、25 个切片的 `text-embedding-3-small` 全量向量化；另有 1 篇故意损坏 PDF 保持 `FAILED`。
+已实现但当前默认不使用的能力：旧 `/api/rag/chat` 仅作为兼容别名；Kimi K3 因当前账号模型列表不可见而未配置。2026-09-03 曾在明确授权范围内完成一批 `text-embedding-3-small` 向量化；实时库新增文档后是否重新全量外发，应以最新的数据授权范围为准。
+
+## 16. 日常操作流程图
+
+### 16.1 工单处理流程
+
+```mermaid
+flowchart LR
+    A[用户新建工单] --> B[运维接单]
+    B --> C[开始处理]
+    C --> D[填写诊断/动作/证据]
+    D --> E[用工单文档 RAG 辅助排查]
+    E --> F{是否需要业务确认}
+    F -->|是| G[提交业务确认]
+    G --> H[标记已解决]
+    F -->|否| H
+    H --> I{创建人确认}
+    I -->|未恢复| C
+    I -->|已恢复| J[关闭工单]
+```
+
+状态变化会同步写入 `ticket_history`、`ticket_operation_log`、`ticket_assignment` 和 `event_outbox`。在工单详情右侧“后台数据链路”可直接核对真实表记录，不只是页面状态变化。
+
+### 16.2 知识发布流程
+
+```mermaid
+flowchart LR
+    A[创建知识库] --> B[拖拽上传文档]
+    B --> C[异步解析]
+    C --> D[查看结构化 Chunk]
+    D --> E[提交审核]
+    E --> F{OPS/ADMIN 审核}
+    F -->|驳回| B
+    F -->|通过| G[PUBLISHED]
+    G --> H[Outbox + RabbitMQ 索引]
+    H --> I[index_status=SUCCESS]
+    I --> J[RAG 可检索]
+```
+
+解析、发布和索引是三个不同状态。只完成上传或解析并不代表已经进入生产 RAG；必须审核通过并且索引成功。
+
+### 16.3 RAG 查询流程
+
+```mermaid
+flowchart LR
+    A[输入问题] --> B[权限与发布过滤]
+    B --> C[BM25]
+    B --> D[Query Embedding + kNN]
+    C --> E[RRF]
+    D --> E
+    E --> F[BGE Rerank 可选]
+    F --> G[Context 预算与来源编号]
+    G --> H[LLM SSE]
+    H --> I[Citation 校验]
+    I --> J[逐段答案 + 引用卡片]
+```
+
+页面 30 秒没有收到首个 Token 会终止并提示检查 AI 服务。Embedding/ES/Reranker/LLM 任一环节故障时按配置降级，不能把“降级可回答”误认为全部链路正常。
+
+### 16.4 删除、修复和 Reindex
+
+```mermaid
+flowchart TD
+    A{操作类型} -->|删除/归档| B[MySQL 状态先提交]
+    B --> C[DELETE 补偿任务]
+    C --> D[清理 ES 文档]
+    A -->|单篇失败| E[索引管理输入文档 ID]
+    E --> F[重新投递 Outbox]
+    A -->|Mapping/模型升级| G[全量 Reindex]
+    G --> H[新物理索引]
+    H --> I[数量校验]
+    I --> J[Alias 原子切换]
+```
+
+管理员操作路径：登录 → 左侧“索引管理” → 先刷新一致性 → 根据失败任务做单文档修复；只有 Mapping、Embedding 模型或切片策略整体升级时才执行全量 Reindex。
+
+## 17. RAG 增强后的验收入口
+
+- 检索调试：`GET /api/rag/debug/search`（ADMIN）。
+- 索引一致性：`GET /api/knowledge/admin/index/consistency`。
+- 全量重建：`POST /api/knowledge/admin/reindex`，随后查询 `/api/knowledge/admin/reindex/{taskId}`。
+- 失败任务：`GET /api/knowledge/admin/index/failed-tasks`。
+- 单文档修复：`POST /api/knowledge/admin/index/repair/{documentId}`。
+- 离线评测：`rag-eval/scripts/evaluate.py`。
+- 架构、审计和真实测试结果：`docs/rag/`。
+
+注意：实时库目前有 26 篇已发布文档，已获得的 OpenAI Embedding 明确授权范围只有 21 篇。新增 5 篇未经明确授权前，不执行全量外部向量化；这不会影响 SQL fallback 和 SSE 功能验收，但会影响新 Alias 下的 Hybrid/Rerank 质量评测。

@@ -14,13 +14,25 @@ import org.springframework.stereotype.Component;
 public class VectorProperties {
     private boolean enabled;
     private String elasticsearchUrl = "http://localhost:9200";
-    private String indexName = "opsagent-knowledge-v1";
+    private String indexName = "ops_knowledge_chunk_v2";
+    private String readAlias = "ops_knowledge_chunk_read";
+    private String writeAlias = "ops_knowledge_chunk_write";
+    private String analyzer = "smartcn";
     private int dimensions = 1536;
     private double minimumScore = 0.72D;
     private String embeddingBaseUrl = "https://api.openai.com/v1";
     private String embeddingApiKey = "";
     private String embeddingModel = "text-embedding-3-small";
     private int timeoutSeconds = 30;
+    private int embeddingBatchSize = 32;
+    private int embeddingBatchMaxTokens = 12000;
+    private int bulkSize = 100;
+    private int bm25TopK = 50;
+    private int vectorTopK = 50;
+    private int vectorCandidates = 100;
+    private int rrfWindow = 50;
+    private int rrfRankConstant = 60;
+    private int hybridCandidates = 30;
 
     public boolean isEnabled() {
         return enabled;
@@ -44,6 +56,30 @@ public class VectorProperties {
 
     public void setIndexName(String indexName) {
         this.indexName = indexName;
+    }
+
+    public String getReadAlias() {
+        return readAlias;
+    }
+
+    public void setReadAlias(String readAlias) {
+        this.readAlias = readAlias;
+    }
+
+    public String getWriteAlias() {
+        return writeAlias;
+    }
+
+    public void setWriteAlias(String writeAlias) {
+        this.writeAlias = writeAlias;
+    }
+
+    public String getAnalyzer() {
+        return analyzer;
+    }
+
+    public void setAnalyzer(String analyzer) {
+        this.analyzer = analyzer;
     }
 
     public int getDimensions() {
@@ -92,6 +128,78 @@ public class VectorProperties {
 
     public void setTimeoutSeconds(int timeoutSeconds) {
         this.timeoutSeconds = timeoutSeconds;
+    }
+
+    public int getEmbeddingBatchSize() {
+        return embeddingBatchSize;
+    }
+
+    public void setEmbeddingBatchSize(int embeddingBatchSize) {
+        this.embeddingBatchSize = embeddingBatchSize;
+    }
+
+    public int getEmbeddingBatchMaxTokens() {
+        return embeddingBatchMaxTokens;
+    }
+
+    public void setEmbeddingBatchMaxTokens(int embeddingBatchMaxTokens) {
+        this.embeddingBatchMaxTokens = embeddingBatchMaxTokens;
+    }
+
+    public int getBulkSize() {
+        return bulkSize;
+    }
+
+    public void setBulkSize(int bulkSize) {
+        this.bulkSize = bulkSize;
+    }
+
+    public int getBm25TopK() {
+        return bm25TopK;
+    }
+
+    public void setBm25TopK(int bm25TopK) {
+        this.bm25TopK = bm25TopK;
+    }
+
+    public int getVectorTopK() {
+        return vectorTopK;
+    }
+
+    public void setVectorTopK(int vectorTopK) {
+        this.vectorTopK = vectorTopK;
+    }
+
+    public int getVectorCandidates() {
+        return vectorCandidates;
+    }
+
+    public void setVectorCandidates(int vectorCandidates) {
+        this.vectorCandidates = vectorCandidates;
+    }
+
+    public int getRrfWindow() {
+        return rrfWindow;
+    }
+
+    public void setRrfWindow(int rrfWindow) {
+        this.rrfWindow = rrfWindow;
+    }
+
+    public int getRrfRankConstant() {
+        return rrfRankConstant;
+    }
+
+    public void setRrfRankConstant(int rrfRankConstant) {
+        this.rrfRankConstant = rrfRankConstant;
+    }
+
+    public int getHybridCandidates() {
+        return hybridCandidates;
+    }
+
+    public void setHybridCandidates(int hybridCandidates) {
+        this.hybridCandidates = hybridCandidates;
     }
 
     boolean configured() {

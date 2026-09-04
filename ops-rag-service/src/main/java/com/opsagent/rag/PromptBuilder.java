@@ -27,6 +27,14 @@ public class PromptBuilder {
 
     LlmRequest build(String question, List<RetrievedChunk> chunks) {
         String context = context(chunks);
+        return build(question, context);
+    }
+
+    LlmRequest build(String question, ContextAssembler.AssembledContext context) {
+        return build(question, context.text());
+    }
+
+    private LlmRequest build(String question, String context) {
         PromptTemplateLoader.PromptTemplate template = loader.get();
         String user = template.user()
                 .replace("{{question}}", question)

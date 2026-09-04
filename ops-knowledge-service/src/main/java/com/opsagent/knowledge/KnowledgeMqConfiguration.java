@@ -30,6 +30,11 @@ public class KnowledgeMqConfiguration {
     }
 
     @Bean
+    DirectExchange documentIndexDeadLetterExchange() {
+        return new DirectExchange(MqNames.DOCUMENT_INDEX_DLX, true, false);
+    }
+
+    @Bean
     Queue documentParseQueue() {
         return new Queue(
                 MqNames.DOCUMENT_PARSE_QUEUE,
@@ -49,6 +54,25 @@ public class KnowledgeMqConfiguration {
     }
 
     @Bean
+    Queue documentIndexQueue() {
+        return new Queue(
+                MqNames.DOCUMENT_INDEX_QUEUE,
+                true,
+                false,
+                false,
+                Map.of(
+                        "x-dead-letter-exchange",
+                        MqNames.DOCUMENT_INDEX_DLX,
+                        "x-dead-letter-routing-key",
+                        MqNames.DOCUMENT_INDEX_DEAD_ROUTING_KEY));
+    }
+
+    @Bean
+    Queue documentIndexDeadLetterQueue() {
+        return new Queue(MqNames.DOCUMENT_INDEX_DLQ, true);
+    }
+
+    @Bean
     Binding documentParseBinding(Queue documentParseQueue, DirectExchange knowledgeExchange) {
         return BindingBuilder.bind(documentParseQueue)
                 .to(knowledgeExchange)
@@ -61,6 +85,21 @@ public class KnowledgeMqConfiguration {
         return BindingBuilder.bind(documentParseDeadLetterQueue)
                 .to(documentParseDeadLetterExchange)
                 .with(MqNames.DOCUMENT_PARSE_DEAD_ROUTING_KEY);
+    }
+
+    @Bean
+    Binding documentIndexBinding(Queue documentIndexQueue, DirectExchange knowledgeExchange) {
+        return BindingBuilder.bind(documentIndexQueue)
+                .to(knowledgeExchange)
+                .with(MqNames.DOCUMENT_INDEX_ROUTING_KEY);
+    }
+
+    @Bean
+    Binding documentIndexDeadLetterBinding(
+            Queue documentIndexDeadLetterQueue, DirectExchange documentIndexDeadLetterExchange) {
+        return BindingBuilder.bind(documentIndexDeadLetterQueue)
+                .to(documentIndexDeadLetterExchange)
+                .with(MqNames.DOCUMENT_INDEX_DEAD_ROUTING_KEY);
     }
 
 }

@@ -1,0 +1,10 @@
+{
+  "status": "firing",
+  "alerts": [{
+    "status": "firing",
+    "labels": {"alertname": "MysqlConnectionPoolSaturation", "service": "mysql", "severity": "high"},
+    "annotations": {"summary": "MySQL 连接池使用率超过 90%", "description": "检查活跃连接、等待线程、慢 SQL 和连接泄漏。"},
+    "startsAt": "2026-09-04T04:00:00Z",
+    "fingerprint": "opsagent-demo-mysql-pool-v1"
+  }]
+}

@@ -22,7 +22,8 @@ final class TicketDtos {
     record Create(
             @NotBlank @Size(max = 128) String title,
             @NotBlank String description,
-            @NotBlank @Pattern(regexp = "LOW|MEDIUM|HIGH|URGENT") String priority) {}
+            @NotBlank @Pattern(regexp = "LOW|MEDIUM|HIGH|URGENT") String priority,
+            @Size(max = 64) String affectedCiCode) {}
 
     /**
      * 领取工单请求参数。
@@ -81,6 +82,8 @@ final class TicketDtos {
             String status,
             Long creatorId,
             Long assigneeId,
+            String affectedCiCode,
+            String sourceType,
             Integer version,
             LocalDateTime createTime,
             LocalDateTime updateTime) {}

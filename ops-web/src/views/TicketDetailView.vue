@@ -16,7 +16,7 @@ import {
   Database,
   Wrench,
 } from "@lucide/vue";
-import { aiApi, documentApi, ticketApi } from "@/api/modules";
+import { aiApi, documentApi, itsmApi, ticketApi } from "@/api/modules";
 import { streamRagAnswer } from "@/api/rag-stream";
 import type {
   AiQuestion,
@@ -33,6 +33,7 @@ import { useAuthStore } from "@/stores/auth";
 import BaseModal from "@/components/BaseModal.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import AnswerContent from "@/components/AnswerContent.vue";
+import RagSources from "@/components/RagSources.vue";
 
 type TicketAction =
   | "accept"
@@ -55,6 +56,7 @@ const logs = ref<TicketLog[]>([]);
 const comments = ref<TicketComment[]>([]);
 const workRecords = ref<TicketWorkRecord[]>([]);
 const trace = ref<TicketTrace>();
+const sla = ref<Record<string, unknown>>();
 const traceOpen = ref(false);
 const documents = ref<DocumentRecord[]>([]);
 const questions = ref<AiQuestion[]>([]);
@@ -120,6 +122,7 @@ async function load() {
       comments.value,
       workRecords.value,
       trace.value,
+      sla.value,
     ] = await Promise.all([
       ticketApi.detail(id),
       ticketApi.logs(id),
@@ -127,6 +130,7 @@ async function load() {
       ticketApi.comments(id),
       ticketApi.workRecords(id),
       ticketApi.trace(id),
+      itsmApi.ticketSla(id),
     ]);
     questions.value = (await aiApi.page(id)).records;
   } catch (e) {
@@ -339,6 +343,9 @@ onMounted(load);
           }}</strong>
         </div>
         <div>
+          <span>受影响 CI</span><strong>{{ ticket.affectedCiCode || "未关联" }}</strong>
+        </div>
+        <div>
           <span>最后更新</span
           ><strong>{{
             new Date(ticket.updateTime).toLocaleString("zh-CN")
@@ -500,15 +507,7 @@ onMounted(load);
                   />
                 </div>
               </div>
-              <div v-if="qa.references?.length" class="reference-list">
-                <span v-for="ref in qa.references" :key="ref.chunkId"
-                  >{{ ref.documentName || `文档 #${ref.documentId}` }}
-                  <small v-if="ref.pageNumber">第 {{ ref.pageNumber }} 页</small>
-                  <small v-if="ref.relevanceScore"
-                    >相关度 {{ (ref.relevanceScore * 100).toFixed(0) }}%</small
-                  ></span
-                >
-              </div>
+              <RagSources :references="qa.references || []" compact />
             </article>
           </div>
         </section>
@@ -565,6 +564,10 @@ onMounted(load);
         </section>
       </div>
       <aside class="detail-aside">
+        <section v-if="sla" class="panel sla-detail-card">
+          <header class="panel-header"><div><span class="eyebrow">SERVICE LEVEL</span><h3>SLA 计时</h3></div><Clock3 :size="20" /></header>
+          <dl><div><dt>响应状态</dt><dd>{{ sla.responseStatus }}</dd></div><div><dt>解决状态</dt><dd>{{ sla.resolutionStatus }}</dd></div><div><dt>响应截止</dt><dd>{{ new Date(String(sla.responseDeadline)).toLocaleString("zh-CN") }}</dd></div><div><dt>解决截止</dt><dd>{{ new Date(String(sla.resolutionDeadline)).toLocaleString("zh-CN") }}</dd></div><div><dt>升级级别</dt><dd>L{{ sla.escalationLevel }}</dd></div></dl>
+        </section>
         <section class="panel trace-summary-panel">
           <header class="panel-header"><div><span class="eyebrow">BACKEND TRACE</span><h3>后台数据链路</h3></div><Database :size="20" /></header>
           <div class="trace-metrics"><span><strong>{{ trace?.assignments.length || 0 }}</strong>ticket_assignment</span><span><strong>{{ trace?.operations.length || 0 }}</strong>ticket_operation_log</span><span><strong>{{ trace?.outboxEvents.length || 0 }}</strong>event_outbox</span></div>

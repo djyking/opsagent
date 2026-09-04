@@ -13,5 +13,11 @@ public interface EmbeddingClient {
 
     String model();
 
-    List<List<Double>> embed(List<String> texts);
+    int dimensions();
+
+    EmbeddingBatchResult embedBatch(List<String> texts);
+
+    default List<List<Double>> embed(List<String> texts) {
+        return embedBatch(texts).vectors();
+    }
 }

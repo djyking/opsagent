@@ -12,6 +12,9 @@ import jakarta.validation.constraints.Size;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.http.MediaType;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.security.access.prepost.PreAuthorize;
+
+import java.util.Map;
 
 /**
  * 提供基于知识库引用的问答接口。
@@ -62,5 +65,14 @@ public class RagController {
         } catch (BusinessException exception) {
             return streamingService.error(exception.getMessage());
         }
+    }
+
+    @GetMapping("/debug/search")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Map<String, Object>> debugSearch(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "30") @Min(1) @Max(30) int topK,
+            @RequestParam(required = false) Long documentId) {
+        return ApiResponse.success(service.debugSearch(query, topK, documentId));
     }
 }

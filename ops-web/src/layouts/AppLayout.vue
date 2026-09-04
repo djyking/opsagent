@@ -13,6 +13,12 @@ import {
   BookOpen,
   Bot,
   Monitor,
+  Network,
+  CalendarClock,
+  TimerReset,
+  Siren,
+  BookCheck,
+  DatabaseZap,
 } from "@lucide/vue";
 import { useAuthStore } from "@/stores/auth";
 
@@ -29,6 +35,12 @@ const title = computed(
       knowledge: "知识库",
       "rag-chat": "智能问答",
       monitor: "系统监控",
+      cmdb: "服务目录与拓扑",
+      oncall: "值班排班",
+      sla: "SLA 看板",
+      alerts: "活动告警",
+      "knowledge-review": "知识审核",
+      "knowledge-index-admin": "知识索引管理",
       notifications: "通知中心",
       admin: "操作审计",
     })[String(route.name)] || "OpsAgent",
@@ -39,8 +51,14 @@ const nav = computed(() => [
   { to: "/knowledge", label: "知识库", icon: BookOpen },
   { to: "/rag/chat", label: "智能问答", icon: Bot },
   { to: "/system/monitor", label: "系统监控", icon: Monitor },
+  { to: "/itsm/cmdb", label: "服务目录", icon: Network },
+  { to: "/itsm/oncall", label: "值班排班", icon: CalendarClock },
+  { to: "/itsm/sla", label: "SLA 看板", icon: TimerReset },
   ...(auth.isAdmin
     ? [
+        { to: "/itsm/alerts", label: "活动告警", icon: Siren },
+        { to: "/knowledge/review", label: "知识审核", icon: BookCheck },
+        { to: "/knowledge/index-admin", label: "索引管理", icon: DatabaseZap },
         { to: "/notifications", label: "通知中心", icon: Bell },
         { to: "/admin", label: "操作审计", icon: ShieldCheck },
       ]

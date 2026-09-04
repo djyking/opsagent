@@ -36,6 +36,14 @@ public class KnowledgeController {
             @NotBlank @Size(max = 128) String name,
             @Size(max = 500) String description) {}
 
+    /**
+     * 知识审核意见请求。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record ReviewRequest(@Size(max = 1000) String comment) {}
+
     @PostMapping("/bases")
     ApiResponse<Long> create(@Valid @RequestBody BaseRequest r) {
         return ApiResponse.success(service.createBase(r.name(), r.description()));
@@ -103,5 +111,93 @@ public class KnowledgeController {
     @PreAuthorize("hasRole('ADMIN')")
     ApiResponse<Integer> reindex() {
         return ApiResponse.success(service.reindexAll());
+    }
+
+    @PostMapping("/admin/reindex")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Long> requestReindex() {
+        return ApiResponse.success(service.requestReindex());
+    }
+
+    @GetMapping("/admin/reindex/{taskId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Map<String, Object>> reindexTask(@PathVariable long taskId) {
+        return ApiResponse.success(service.reindexTask(taskId));
+    }
+
+    @GetMapping("/admin/index/consistency")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Map<String, Object>> indexConsistency() {
+        return ApiResponse.success(service.indexConsistency());
+    }
+
+    @PostMapping("/admin/index/repair/{documentId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Long> repairIndex(@PathVariable long documentId) {
+        return ApiResponse.success(service.repairIndex(documentId));
+    }
+
+    @GetMapping("/admin/index/failed-tasks")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<List<Map<String, Object>>> failedIndexTasks() {
+        return ApiResponse.success(service.failedIndexTasks());
+    }
+
+    @GetMapping("/internal/debug/search")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<HybridSearchResult> debugSearch(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "30") int topK,
+            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam(required = false) Long documentId,
+            @RequestParam(required = false) Set<Long> allowedKnowledgeBaseIds,
+            @RequestParam(defaultValue = "false") boolean administratorPreview) {
+        return ApiResponse.success(service.debugSearch(
+                query,
+                topK,
+                knowledgeBaseId,
+                documentId,
+                allowedKnowledgeBaseIds,
+                administratorPreview));
+    }
+
+    @GetMapping("/review/documents")
+    @PreAuthorize("hasAnyRole('OPS','ADMIN')")
+    ApiResponse<List<Map<String, Object>>> reviewDocuments(
+            @RequestParam(required = false) String status) {
+        return ApiResponse.success(service.reviewDocuments(status));
+    }
+
+    @PostMapping("/documents/{id}/submit-review")
+    ApiResponse<Map<String, Object>> submitReview(@PathVariable long id) {
+        return ApiResponse.success(service.submitReview(id));
+    }
+
+    @PostMapping("/documents/{id}/approve")
+    @PreAuthorize("hasAnyRole('OPS','ADMIN')")
+    ApiResponse<Map<String, Object>> approve(
+            @PathVariable long id, @RequestBody(required = false) ReviewRequest request) {
+        return ApiResponse.success(
+                service.approveReview(id, request == null ? null : request.comment()));
+    }
+
+    @PostMapping("/documents/{id}/reject")
+    @PreAuthorize("hasAnyRole('OPS','ADMIN')")
+    ApiResponse<Map<String, Object>> reject(
+            @PathVariable long id, @Valid @RequestBody ReviewRequest request) {
+        return ApiResponse.success(service.rejectReview(id, request.comment()));
+    }
+
+    @PostMapping("/documents/{id}/archive")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Map<String, Object>> archive(
+            @PathVariable long id, @RequestBody(required = false) ReviewRequest request) {
+        return ApiResponse.success(service.archive(id, request == null ? null : request.comment()));
+    }
+
+    @GetMapping("/documents/{id}/review-history")
+    @PreAuthorize("hasAnyRole('OPS','ADMIN')")
+    ApiResponse<List<Map<String, Object>>> reviewHistory(@PathVariable long id) {
+        return ApiResponse.success(service.reviewHistory(id));
     }
 }

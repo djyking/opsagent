@@ -23,4 +23,18 @@ class CitationValidatorTest {
 
         assertThat(answer).contains("[chunk:10]").doesNotContain("[chunk:999]");
     }
+
+    @Test
+    void shouldRejectUnknownContextSourceId() {
+        RetrievedChunk chunk = new RetrievedChunk(
+                10L, 1L, 0, "content", "doc.md", null, 1, "", 1.0D);
+        ContextAssembler.ContextSource source =
+                new ContextAssembler.ContextSource("S1", chunk, false, null);
+
+        CitationValidator.Validation result = new CitationValidator()
+                .validateContext("真实 [S1]，伪造 [S9]。", List.of(source));
+
+        assertThat(result.answer()).contains("[S1]").doesNotContain("[S9]");
+        assertThat(result.invalidCount()).isEqualTo(1);
+    }
 }

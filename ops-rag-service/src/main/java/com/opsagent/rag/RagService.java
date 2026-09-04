@@ -3,11 +3,17 @@ package com.opsagent.rag;
 import com.opsagent.common.core.BusinessException;
 import com.opsagent.common.core.ErrorCode;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 编排权限检索、Prompt 构建、模型调用和真实来源返回。
@@ -17,12 +23,16 @@ import java.util.function.Consumer;
  */
 @Service
 public class RagService {
+    private static final Logger LOG = LoggerFactory.getLogger(RagService.class);
     private final KnowledgeClient knowledge;
     private final RagProperties ragProperties;
     private final AiProperties aiProperties;
     private final PromptBuilder promptBuilder;
     private final LlmInvocationService invocationService;
     private final CitationValidator citationValidator;
+    private final RerankService rerankService;
+    private final ContextAssembler contextAssembler;
+    private final MeterRegistry metrics;
 
     RagService(
             KnowledgeClient knowledge,
@@ -30,13 +40,19 @@ public class RagService {
             AiProperties aiProperties,
             PromptBuilder promptBuilder,
             LlmInvocationService invocationService,
-            CitationValidator citationValidator) {
+            CitationValidator citationValidator,
+            RerankService rerankService,
+            ContextAssembler contextAssembler,
+            MeterRegistry metrics) {
         this.knowledge = knowledge;
         this.ragProperties = ragProperties;
         this.aiProperties = aiProperties;
         this.promptBuilder = promptBuilder;
         this.invocationService = invocationService;
         this.citationValidator = citationValidator;
+        this.rerankService = rerankService;
+        this.contextAssembler = contextAssembler;
+        this.metrics = metrics;
     }
 
     Answer ask(String question, Integer requestedTopK) {
@@ -44,27 +60,34 @@ public class RagService {
     }
 
     Answer ask(String question, Integer requestedTopK, Long documentId) {
+        long started = System.nanoTime();
         StreamPlan plan = prepareStream(question, requestedTopK, documentId);
+        Answer answer;
         if (plan.immediate() != null) {
-            return plan.immediate();
+            answer = plan.immediate();
+        } else {
+            try {
+                LlmInvocationService.Invocation invocation = invocationService.invoke(
+                        question, plan.request());
+                answer = complete(plan, invocation);
+            } catch (AiProviderException exception) {
+                answer = localFallback(plan.context(), plan.sources(), "LLM_UNAVAILABLE");
+            }
         }
-        try {
-            LlmInvocationService.Invocation invocation = invocationService.invoke(
-                    question, plan.request());
-            return complete(plan, invocation);
-        } catch (AiProviderException exception) {
-            throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, exception.getMessage());
-        }
+        recordQuery(question, answer, started);
+        return answer;
     }
 
     StreamPlan prepareStream(String question, Integer requestedTopK, Long documentId) {
+        long started = System.nanoTime();
         if (credentialExtractionQuestion(question)) {
-            return StreamPlan.completed(question, noEvidence());
+            return StreamPlan.completed(question, noEvidence(), started);
         }
         int topK = ragProperties.limit(requestedTopK);
+        int retrievalCandidates = Math.max(topK, ragProperties.getRetrievalCandidates());
         List<RetrievedChunk> chunks;
         try {
-            var result = knowledge.search(question, topK, documentId);
+            var result = knowledge.search(question, retrievalCandidates, documentId);
             List<Map<String, Object>> data = result.data() == null ? List.of() : result.data();
             chunks = data.stream()
                     .map(RetrievedChunk::from)
@@ -73,15 +96,27 @@ public class RagService {
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "知识检索暂时不可用");
         }
-        List<Source> sources = chunks.stream().map(Source::from).toList();
         if (chunks.isEmpty() && internalFactQuestion(question)) {
-            return StreamPlan.completed(question, noEvidence());
+            return StreamPlan.completed(question, noEvidence(), started);
         }
+        RerankService.Outcome reranked = rerankService.rerank(question, chunks, topK);
+        ContextAssembler.AssembledContext context = contextAssembler.assemble(
+                reranked.chunks(), chunks, documentId != null);
+        List<Source> sources = context.sources().stream().map(Source::from).toList();
+        AnswerMetadata metadata = metadata(chunks, context, reranked);
         if (!aiProperties.isEnabled()) {
-            return StreamPlan.completed(question, localFallback(chunks, sources));
+            return StreamPlan.completed(
+                    question, localFallback(context, sources, "LLM_DISABLED"), started);
         }
         return new StreamPlan(
-                question, chunks, sources, promptBuilder.build(question, chunks), null);
+                question,
+                reranked.chunks(),
+                context.sources(),
+                sources,
+                promptBuilder.build(question, context),
+                metadata,
+                null,
+                started);
     }
 
     Answer stream(
@@ -90,31 +125,81 @@ public class RagService {
             LlmInvocationService.AuditContext context) {
         if (plan.immediate() != null) {
             onDelta.accept(plan.immediate().answer());
+            recordQuery(plan.question(), plan.immediate(), plan.startedNanos());
             return plan.immediate();
         }
-        LlmInvocationService.Invocation invocation = invocationService.stream(
-                plan.question(), plan.request(), onDelta, context);
-        return complete(plan, invocation);
+        long started = System.nanoTime();
+        Answer answer;
+        try {
+            LlmInvocationService.Invocation invocation = invocationService.stream(
+                    plan.question(), plan.request(), onDelta, context);
+            answer = complete(plan, invocation);
+        } catch (AiProviderException exception) {
+            answer = localFallback(plan.context(), plan.sources(), "LLM_UNAVAILABLE");
+            onDelta.accept(answer.answer());
+        }
+        recordQuery(plan.question(), answer, started);
+        return answer;
     }
 
     LlmInvocationService.AuditContext auditContext() {
         return invocationService.currentContext();
     }
 
+    Map<String, Object> debugSearch(String question, int topK, Long documentId) {
+        KnowledgeClient.Envelope<Map<String, Object>> response = knowledge.debugSearch(
+                question, Math.min(Math.max(topK, 1), 30), documentId);
+        Map<String, Object> retrieval = response.data() == null
+                ? Map.of() : response.data();
+        List<RetrievedChunk> candidates = rows(retrieval.get("candidates")).stream()
+                .map(RetrievedChunk::from)
+                .toList();
+        RerankService.Outcome reranked = rerankService.rerank(
+                question, candidates, ragProperties.getRerankTopN());
+        ContextAssembler.AssembledContext context = contextAssembler.assemble(
+                reranked.chunks(), candidates, documentId != null);
+        Map<String, Object> result = new java.util.LinkedHashMap<>(retrieval);
+        result.put("rerankApplied", reranked.applied());
+        result.put("rerankDegradedReason", reranked.degradedReason());
+        result.put("rerankRank", reranked.chunks().stream()
+                .map(RetrievedChunk::chunkId).toList());
+        result.put("contextSources", context.sources().stream().map(Source::from).toList());
+        result.put("contextTokens", context.tokenCount());
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> rows(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream()
+                    .filter(Map.class::isInstance)
+                    .map(item -> (Map<String, Object>) item)
+                    .toList();
+        }
+        return List.of();
+    }
+
     private Answer complete(StreamPlan plan, LlmInvocationService.Invocation invocation) {
         LlmResult result = invocation.result();
+        CitationValidator.Validation validation = citationValidator.validateContext(
+                result.text(), plan.contextSources());
+        metrics.counter("rag.citation.invalid").increment(validation.invalidCount());
         return new Answer(
-                citationValidator.validate(result.text(), plan.chunks()),
+                validation.answer(),
                 plan.sources(),
                 result.provider(),
                 result.model(),
                 result.inputTokens(),
                 result.outputTokens(),
-                invocation.latencyMs());
+                invocation.latencyMs(),
+                plan.metadata());
     }
 
-    private Answer localFallback(List<RetrievedChunk> chunks, List<Source> sources) {
-        if (chunks.isEmpty()) {
+    private Answer localFallback(
+            ContextAssembler.AssembledContext context,
+            List<Source> sources,
+            String reason) {
+        if (context.sources().isEmpty()) {
             return new Answer(
                     "当前检索到的知识库内容不足以确认该问题。",
                     sources,
@@ -122,19 +207,29 @@ public class RagService {
                     "none",
                     0,
                     0,
-                    0);
+                    0,
+                    new AnswerMetadata("NONE", false, 0, 0, 0, true, reason));
         }
-        RetrievedChunk first = chunks.get(0);
+        RetrievedChunk first = context.sources().get(0).chunk();
         String content = first.content();
         String excerpt = content.substring(0, Math.min(content.length(), 500));
         return new Answer(
-                "AI 生成功能未启用。以下是最相关知识片段：\n" + excerpt + " [chunk:" + first.chunkId() + "]",
+                "AI 生成暂时不可用。已找到以下最相关知识条目，请根据引用查看原文：\n"
+                        + excerpt + " [S1]",
                 sources,
                 "disabled",
                 "retrieval-only",
                 0,
                 0,
-                0);
+                0,
+                new AnswerMetadata(
+                        first.retrievalMode(),
+                        false,
+                        sources.size(),
+                        sources.size(),
+                        context.tokenCount(),
+                        true,
+                        reason));
     }
 
     private Answer noEvidence() {
@@ -145,7 +240,58 @@ public class RagService {
                 "none",
                 0,
                 0,
-                0);
+                0,
+                new AnswerMetadata("NONE", false, 0, 0, 0, false, null));
+    }
+
+    private AnswerMetadata metadata(
+            List<RetrievedChunk> candidates,
+            ContextAssembler.AssembledContext context,
+            RerankService.Outcome reranked) {
+        String mode = candidates.isEmpty() ? "NONE" : candidates.get(0).retrievalMode();
+        boolean degraded = reranked.degradedReason() != null
+                || candidates.stream().anyMatch(chunk -> !chunk.degradedReason().isBlank());
+        String reason = reranked.degradedReason();
+        if (reason == null && !candidates.isEmpty()) {
+            reason = candidates.get(0).degradedReason();
+        }
+        return new AnswerMetadata(
+                mode,
+                reranked.applied(),
+                candidates.size(),
+                context.sources().size(),
+                context.tokenCount(),
+                degraded,
+                reason);
+    }
+
+    private void recordQuery(String question, Answer answer, long started) {
+        long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+        String status = answer.metadata().degraded() ? "degraded" : "success";
+        metrics.counter(
+                "rag.query", "mode", answer.metadata().retrievalMode(), "status", status)
+                .increment();
+        Timer.builder("rag.query.duration")
+                .tag("stage", "total")
+                .register(metrics)
+                .record(elapsed, TimeUnit.MILLISECONDS);
+        if (answer.metadata().degradedReason() != null) {
+            metrics.counter(
+                    "rag.query.degraded",
+                    "reason",
+                    answer.metadata().degradedReason()).increment();
+        }
+        LOG.info(
+                "RAG queryHash={}, retrievalMode={}, candidateCount={}, rerankApplied={},"
+                        + " contextTokens={}, citationCount={}, degradedReason={}, durationMs={}",
+                Integer.toUnsignedString(question.hashCode(), 16),
+                answer.metadata().retrievalMode(),
+                answer.metadata().candidateCount(),
+                answer.metadata().rerankApplied(),
+                answer.metadata().contextTokens(),
+                answer.references().size(),
+                answer.metadata().degradedReason(),
+                elapsed);
     }
 
     private boolean credentialExtractionQuestion(String question) {
@@ -197,7 +343,24 @@ public class RagService {
             String model,
             int inputTokens,
             int outputTokens,
-            long latencyMs) {}
+            long latencyMs,
+            AnswerMetadata metadata) {}
+
+    /**
+     * 暴露检索、重排、Context 预算和降级状态，便于前端与可观测平台解释结果。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record AnswerMetadata(
+            String retrievalMode,
+            boolean rerankApplied,
+            int candidateCount,
+            int contextChunkCount,
+            int contextTokens,
+            boolean degraded,
+            String degradedReason) {
+    }
 
     /**
      * 保存请求线程已完成的检索结果，避免 SSE 工作线程丢失 Feign Token Relay 上下文。
@@ -208,11 +371,27 @@ public class RagService {
     record StreamPlan(
             String question,
             List<RetrievedChunk> chunks,
+            List<ContextAssembler.ContextSource> contextSources,
             List<Source> sources,
             LlmRequest request,
-            Answer immediate) {
-        static StreamPlan completed(String question, Answer answer) {
-            return new StreamPlan(question, List.of(), answer.references(), null, answer);
+            AnswerMetadata metadata,
+            Answer immediate,
+            long startedNanos) {
+        static StreamPlan completed(String question, Answer answer, long startedNanos) {
+            return new StreamPlan(
+                    question,
+                    List.of(),
+                    List.of(),
+                    answer.references(),
+                    null,
+                    answer.metadata(),
+                    answer,
+                    startedNanos);
+        }
+
+        ContextAssembler.AssembledContext context() {
+            return new ContextAssembler.AssembledContext(
+                    "", contextSources, metadata.contextTokens(), 0);
         }
     }
 
@@ -230,8 +409,18 @@ public class RagService {
             Integer page,
             Integer version,
             String updateTime,
-            double score) {
-        static Source from(RetrievedChunk chunk) {
+            double score,
+            String sourceId,
+            String headingPath,
+            Integer pageStart,
+            Integer pageEnd,
+            Double rrfScore,
+            Double rerankScore,
+            java.util.Set<String> retrievalChannels,
+            boolean neighbor,
+            Long parentChunkId) {
+        static Source from(ContextAssembler.ContextSource contextSource) {
+            RetrievedChunk chunk = contextSource.chunk();
             return new Source(
                     chunk.chunkId(),
                     chunk.documentId(),
@@ -240,7 +429,16 @@ public class RagService {
                     chunk.page(),
                     chunk.version(),
                     chunk.updateTime(),
-                    chunk.score());
+                    chunk.score(),
+                    contextSource.sourceId(),
+                    chunk.headingPath(),
+                    chunk.pageStart(),
+                    chunk.pageEnd(),
+                    chunk.rrfScore(),
+                    chunk.rerankScore(),
+                    chunk.channels(),
+                    contextSource.neighbor(),
+                    contextSource.parentChunkId());
         }
     }
 }

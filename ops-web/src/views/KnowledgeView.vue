@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { BookOpen, FileText, Layers3, Play, Trash2, Upload } from "@lucide/vue";
+import { BookCheck, BookOpen, FileText, Layers3, Play, Trash2, Upload } from "@lucide/vue";
 import { request } from "@/api/http";
 import BaseModal from "@/components/BaseModal.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
@@ -16,6 +16,11 @@ interface KnowledgeDocument {
   file_type: string;
   file_size: number;
   status: string;
+  review_status: string;
+  index_status?: string;
+  chunk_count?: number;
+  embedding_model?: string;
+  version?: number;
   parse_error?: string;
   create_time: string;
 }
@@ -34,7 +39,7 @@ const error = ref("");
 const success = ref("");
 const busy = ref("");
 const selectedBase = computed(() => bases.value.find((item) => item.id === selectedBaseId.value));
-const indexedCount = computed(() => documents.value.filter((item) => item.status === "INDEXED").length);
+const indexedCount = computed(() => documents.value.filter((item) => item.index_status === "SUCCESS" || item.status === "INDEXED").length);
 
 async function load() {
   try {
@@ -142,6 +147,21 @@ async function remove(document: KnowledgeDocument) {
     busy.value = "";
   }
 }
+async function submitReview(document: KnowledgeDocument) {
+  busy.value = `review-${document.id}`;
+  try {
+    await request({
+      method: "POST",
+      url: `/api/knowledge/documents/${document.id}/submit-review`,
+    });
+    success.value = "已提交知识审核；发布前不会进入生产 RAG 检索范围";
+    await loadDocuments();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "提交审核失败";
+  } finally {
+    busy.value = "";
+  }
+}
 onMounted(load);
 </script>
 
@@ -173,9 +193,9 @@ onMounted(load);
       <div v-if="selectedBase && !documents.length" class="empty-state"><FileText :size="32" /><strong>这个知识库还没有文档</strong><span>上传 SOP、故障复盘或运维手册后执行解析。</span></div>
       <div v-else class="document-list knowledge-document-list">
         <article v-for="document in documents" :key="document.id">
-          <div class="file-icon">{{ document.file_type.toUpperCase() }}</div><div class="file-info"><strong>{{ document.original_name }}</strong><span>{{ (document.file_size / 1024).toFixed(1) }} KB · {{ new Date(document.create_time).toLocaleString("zh-CN") }}</span><p v-if="document.parse_error" class="file-error">{{ document.parse_error }}</p></div>
-          <StatusBadge :value="document.status === 'INDEXED' ? 'SUCCESS' : document.status" />
-          <div class="row-actions"><button class="icon-button" title="解析并建立向量索引" :disabled="busy === `parse-${document.id}`" @click="parse(document)"><Play :size="16" /></button><button class="icon-button" title="查看文本切片" :disabled="document.status !== 'INDEXED'" @click="showChunks(document)"><Layers3 :size="16" /></button><button class="icon-button danger" title="删除文档" @click="remove(document)"><Trash2 :size="16" /></button></div>
+          <div class="file-icon">{{ document.file_type.toUpperCase() }}</div><div class="file-info"><strong>{{ document.original_name }}</strong><span>{{ (document.file_size / 1024).toFixed(1) }} KB · {{ new Date(document.create_time).toLocaleString("zh-CN") }}</span><span>Chunk {{ document.chunk_count || 0 }} · {{ document.embedding_model || "待 Embedding" }} · 文档版本 v{{ document.version || 1 }}</span><p v-if="document.parse_error" class="file-error">{{ document.parse_error }}</p></div>
+          <div class="document-statuses"><span class="block-muted">解析</span><StatusBadge :value="document.status === 'INDEXED' ? 'SUCCESS' : document.status" /><span class="block-muted">索引</span><StatusBadge :value="document.index_status || (document.status === 'INDEXED' ? 'SUCCESS' : 'PENDING')" /><span class="block-muted">发布</span><StatusBadge :value="document.review_status || 'DRAFT'" /></div>
+          <div class="row-actions"><button class="icon-button" title="解析并建立向量索引" :disabled="busy === `parse-${document.id}`" @click="parse(document)"><Play :size="16" /></button><button v-if="['PARSED','INDEXED'].includes(document.status) && ['DRAFT','REJECTED'].includes(document.review_status || 'DRAFT')" class="icon-button success" title="提交知识审核" :disabled="busy === `review-${document.id}`" @click="submitReview(document)"><BookCheck :size="16" /></button><button class="icon-button" title="查看文本切片" :disabled="!['PARSED','INDEXED'].includes(document.status)" @click="showChunks(document)"><Layers3 :size="16" /></button><button class="icon-button danger" title="删除文档" @click="remove(document)"><Trash2 :size="16" /></button></div>
         </article>
       </div>
     </main>

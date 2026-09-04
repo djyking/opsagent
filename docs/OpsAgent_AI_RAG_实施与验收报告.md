@@ -131,11 +131,17 @@ OpenAI 首次 Java probe 曾连接超时。根因是 Windows 启用了 `127.0.0.
 ## 8. 操作入口
 
 - 用户操作：`http://127.0.0.1:5173/`
-- RAG API：`POST http://127.0.0.1:8080/api/rag/ask`
-- RAG SSE：`POST http://127.0.0.1:8080/api/rag/stream`
-- Provider 状态：`GET http://127.0.0.1:8080/api/rag/admin/providers`
+- RAG API：`POST http://127.0.0.1:18080/api/rag/ask`
+- RAG SSE：`POST http://127.0.0.1:18080/api/rag/stream`
+- Provider 状态：`GET http://127.0.0.1:18080/api/rag/admin/providers`
 - Elasticsearch：`http://127.0.0.1:9200/opsagent-knowledge-v1/_count`
 - Prometheus：`http://127.0.0.1:9090/`
 - Grafana：`http://127.0.0.1:3000/`
 
 账号和本地密码只在仓库外 `D:\middleware\docs\OpsAgent本地地址与密码.md` 中维护。
+
+## 9. 2026-09-04 RAG 技术增强补充
+
+本节覆盖前文基于旧 `opsagent-knowledge-v1` 索引的历史结论。当前已升级为结构化切片、SmartCN BM25、kNN、RRF、可选 BGE Cross-Encoder、Context Token Budget、`[Sx]` Citation、独立索引 Outbox/DLQ 和版本化 Alias。管理员页面新增一致性检查、全量 Reindex、失败任务和单文档修复。
+
+本机 BGE `BAAI/bge-reranker-v2-m3` 已完成真实 CPU 推理；Java → BGE 隔离测试中 5/5 来源具有 Rerank 分数。实时库现有 26 篇已发布文档，而明确的 OpenAI Embedding 授权范围为 21 篇，所以本次没有把新增 5 篇外发，新的 `ops_knowledge_chunk_read/write` Alias 暂未完成全量向量重建。完整现状、架构和不编造数字的评测报告见 `docs/rag/`。

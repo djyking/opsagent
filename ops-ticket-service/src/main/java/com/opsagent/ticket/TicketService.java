@@ -27,12 +27,19 @@ public class TicketService {
     private final TicketAuditMapper audit;
     private final OutboxMapper outbox;
     private final ObjectMapper json;
+    private final SlaService sla;
 
-    TicketService(TicketMapper t, TicketAuditMapper a, OutboxMapper o, ObjectMapper json) {
+    TicketService(
+            TicketMapper t,
+            TicketAuditMapper a,
+            OutboxMapper o,
+            ObjectMapper json,
+            SlaService sla) {
         tickets = t;
         audit = a;
         outbox = o;
         this.json = json;
+        this.sla = sla;
     }
 
     @Transactional
@@ -49,9 +56,12 @@ public class TicketService {
         t.setPriority(r.priority());
         t.setStatus(TicketStatus.CREATED.name());
         t.setCreatorId(u.userId());
+        t.setAffectedCiCode(normalize(r.affectedCiCode()));
+        t.setSourceType("MANUAL");
         t.setVersion(0);
         t.setDeleted(0);
         tickets.insert(t);
+        sla.start(t.getId(), t.getPriority());
         audit.history(t.getId(), u.userId(), "CREATE", null, t.getStatus(), null);
         audit.operation(t.getId(), u.userId(), "CREATE", null, payload(t.getId(), u.userId()));
         addEvent(t.getId(), "ticket.created", u.userId());
@@ -88,6 +98,7 @@ public class TicketService {
         // 单条条件 UPDATE 同时校验状态和版本，保证多实例并发接单只有一个请求成功。
         if (tickets.claim(id, u.userId(), r.version()) != 1)
             throw new BusinessException(ErrorCode.CONFLICT, "工单已被他人接单或版本已变化");
+        sla.responseCompleted(id);
         audit.history(id, u.userId(), "CLAIM", "CREATED", "ASSIGNED", null);
         audit.assignment(id, u.userId(), u.userId(), "CLAIM");
         audit.operation(id, u.userId(), "CLAIM", null, payload(id, u.userId()));
@@ -111,6 +122,9 @@ public class TicketService {
         // 再次把源状态和版本放入更新条件，避免读取后被其他实例抢先流转。
         if (tickets.transition(id, source.name(), r.target().name(), r.version()) != 1)
             throw new BusinessException(ErrorCode.CONFLICT, "工单版本已变化，请刷新后重试");
+        if (r.target() == TicketStatus.RESOLVED) {
+            sla.resolutionCompleted(id);
+        }
         audit.history(
                 id, u.userId(), r.target().name(), source.name(), r.target().name(), r.remark());
         audit.operation(
@@ -214,6 +228,8 @@ public class TicketService {
                 t.getStatus(),
                 t.getCreatorId(),
                 t.getAssigneeId(),
+                t.getAffectedCiCode(),
+                t.getSourceType(),
                 t.getVersion(),
                 t.getCreateTime(),
                 t.getUpdateTime());
@@ -225,6 +241,45 @@ public class TicketService {
                 ticketId,
                 eventType,
                 payload(ticketId, actorId));
+    }
+
+    Ticket createFromAlert(
+            String title,
+            String description,
+            String priority,
+            String affectedCiCode) {
+        Ticket ticket = new Ticket();
+        ticket.setTicketNo(
+                "ALT-"
+                        + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
+                        + "-"
+                        + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
+        ticket.setTitle(title);
+        ticket.setDescription(description);
+        ticket.setPriority(priority);
+        ticket.setStatus(TicketStatus.CREATED.name());
+        ticket.setCreatorId(1L);
+        ticket.setAffectedCiCode(normalize(affectedCiCode));
+        ticket.setSourceType("ALERTMANAGER");
+        ticket.setVersion(0);
+        ticket.setDeleted(0);
+        tickets.insert(ticket);
+        sla.start(ticket.getId(), priority);
+        audit.history(
+                ticket.getId(),
+                1L,
+                "ALERT_CREATE",
+                null,
+                TicketStatus.CREATED.name(),
+                "监控告警自动建单");
+        audit.operation(
+                ticket.getId(),
+                1L,
+                "ALERT_CREATE",
+                null,
+                payload(ticket.getId(), 1L, "sourceType", "ALERTMANAGER"));
+        addEvent(ticket.getId(), "ticket.alert.created", 1L);
+        return ticket;
     }
 
     private String payload(long ticketId, long actorId, String... entries) {

@@ -1,0 +1,11 @@
+{
+  "status": "resolved",
+  "alerts": [{
+    "status": "resolved",
+    "labels": {"alertname": "OrderServiceHighLatency", "service": "order-service", "severity": "critical"},
+    "annotations": {"summary": "订单服务 P99 延迟已恢复", "description": "指标恢复只记录事件，不自动关闭关联工单。"},
+    "startsAt": "2026-09-04T04:00:00Z",
+    "endsAt": "2026-09-04T04:10:00Z",
+    "fingerprint": "opsagent-demo-order-latency-v1"
+  }]
+}

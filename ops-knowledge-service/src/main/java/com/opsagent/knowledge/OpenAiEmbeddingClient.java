@@ -2,6 +2,8 @@ package com.opsagent.knowledge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
+import io.micrometer.core.instrument.MeterRegistry;
+
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -14,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 调用 OpenAI Embeddings API，并保持文档和查询使用同一模型与维度。
@@ -25,9 +28,11 @@ import java.util.Map;
 public class OpenAiEmbeddingClient implements EmbeddingClient {
     private static final int MAXIMUM_ATTEMPTS = 3;
     private final VectorProperties properties;
+    private final MeterRegistry metrics;
 
-    OpenAiEmbeddingClient(VectorProperties properties) {
+    OpenAiEmbeddingClient(VectorProperties properties, MeterRegistry metrics) {
         this.properties = properties;
+        this.metrics = metrics;
     }
 
     @Override
@@ -41,31 +46,53 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
     }
 
     @Override
-    public List<List<Double>> embed(List<String> texts) {
-        if (!configured()) {
-            throw new IllegalStateException("Embedding 服务未配置");
+    public int dimensions() {
+        return properties.getDimensions();
+    }
+
+    @Override
+    public EmbeddingBatchResult embedBatch(List<String> texts) {
+        long started = System.nanoTime();
+        try {
+            if (!configured()) {
+                throw new IllegalStateException("Embedding 服务未配置");
+            }
+            Map<String, Object> body = Map.of(
+                    "model", model(),
+                    "input", texts,
+                    "dimensions", properties.getDimensions(),
+                    "encoding_format", "float");
+            JsonNode response = request(body);
+            List<JsonNode> rows = new ArrayList<>();
+            response.path("data").forEach(rows::add);
+            rows.sort(Comparator.comparingInt(row -> row.path("index").asInt()));
+            List<List<Double>> vectors = rows.stream()
+                    .map(row -> {
+                        List<Double> vector = new ArrayList<>();
+                        row.path("embedding").forEach(value -> vector.add(value.asDouble()));
+                        return List.copyOf(vector);
+                    })
+                    .toList();
+            if (vectors.size() != texts.size()
+                    || vectors.stream()
+                            .anyMatch(vector -> vector.size() != properties.getDimensions())) {
+                throw new IllegalStateException("Embedding 返回数量或维度不正确");
+            }
+            EmbeddingBatchResult result = new EmbeddingBatchResult(
+                    vectors,
+                    model(),
+                    properties.getDimensions(),
+                    response.path("usage").path("total_tokens").asInt(0));
+            metrics.counter("rag.embedding.request", "status", "success").increment();
+            metrics.counter("rag.embedding.tokens").increment(result.tokenUsage());
+            return result;
+        } catch (RuntimeException exception) {
+            metrics.counter("rag.embedding.request", "status", "failure").increment();
+            throw exception;
+        } finally {
+            metrics.timer("rag.embedding.duration")
+                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
-        Map<String, Object> body = Map.of(
-                "model", model(),
-                "input", texts,
-                "dimensions", properties.getDimensions(),
-                "encoding_format", "float");
-        JsonNode response = request(body);
-        List<JsonNode> rows = new ArrayList<>();
-        response.path("data").forEach(rows::add);
-        rows.sort(Comparator.comparingInt(row -> row.path("index").asInt()));
-        List<List<Double>> vectors = rows.stream()
-                .map(row -> {
-                    List<Double> vector = new ArrayList<>();
-                    row.path("embedding").forEach(value -> vector.add(value.asDouble()));
-                    return List.copyOf(vector);
-                })
-                .toList();
-        if (vectors.size() != texts.size()
-                || vectors.stream().anyMatch(vector -> vector.size() != properties.getDimensions())) {
-            throw new IllegalStateException("Embedding 返回数量或维度不正确");
-        }
-        return vectors;
     }
 
     private JsonNode request(Map<String, Object> body) {

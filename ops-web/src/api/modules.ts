@@ -56,7 +56,12 @@ export const ticketApi = {
     } as PageResponse<Ticket>;
   },
   detail: (id: number) => request<Ticket>({ url: `/api/tickets/${id}` }),
-  create: (data: { title: string; description: string; priority: string }) =>
+  create: (data: {
+    title: string;
+    description: string;
+    priority: string;
+    affectedCiCode?: string;
+  }) =>
     request<Ticket>({ method: "POST", url: "/api/tickets", data }),
   update: (
     _id: number,
@@ -123,6 +128,116 @@ export const ticketApi = {
     request<TicketTrace>({ url: `/api/tickets/${id}/trace` }),
   remove: (_id: number) =>
     Promise.reject(new Error("微服务版不提供直接物理删除工单")),
+};
+
+export const itsmApi = {
+  cis: (params: { keyword?: string; type?: string } = {}) =>
+    request<Record<string, unknown>[]>({ url: "/api/platform/cmdb/cis", params }),
+  topology: (ciCode: string) =>
+    request<Record<string, unknown>>({
+      url: `/api/platform/cmdb/cis/${encodeURIComponent(ciCode)}/topology`,
+    }),
+  createCi: (data: Record<string, unknown>) =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: "/api/platform/cmdb/cis",
+      data,
+    }),
+  updateCi: (id: number, data: Record<string, unknown>) =>
+    request<Record<string, unknown>>({
+      method: "PUT",
+      url: `/api/platform/cmdb/cis/${id}`,
+      data,
+    }),
+  createRelation: (data: Record<string, unknown>) =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: "/api/platform/cmdb/relations",
+      data,
+    }),
+  deleteRelation: (id: number) =>
+    request<void>({
+      method: "DELETE",
+      url: `/api/platform/cmdb/relations/${id}`,
+    }),
+  schedules: () =>
+    request<Record<string, unknown>[]>({ url: "/api/platform/oncall/schedules" }),
+  shifts: (scheduleId?: number) =>
+    request<Record<string, unknown>[]>({
+      url: "/api/platform/oncall/shifts",
+      params: { scheduleId },
+    }),
+  currentOnCall: (serviceCiCode?: string) =>
+    request<Record<string, unknown>>({
+      url: "/api/platform/oncall/current",
+      params: { serviceCiCode },
+    }),
+  createSchedule: (data: Record<string, unknown>) =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: "/api/platform/oncall/schedules",
+      data,
+    }),
+  updateSchedule: (id: number, data: Record<string, unknown>) =>
+    request<Record<string, unknown>>({
+      method: "PUT",
+      url: `/api/platform/oncall/schedules/${id}`,
+      data,
+    }),
+  createShift: (data: Record<string, unknown>) =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: "/api/platform/oncall/shifts",
+      data,
+    }),
+  updateShift: (id: number, data: Record<string, unknown>) =>
+    request<Record<string, unknown>>({
+      method: "PUT",
+      url: `/api/platform/oncall/shifts/${id}`,
+      data,
+    }),
+  deleteShift: (id: number) =>
+    request<void>({
+      method: "DELETE",
+      url: `/api/platform/oncall/shifts/${id}`,
+    }),
+  slaOverview: () =>
+    request<Record<string, unknown>[]>({ url: "/api/tickets/sla/overview" }),
+  ticketSla: (ticketId: number) =>
+    request<Record<string, unknown>>({ url: `/api/tickets/${ticketId}/sla` }),
+  alerts: (status = "") =>
+    request<Record<string, unknown>[]>({
+      url: "/api/tickets/alerts",
+      params: { status },
+    }),
+  reviewDocuments: (status = "") =>
+    request<Record<string, unknown>[]>({
+      url: "/api/knowledge/review/documents",
+      params: { status },
+    }),
+  submitReview: (documentId: number) =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: `/api/knowledge/documents/${documentId}/submit-review`,
+    }),
+  approveDocument: (documentId: number, comment = "") =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: `/api/knowledge/documents/${documentId}/approve`,
+      data: { comment },
+    }),
+  rejectDocument: (documentId: number, comment: string) =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: `/api/knowledge/documents/${documentId}/reject`,
+      data: { comment },
+    }),
+  archiveDocument: (documentId: number, comment = "") =>
+    request<Record<string, unknown>>({
+      method: "POST",
+      url: `/api/knowledge/documents/${documentId}/archive`,
+      data: { comment },
+    }),
 };
 
 export const documentApi = {
@@ -216,6 +331,28 @@ export const aiApi = {
 };
 
 export const adminApi = {
+  knowledgeIndexConsistency: () =>
+    request<Record<string, unknown>>({
+      url: "/api/knowledge/admin/index/consistency",
+    }),
+  requestKnowledgeReindex: () =>
+    request<number>({
+      method: "POST",
+      url: "/api/knowledge/admin/reindex",
+    }),
+  knowledgeReindexTask: (taskId: number) =>
+    request<Record<string, unknown>>({
+      url: `/api/knowledge/admin/reindex/${taskId}`,
+    }),
+  failedKnowledgeIndexTasks: () =>
+    request<Record<string, unknown>[]>({
+      url: "/api/knowledge/admin/index/failed-tasks",
+    }),
+  repairKnowledgeIndex: (documentId: number) =>
+    request<number>({
+      method: "POST",
+      url: `/api/knowledge/admin/index/repair/${documentId}`,
+    }),
   notifications: (params: {
     pageNum: number;
     pageSize: number;

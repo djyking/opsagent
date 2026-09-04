@@ -22,6 +22,8 @@ public class Ticket {
     private String status;
     private Long creatorId;
     private Long assigneeId;
+    private String affectedCiCode;
+    private String sourceType;
     @Version private Integer version;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
@@ -89,6 +91,22 @@ public class Ticket {
 
     public void setAssigneeId(Long v) {
         assigneeId = v;
+    }
+
+    public String getAffectedCiCode() {
+        return affectedCiCode;
+    }
+
+    public void setAffectedCiCode(String affectedCiCode) {
+        this.affectedCiCode = affectedCiCode;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
     }
 
     public Integer getVersion() {

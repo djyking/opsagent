@@ -43,6 +43,8 @@ export interface Ticket {
   status: TicketStatus;
   creatorId: number;
   assigneeId?: number;
+  affectedCiCode?: string;
+  sourceType: string;
   version: number;
   createTime: string;
   updateTime: string;
@@ -89,6 +91,14 @@ export interface AiReference {
   pageNumber?: number;
   relevanceScore: number;
   excerpt?: string;
+  sourceId?: string;
+  headingPath?: string;
+  pageStart?: number;
+  pageEnd?: number;
+  rrfScore?: number;
+  rerankScore?: number;
+  retrievalChannels?: string[];
+  neighbor?: boolean;
 }
 export interface TicketComment {
   id: number;

@@ -52,6 +52,39 @@ const router = createRouter({
           component: () => import("@/views/MonitorView.vue"),
         },
         {
+          path: "itsm/cmdb",
+          name: "cmdb",
+          component: () => import("@/views/CmdbView.vue"),
+        },
+        {
+          path: "itsm/oncall",
+          name: "oncall",
+          component: () => import("@/views/OnCallView.vue"),
+        },
+        {
+          path: "itsm/sla",
+          name: "sla",
+          component: () => import("@/views/SlaView.vue"),
+        },
+        {
+          path: "itsm/alerts",
+          name: "alerts",
+          component: () => import("@/views/AlertView.vue"),
+          meta: { admin: true },
+        },
+        {
+          path: "knowledge/review",
+          name: "knowledge-review",
+          component: () => import("@/views/KnowledgeReviewView.vue"),
+          meta: { admin: true },
+        },
+        {
+          path: "knowledge/index-admin",
+          name: "knowledge-index-admin",
+          component: () => import("@/views/KnowledgeIndexAdminView.vue"),
+          meta: { admin: true },
+        },
+        {
           path: "notifications",
           name: "notifications",
           component: () => import("@/views/NotificationsView.vue"),

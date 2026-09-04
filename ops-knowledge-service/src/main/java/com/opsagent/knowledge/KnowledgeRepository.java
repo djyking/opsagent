@@ -1,10 +1,17 @@
 package com.opsagent.knowledge;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.opsagent.common.mq.DocumentIndexRequested;
+import com.opsagent.common.mq.DomainEvent;
+import com.opsagent.common.mq.MqNames;
+
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.*;
 import org.springframework.stereotype.Repository;
 
 import java.sql.*;
+import java.time.Instant;
 import java.util.*;
 
 /**
@@ -16,9 +23,11 @@ import java.util.*;
 @Repository
 public class KnowledgeRepository {
     private final JdbcTemplate jdbc;
+    private final ObjectMapper mapper;
 
-    KnowledgeRepository(JdbcTemplate j) {
+    KnowledgeRepository(JdbcTemplate j, ObjectMapper mapper) {
         jdbc = j;
+        this.mapper = mapper;
     }
 
     long createBase(String name, String description, long user) {
@@ -59,9 +68,10 @@ public class KnowledgeRepository {
                             c.prepareStatement(
                                     "INSERT INTO knowledge_document(knowledge_base_id,ticket_id,file_name,"
                                         + " original_name, file_type, file_size, storage_path,"
-                                        + " status, content_hash, version, visibility, create_by, create_time,"
+                                        + " status, review_status, content_hash, version,"
+                                        + " visibility, create_by, create_time,"
                                         + " update_time, deleted)"
-                                        + " VALUES(?,?,?,?,?,?,?,'UPLOADED',?,1,?,?,NOW(),NOW(),0)",
+                                        + " VALUES(?,?,?,?,?,?,?,'UPLOADED','DRAFT',?,1,?,?,NOW(),NOW(),0)",
                                     Statement.RETURN_GENERATED_KEYS);
                     p.setLong(1, base);
                     if (ticketId == null) p.setNull(2, Types.BIGINT);
@@ -82,16 +92,18 @@ public class KnowledgeRepository {
 
     List<Map<String, Object>> documents(long base) {
         return jdbc.queryForList(
-                "SELECT id, knowledge_base_id, original_name, file_type, file_size, status, visibility,"
-                        + " content_hash, parse_error, create_by, create_time, update_time FROM"
-                        + " knowledge_document WHERE knowledge_base_id=? AND deleted=0 ORDER BY id"
-                        + " DESC",
+                "SELECT d.id,d.knowledge_base_id,d.original_name,d.file_type,d.file_size,"
+                        + "d.status,d.review_status,d.index_status,d.visibility,d.version,"
+                        + "d.content_hash,d.parse_error,d.create_by,d.create_time,d.update_time,"
+                        + "COUNT(c.id) chunk_count,MAX(c.embedding_model) embedding_model"
+                        + " FROM knowledge_document d LEFT JOIN knowledge_chunk c ON c.document_id=d.id"
+                        + " WHERE d.knowledge_base_id=? AND d.deleted=0 GROUP BY d.id ORDER BY d.id DESC",
                 base);
     }
 
     List<Map<String, Object>> ticketDocuments(long ticketId, long userId, boolean administrator) {
         return jdbc.queryForList(
-                "SELECT id,knowledge_base_id,ticket_id,original_name,file_type,file_size,status,"
+                "SELECT id,knowledge_base_id,ticket_id,original_name,file_type,file_size,status,review_status,"
                         + "visibility,content_hash,parse_error,create_by,create_time,update_time FROM"
                         + " knowledge_document WHERE ticket_id=? AND deleted=0"
                         + " AND (?=1 OR visibility='PUBLIC' OR create_by=?) ORDER BY id DESC",
@@ -144,6 +156,15 @@ public class KnowledgeRepository {
                 eventId);
     }
 
+    boolean consumed(String consumer, String eventId) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM mq_consumed_event WHERE consumer_name=? AND event_id=?",
+                Integer.class,
+                consumer,
+                eventId);
+        return count != null && count > 0;
+    }
+
     void taskProcessing(long taskId) {
         jdbc.update(
                 "UPDATE document_parse_task SET status='PROCESSING',error_message=NULL,"
@@ -179,19 +200,26 @@ public class KnowledgeRepository {
         failed(documentId, safe);
     }
 
-    void parsed(long id, List<String> chunks) {
+    void parsed(long id, List<StructuredChunk> chunks) {
         jdbc.update("DELETE FROM knowledge_chunk WHERE document_id=?", id);
-        for (int i = 0; i < chunks.size(); i++)
+        for (int i = 0; i < chunks.size(); i++) {
+            StructuredChunk chunk = chunks.get(i);
             jdbc.update(
                     "INSERT INTO"
-                        + " knowledge_chunk(document_id,chunk_index,content,token_count,embedding_status,create_time)"
-                        + " VALUES(?,?,?,?, 'PENDING',NOW())",
+                        + " knowledge_chunk(document_id,chunk_index,content,token_count,embedding_status,"
+                        + " page_number,metadata_json,create_time)"
+                        + " VALUES(?,?,?,?,'PENDING',?,?,NOW())",
                     id,
                     i,
-                    chunks.get(i),
-                    Math.max(1, chunks.get(i).length() / 4));
+                    chunk.content(),
+                    chunk.tokenCount(),
+                    chunk.pageStart(),
+                    metadataJson(chunk));
+        }
         jdbc.update(
-                "UPDATE knowledge_document SET status='PARSED',parse_error=NULL WHERE id=?", id);
+                "UPDATE knowledge_document SET status='PARSED',index_status='PENDING',"
+                        + "parse_error=NULL WHERE id=?",
+                id);
     }
 
     void failed(long id, String message) {
@@ -205,7 +233,7 @@ public class KnowledgeRepository {
         return jdbc.queryForList(
                 "SELECT"
                     + " id,document_id,chunk_index,content,token_count,embedding_status,"
-                    + " embedding_model,indexed_at,page_number,create_time"
+                    + " embedding_model,indexed_at,page_number,metadata_json,create_time"
                     + " FROM knowledge_chunk WHERE document_id=? ORDER BY chunk_index",
                 id);
     }
@@ -230,29 +258,346 @@ public class KnowledgeRepository {
                 + " chunkIndex,c.content,d.original_name documentName,c.page_number page,"
                 + " d.version,d.update_time updateTime FROM knowledge_chunk c"
                 + " JOIN knowledge_document d ON d.id=c.document_id WHERE c.content LIKE ? AND"
-                + " d.deleted=0 AND (?=1 OR d.visibility='PUBLIC' OR d.create_by=?)"
+                + " d.deleted=0 AND d.review_status='PUBLISHED'"
+                + " AND (?=1 OR d.visibility='PUBLIC' OR d.create_by=?)"
                 + documentFilter + " ORDER BY c.id DESC LIMIT ?";
         return jdbc.queryForList(sql, arguments.toArray());
     }
 
     List<Long> indexableDocumentIds() {
         return jdbc.queryForList(
-                "SELECT id FROM knowledge_document WHERE deleted=0 AND status IN ('PARSED','INDEXED')"
+                "SELECT id FROM knowledge_document WHERE deleted=0 AND review_status='PUBLISHED'"
+                        + " AND status IN ('PARSED','INDEXED')"
                         + " ORDER BY id",
                 Long.class);
     }
 
-    void markIndexed(long documentId, List<Long> chunkIds, String model) {
-        for (Long chunkId : chunkIds) {
+    List<Map<String, Object>> reviewDocuments(String status) {
+        String reviewStatus = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+        return jdbc.queryForList(
+                """
+                SELECT d.id,d.knowledge_base_id knowledgeBaseId,b.name knowledgeBaseName,
+                       d.original_name originalName,d.status parseStatus,
+                       d.review_status reviewStatus,d.visibility,d.create_by createBy,
+                       d.submitted_by submittedBy,d.submitted_time submittedTime,
+                       d.reviewer_id reviewerId,d.review_time reviewTime,
+                       d.publish_time publishTime,d.review_comment reviewComment,
+                       d.create_time createTime,d.update_time updateTime
+                FROM knowledge_document d
+                JOIN knowledge_base b ON b.id=d.knowledge_base_id
+                WHERE d.deleted=0 AND (?='' OR d.review_status=?)
+                ORDER BY FIELD(d.review_status,'IN_REVIEW','DRAFT','REJECTED','PUBLISHED','ARCHIVED'),
+                         d.update_time DESC
+                LIMIT 500
+                """,
+                reviewStatus,
+                reviewStatus);
+    }
+
+    int submitReview(long documentId, long userId) {
+        return jdbc.update(
+                """
+                UPDATE knowledge_document SET review_status='IN_REVIEW',submitted_by=?,
+                    submitted_time=NOW(),reviewer_id=NULL,review_time=NULL,
+                    review_comment=NULL,update_time=NOW()
+                WHERE id=? AND deleted=0 AND create_by=?
+                  AND status IN ('PARSED','INDEXED')
+                  AND review_status IN ('DRAFT','REJECTED')
+                """,
+                userId,
+                documentId,
+                userId);
+    }
+
+    int approveReview(long documentId, long reviewerId, String comment) {
+        return jdbc.update(
+                """
+                UPDATE knowledge_document SET review_status='PUBLISHED',reviewer_id=?,
+                    review_time=NOW(),publish_time=NOW(),review_comment=?,update_time=NOW()
+                WHERE id=? AND deleted=0 AND review_status='IN_REVIEW'
+                """,
+                reviewerId,
+                comment,
+                documentId);
+    }
+
+    int rejectReview(long documentId, long reviewerId, String comment) {
+        return jdbc.update(
+                """
+                UPDATE knowledge_document SET review_status='REJECTED',reviewer_id=?,
+                    review_time=NOW(),publish_time=NULL,review_comment=?,update_time=NOW()
+                WHERE id=? AND deleted=0 AND review_status='IN_REVIEW'
+                """,
+                reviewerId,
+                comment,
+                documentId);
+    }
+
+    int archive(long documentId, long reviewerId, String comment) {
+        return jdbc.update(
+                """
+                UPDATE knowledge_document SET review_status='ARCHIVED',reviewer_id=?,
+                    review_time=NOW(),review_comment=?,update_time=NOW()
+                WHERE id=? AND deleted=0 AND review_status='PUBLISHED'
+                """,
+                reviewerId,
+                comment,
+                documentId);
+    }
+
+    void reviewHistory(
+            long documentId,
+            String fromStatus,
+            String toStatus,
+            long operatorId,
+            String comment) {
+        jdbc.update(
+                """
+                INSERT INTO knowledge_review_history(
+                    document_id,from_status,to_status,operator_id,comment,create_time)
+                VALUES(?,?,?,?,?,NOW())
+                """,
+                documentId,
+                fromStatus,
+                toStatus,
+                operatorId,
+                comment);
+    }
+
+    List<Map<String, Object>> reviewHistory(long documentId) {
+        return jdbc.queryForList(
+                """
+                SELECT id,document_id documentId,from_status fromStatus,to_status toStatus,
+                       operator_id operatorId,comment,create_time createTime
+                FROM knowledge_review_history WHERE document_id=? ORDER BY id
+                """,
+                documentId);
+    }
+
+    void markIndexResults(
+            long documentId,
+            List<Long> succeededChunkIds,
+            Map<Long, String> failures,
+            String model) {
+        for (Long chunkId : succeededChunkIds) {
             jdbc.update(
                     "UPDATE knowledge_chunk SET embedding_status='INDEXED',embedding_model=?,"
                             + "indexed_at=NOW() WHERE id=?",
                     model,
                     chunkId);
         }
+        for (Long chunkId : failures.keySet()) {
+            jdbc.update(
+                    "UPDATE knowledge_chunk SET embedding_status='FAILED',embedding_model=?,"
+                            + "indexed_at=NULL WHERE id=?",
+                    model,
+                    chunkId);
+        }
+        if (failures.isEmpty()) {
+            jdbc.update(
+                    "UPDATE knowledge_document SET index_status='SUCCESS',parse_error=NULL WHERE id=?",
+                    documentId);
+        } else {
+            String firstFailure = failures.values().iterator().next();
+            jdbc.update(
+                    "UPDATE knowledge_document SET index_status='FAILED',parse_error=? WHERE id=?",
+                    safeMessage(firstFailure),
+                    documentId);
+        }
+    }
+
+    long createIndexTaskAndOutbox(long documentId, int documentVersion, String strategyVersion) {
+        KeyHolder holder = new GeneratedKeyHolder();
         jdbc.update(
-                "UPDATE knowledge_document SET status='INDEXED',parse_error=NULL WHERE id=?",
+                connection -> {
+                    PreparedStatement statement = connection.prepareStatement(
+                            "INSERT INTO knowledge_index_task(document_id,document_version,operation,"
+                                    + "status,retry_count,next_retry_time,create_time,update_time)"
+                                    + " VALUES(?,?,'INDEX','PENDING',0,NOW(),NOW(),NOW())"
+                                    + " ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),"
+                                    + "document_version=VALUES(document_version),status='PENDING',"
+                                    + "retry_count=0,next_retry_time=NOW(),error_message=NULL,"
+                                    + "update_time=NOW()",
+                            Statement.RETURN_GENERATED_KEYS);
+                    statement.setLong(1, documentId);
+                    statement.setInt(2, documentVersion);
+                    return statement;
+                },
+                holder);
+        long taskId = Objects.requireNonNull(holder.getKey()).longValue();
+        String eventId = UUID.randomUUID().toString();
+        DomainEvent<DocumentIndexRequested> event = new DomainEvent<>(
+                eventId,
+                MqNames.DOCUMENT_INDEX_ROUTING_KEY,
+                Instant.now(),
+                new DocumentIndexRequested(
+                        documentId, taskId, documentVersion, strategyVersion));
+        try {
+            jdbc.update(
+                    "INSERT INTO knowledge_event_outbox(event_id,event_type,payload,status,"
+                            + "retry_count,next_retry_time,create_time,update_time)"
+                            + " VALUES(?,?,?,'PENDING',0,NOW(),NOW(),NOW())",
+                    eventId,
+                    MqNames.DOCUMENT_INDEX_ROUTING_KEY,
+                    mapper.writeValueAsString(event));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("索引事件无法序列化", exception);
+        }
+        return taskId;
+    }
+
+    List<Map<String, Object>> dueOutboxEvents(int limit) {
+        return jdbc.queryForList(
+                "SELECT id,event_id,event_type,payload,retry_count FROM knowledge_event_outbox"
+                        + " WHERE (status IN ('PENDING','RETRYING')"
+                        + " AND (next_retry_time IS NULL OR next_retry_time<=NOW()))"
+                        + " OR (status='SENDING' AND update_time<=DATE_SUB(NOW(),INTERVAL 5 MINUTE))"
+                        + " ORDER BY id LIMIT ?",
+                limit);
+    }
+
+    int claimOutbox(long id) {
+        return jdbc.update(
+                "UPDATE knowledge_event_outbox SET status='SENDING',update_time=NOW()"
+                        + " WHERE id=? AND ((status IN ('PENDING','RETRYING')"
+                        + " AND (next_retry_time IS NULL OR next_retry_time<=NOW()))"
+                        + " OR (status='SENDING'"
+                        + " AND update_time<=DATE_SUB(NOW(),INTERVAL 5 MINUTE)))",
+                id);
+    }
+
+    void outboxSent(long id) {
+        jdbc.update(
+                "UPDATE knowledge_event_outbox SET status='SENT',last_error=NULL,"
+                        + "next_retry_time=NULL,update_time=NOW() WHERE id=?",
+                id);
+    }
+
+    void outboxFailed(long id, String message) {
+        jdbc.update(
+                "UPDATE knowledge_event_outbox SET status='RETRYING',retry_count=retry_count+1,"
+                        + "next_retry_time=DATE_ADD(NOW(),INTERVAL LEAST(300,POW(2,retry_count+1)) SECOND),"
+                        + "last_error=?,update_time=NOW() WHERE id=?",
+                safeMessage(message),
+                id);
+    }
+
+    boolean validDocumentVersion(long documentId, int version) {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM knowledge_document WHERE id=? AND version=? AND deleted=0",
+                Integer.class,
+                documentId,
+                version);
+        return count != null && count > 0;
+    }
+
+    long createReindexTask(long userId) {
+        KeyHolder holder = new GeneratedKeyHolder();
+        jdbc.update(
+                connection -> {
+                    PreparedStatement statement = connection.prepareStatement(
+                            "INSERT INTO knowledge_reindex_task(status,create_by,create_time,update_time)"
+                                    + " VALUES('PENDING',?,NOW(),NOW())",
+                            Statement.RETURN_GENERATED_KEYS);
+                    statement.setLong(1, userId);
+                    return statement;
+                },
+                holder);
+        return Objects.requireNonNull(holder.getKey()).longValue();
+    }
+
+    List<Long> pendingReindexTasks() {
+        return jdbc.queryForList(
+                "SELECT id FROM knowledge_reindex_task WHERE status='PENDING' ORDER BY id LIMIT 1",
+                Long.class);
+    }
+
+    int claimReindexTask(long taskId, String targetIndex, int documentTotal) {
+        return jdbc.update(
+                "UPDATE knowledge_reindex_task SET status='RUNNING',target_index=?,"
+                        + "document_total=?,start_time=NOW(),update_time=NOW()"
+                        + " WHERE id=? AND status='PENDING'",
+                targetIndex,
+                documentTotal,
+                taskId);
+    }
+
+    void updateReindexProgress(long taskId, int success, int failure, int chunks) {
+        jdbc.update(
+                "UPDATE knowledge_reindex_task SET document_success=?,document_failure=?,"
+                        + "chunk_total=?,update_time=NOW() WHERE id=?",
+                success,
+                failure,
+                chunks,
+                taskId);
+    }
+
+    void completeReindexTask(long taskId) {
+        jdbc.update(
+                "UPDATE knowledge_reindex_task SET status='SUCCESS',finish_time=NOW(),"
+                        + "error_message=NULL,update_time=NOW() WHERE id=?",
+                taskId);
+    }
+
+    void failReindexTask(long taskId, String message) {
+        jdbc.update(
+                "UPDATE knowledge_reindex_task SET status='FAILED',finish_time=NOW(),"
+                        + "error_message=?,update_time=NOW() WHERE id=?",
+                safeMessage(message),
+                taskId);
+    }
+
+    Map<String, Object> reindexTask(long taskId) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM knowledge_reindex_task WHERE id=?", taskId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    Map<String, Long> indexStatusCounts() {
+        long published = count(
+                "SELECT COUNT(*) FROM knowledge_document WHERE deleted=0 AND review_status='PUBLISHED'");
+        long indexed = count(
+                "SELECT COUNT(*) FROM knowledge_document WHERE deleted=0"
+                        + " AND review_status='PUBLISHED' AND index_status='SUCCESS'");
+        long pending = count(
+                "SELECT COUNT(*) FROM knowledge_document WHERE deleted=0"
+                        + " AND review_status='PUBLISHED' AND index_status IN ('PENDING','PROCESSING')");
+        long failed = count(
+                "SELECT COUNT(*) FROM knowledge_document WHERE deleted=0"
+                        + " AND review_status='PUBLISHED' AND index_status='FAILED'");
+        return Map.of(
+                "published", published,
+                "indexed", indexed,
+                "pending", pending,
+                "failed", failed);
+    }
+
+    List<Map<String, Object>> failedIndexTasks() {
+        return jdbc.queryForList(
+                "SELECT id,document_id documentId,document_version documentVersion,operation,"
+                        + "status,retry_count retryCount,error_message lastError,"
+                        + "create_time createTime,update_time updateTime"
+                        + " FROM knowledge_index_task WHERE status='FAILED'"
+                        + " ORDER BY update_time DESC LIMIT 200");
+    }
+
+    void markIndexPending(long documentId) {
+        jdbc.update(
+                "UPDATE knowledge_document SET index_status='PENDING',update_time=NOW()"
+                        + " WHERE id=? AND deleted=0",
                 documentId);
+    }
+
+    void markIndexSuccess(long documentId) {
+        jdbc.update(
+                "UPDATE knowledge_document SET index_status='SUCCESS',parse_error=NULL,"
+                        + "update_time=NOW() WHERE id=? AND deleted=0",
+                documentId);
+    }
+
+    private long count(String sql) {
+        Long value = jdbc.queryForObject(sql, Long.class);
+        return value == null ? 0L : value;
     }
 
     int logicalDelete(long documentId) {
@@ -338,5 +683,13 @@ public class KnowledgeRepository {
     private String safeMessage(String message) {
         String value = message == null || message.isBlank() ? "未知解析错误" : message;
         return value.substring(0, Math.min(value.length(), 1000));
+    }
+
+    private String metadataJson(StructuredChunk chunk) {
+        try {
+            return mapper.writeValueAsString(chunk.metadata());
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("切片元数据无法序列化", exception);
+        }
     }
 }

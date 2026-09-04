@@ -2,14 +2,14 @@
 
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-当前已形成“登录 → 工单 → Outbox → RabbitMQ → 平台审计”和“文档上传 → RabbitMQ → 切片 → OpenAI Embedding → Elasticsearch → 权限检索 → LLM SSE → 真实来源”两条业务闭环，并实现文档软删除和 Elasticsearch 持久化补偿。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于进程启动时注入。
+当前已形成“Prometheus / Alertmanager → CMDB Lite → 自动建单 → 值班 → SLA → Outbox / RabbitMQ → 人工处置 → 知识审核 → RAG”的企业 ITSM 闭环，并保留文档软删除和 Elasticsearch 持久化补偿。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus、Alertmanager 和 Grafana 由 Docker Compose 运行，六个 Java 服务仍在宿主机运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于进程启动时注入。
 
 ## 项目结构
 
 ```text
 opsagent
 ├─ ops-common                 公共响应、Web、安全、MyBatis、Redis/MQ 与可观测模块
-├─ ops-gateway                统一入口（8080）
+├─ ops-gateway                统一入口（18080）
 ├─ ops-auth-service           认证服务（8101）
 ├─ ops-ticket-service         工单服务（8102）
 ├─ ops-knowledge-service      知识服务（8103）
@@ -44,12 +44,13 @@ powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
 | 功能 | 地址 | 当前用途 |
 |---|---|---|
 | OpsAgent 前端 | `http://127.0.0.1:5173/` | 用户操作入口 |
-| Gateway | `http://127.0.0.1:8080/` | 统一 API 入口 |
+| Gateway | `http://127.0.0.1:18080/` | 统一 API 入口；本机 8080 被其他项目占用 |
 | Nacos | `http://127.0.0.1:8849/` | 服务发现和六个 Data ID |
 | Sentinel | `http://127.0.0.1:8858/` | 六个服务的实时监控和簇点链路 |
 | RabbitMQ | `http://127.0.0.1:15672/` | 队列、消费者和 DLQ |
 | Prometheus | `http://127.0.0.1:9090/targets` | 六个 Java 服务抓取状态 |
-| Grafana | `http://127.0.0.1:3000/` | `OpsAgent Overview` 指标面板 |
+| Alertmanager | `http://127.0.0.1:9093/` | 告警路由和恢复状态 |
+| Grafana | `http://127.0.0.1:3000/` | `OpsAgent Overview` 与 `OpsAgent ITSM Overview` |
 | Elasticsearch | `http://127.0.0.1:9200/_cluster/health` | `dense_vector` 知识检索索引 |
 
 账号和密码不写入 Git 文档，统一查看本机仓库外文件 `D:\middleware\docs\OpsAgent本地地址与密码.md`。
@@ -98,6 +99,30 @@ GET  /api/platform/admin/audits
 GET  /api/platform/admin/notifications
 PUT  /api/platform/admin/notifications/read-all
 GET  /api/platform/monitor/summary
+
+GET  /api/platform/cmdb/cis
+POST /api/platform/cmdb/cis                   ADMIN
+PUT  /api/platform/cmdb/cis/{id}              ADMIN
+GET  /api/platform/cmdb/cis/{ciCode}/topology
+POST /api/platform/cmdb/relations              ADMIN
+DELETE /api/platform/cmdb/relations/{id}       ADMIN
+GET  /api/platform/oncall/current
+GET  /api/platform/oncall/shifts
+POST /api/platform/oncall/shifts               ADMIN
+PUT  /api/platform/oncall/shifts/{id}          ADMIN
+DELETE /api/platform/oncall/shifts/{id}        ADMIN
+
+GET  /api/tickets/{id}/sla
+GET  /api/tickets/sla/overview
+GET  /api/tickets/alerts
+POST /api/integrations/alertmanager/webhook    独立 Bearer Token
+
+GET  /api/knowledge/review/documents
+POST /api/knowledge/documents/{id}/submit-review
+POST /api/knowledge/documents/{id}/approve     OPS / ADMIN
+POST /api/knowledge/documents/{id}/reject      OPS / ADMIN
+POST /api/knowledge/documents/{id}/archive     ADMIN
+GET  /api/knowledge/documents/{id}/review-history
 ```
 
 各 MVC 服务启用 SpringDoc；经 Gateway 暴露 Swagger 聚合仍是后续项。
@@ -116,7 +141,7 @@ Question → 同模型 Embedding → RBAC/文档范围过滤 → TopK/最低相�
 → 版本化 YAML Prompt → OpenAI / DeepSeek / Kimi → Citation 校验 → Answer + Sources
 ```
 
-OpenAI 使用 Responses API，DeepSeek 和 Kimi 使用兼容 Chat Completions。`POST /api/rag/stream` 返回 `status`、`token`、`sources`、`done` 或 `error` 事件，前端用 Fetch `ReadableStream` 逐 Token 渲染；最终 `done.answer` 是 Citation 校验后的权威文本。Prompt 位于 `ops-rag-service/src/main/resources/prompts/rag-answer.yml`。返回来源完全由真实检索结果生成；模型声明但检索结果中不存在的 `[chunk:id]` 会被剔除。问题最大 2000 字符，默认 TopK 5、最大 20、上下文 16000 字符。RAG 入口使用 Sentinel `ops-rag-ask` 资源，当前 Nacos 规则为每实例 5 QPS。
+OpenAI 使用 Responses API，DeepSeek 和 Kimi 使用兼容 Chat Completions。DeepSeek V4 与 Kimi 都显式关闭 thinking，避免推理内容耗尽输出预算造成流式正文为空。`POST /api/rag/stream` 返回 `status`、`token`、`sources`、`done` 或 `error` 事件，前端用 Fetch `ReadableStream` 逐 Token 渲染；最终 `done.answer` 是 Citation 校验后的权威文本。Prompt 位于 `ops-rag-service/src/main/resources/prompts/rag-answer.yml`。返回来源完全由真实检索结果生成；模型声明但检索结果中不存在的 `[chunk:id]` 会被剔除。问题最大 2000 字符，默认 TopK 5、最大 20、上下文 16000 字符。RAG 入口使用 Sentinel `ops-rag-ask` 资源，当前 Nacos 规则为每实例 5 QPS。
 
 `POST /api/rag/ask` 可选传 `documentId`，用于把问答严格限定在用户有权访问的单个文档。文档访问规则为：`PUBLIC` 对已认证用户可见，`PRIVATE` 仅创建者和 ADMIN 可见；权限过滤在内容进入 Prompt 之前完成。
 
@@ -166,11 +191,11 @@ $env:OPS_AI_PROVIDER = 'openai' # openai、deepseek 或 kimi，修改后重启 R
 - Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
 - 本地演示账号由 SQL 初始化，账号列表及本地密码只记录在仓库外密码文档中。
 
-`compose.yaml` 只包含中间件：MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus 和 Grafana，不包含 Java 服务。
+`compose.yaml` 只包含中间件：MySQL、Redis、Nacos、Sentinel、RabbitMQ、SmartCN Elasticsearch、Prometheus、Alertmanager、Grafana，以及可选的 BGE Reranker，不包含 Java 服务。
 
 `ops_rag.ai_usage_log` 仅记录用户 ID、Provider、模型、问题 SHA-256、Token、耗时、成功状态和脱敏错误码，不保存问题正文、Prompt、回答或 Key。
 
-解析新文档时，启用向量功能会自动生成 Embedding 并索引。2026-09-03 已在用户明确授权后执行全量重建：22 篇可用文档、25 个切片均使用 OpenAI `text-embedding-3-small`，另有 1 篇损坏 PDF 保持 `FAILED`。今后再次导入内部文档时仍需单独确认数据分级和第三方处理范围；生成阶段会把检索上下文发送给当前 `OPS_AI_PROVIDER`，不要把 Embedding 授权等同于任意生成 Provider 授权。
+解析新文档时，启用向量功能会自动生成 Embedding 并索引。2026-09-03 曾在明确授权范围内完成一批 `text-embedding-3-small` 向量化；2026-09-04 实时库已有 26 篇已发布文档，其中新增 5 篇不在原 21 篇外发授权内，因此新版本 Alias 的全量 Reindex 暂未执行。今后再次导入内部文档时仍需单独确认数据分级和第三方处理范围；生成阶段会把检索上下文发送给当前 `OPS_AI_PROVIDER`，不要把 Embedding 授权等同于任意生成 Provider 授权。
 
 ```powershell
 docker compose up -d
@@ -178,6 +203,8 @@ docker compose ps
 ```
 
 推荐使用 `D:\middleware\scripts\start-opsagent.ps1` 启动全部中间件和本机应用；只启动中间件时添加 `-MiddlewareOnly`。停止脚本不会删除 Docker named volumes。
+
+BGE Reranker 镜像存在时，启动脚本会自动启动 `reranker` profile，并给 RAG 服务注入 `OPS_RERANK_ENABLED=true` 与 `OPS_RERANK_BASE_URL=http://localhost:8010`。首次运行需要下载模型；模型就绪前查询自动按 RRF 排序降级。代码默认按 Top30/3 秒保护生产延迟；当前本机是 CPU 推理，启动脚本覆盖为 5 个候选/20 秒，以保证能在页面 30 秒首段上限内完成真实重排。
 
 启动脚本会启用 Nacos 服务发现和配置订阅，并把六个服务配置及 `ops-rag-sentinel-flow-rules` 发布到 `DEFAULT_GROUP`。Gateway 的 `lb://` 路由依赖 Nacos 实例列表，因此 Nacos 已被实际使用。RAG 服务订阅 Sentinel FlowRule，`ops-rag-ask` 当前限制为每实例 5 QPS。Nacos 实现规则统一下发，但普通 Sentinel 客户端仍是每实例计数；多实例严格共享总额度需要部署 Sentinel Cluster Token Server。
 
@@ -190,7 +217,7 @@ docker compose ps
 D:\middleware\scripts\start-opsagent.ps1
 ```
 
-后端是六个独立进程，分别运行各模块 `target` 下的可执行 Jar。统一 API 入口为 `http://localhost:8080`。
+后端是六个独立进程，分别运行各模块 `target` 下的可执行 Jar。统一 API 入口为 `http://localhost:18080`。
 
 只有修改前端源码并需要热更新时，才单独启动 Vite：
 
@@ -200,7 +227,7 @@ pnpm install
 pnpm dev
 ```
 
-Vite 开发模式访问 `http://localhost:5173`，并把 `/api` 和 `/actuator` 请求代理到 `http://localhost:8080`。直接访问 `http://localhost:8080/api/auth/login` 时，后端会跳转到同一服务的 `/login`；Axios 等 API 请求未认证时仍返回标准401 JSON。
+Vite 开发模式访问 `http://localhost:5173`，并把 `/api` 和 `/actuator` 请求代理到 `http://localhost:18080`。Axios 等 API 请求未认证时返回标准 401 JSON。
 
 前端生产构建：
 
@@ -213,4 +240,12 @@ pnpm build
 
 项目默认启用 `local` Profile，也可以用 `SPRING_PROFILES_ACTIVE` 覆盖。接口访问日志只记录请求方法、路径、响应状态、耗时和 Trace ID，不记录请求体、密码或完整 JWT。
 
-从数据库初始化到完整工单闭环、Nacos/Sentinel 控制台操作和故障排查步骤见 [opsAgent使用文档.md](opsAgent使用文档.md)。手册同时标明了当前前端仍需通过 API 完成的步骤，避免把未接通功能写成已完成。
+从数据库初始化到完整工单闭环、Nacos/Sentinel 控制台操作和故障排查步骤见 [opsAgent使用文档.md](opsAgent使用文档.md)。监控告警、CMDB、值班、SLA 与知识审核的 6—8 分钟演示路线见 [OpsAgent_ITSM演示与验收手册.md](docs/OpsAgent_ITSM演示与验收手册.md)。
+
+RAG 技术资料：
+
+- [现状审计](docs/rag/current-rag-audit.md)
+- [架构与运行机制](docs/rag/architecture.md)
+- [真实验收与评测报告](docs/rag/evaluation-report.md)
+
+管理员登录后可从“索引管理”查看 MySQL/ES 一致性、提交全量 Reindex、查看失败任务并按文档 ID 修复。问答引用展示 `[S1]`、文档、章节、页码和检索通道；RRF/Rerank 分数只对管理员显示。

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
-import { Bot, Clock3, Database, Send } from "@lucide/vue";
+import { Bot, Clock3, Send } from "@lucide/vue";
 import { streamRagAnswer } from "@/api/rag-stream";
 import type { AiReference } from "@/types/api";
 import AnswerContent from "@/components/AnswerContent.vue";
+import RagSources from "@/components/RagSources.vue";
 
 const question = ref("");
 const answer = ref("");
@@ -86,16 +87,7 @@ async function ask() {
       </div>
       <AnswerContent v-if="answer" :content="answer" />
       <div v-else class="answer-skeleton"><i /><i /><i /></div>
-      <div v-if="references.length" class="source-section">
-        <strong><Database :size="16" />参考来源</strong>
-        <div class="reference-list source-cards">
-          <span v-for="item in references" :key="item.chunkId">
-            {{ item.documentName || `文档 #${item.documentId}` }}
-            <small v-if="item.pageNumber">第 {{ item.pageNumber }} 页</small>
-            <small v-if="item.relevanceScore">相关度 {{ (item.relevanceScore * 100).toFixed(0) }}%</small>
-          </span>
-        </div>
-      </div>
+      <RagSources :references="references" />
     </div>
     <div v-else class="empty-state rag-empty">
       <Bot :size="34" /><strong>输入问题开始检索</strong>
