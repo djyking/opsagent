@@ -234,3 +234,17 @@ export interface AiTask {
   createTime: string;
   updateTime: string;
 }
+export interface CurrentOnCall {
+  fallback: boolean;
+  message?: string;
+  members: Array<{
+    scheduleCode: string;
+    scheduleName: string;
+    serviceCiCode?: string;
+    roleType: "PRIMARY" | "SECONDARY";
+    userId: number;
+    userName: string;
+    startTime: string;
+    endTime: string;
+  }>;
+}

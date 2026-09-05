@@ -23,6 +23,16 @@ final class AuthDtos {
     record LoginRequest(@NotBlank String username, @NotBlank String password) {}
 
     /**
+     * 公开注册只接受账号资料，不接受角色或权限字段。
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record RegisterRequest(
+            @NotBlank @Size(max = 64) String username,
+            @NotBlank @Size(min = 6, max = 72) String password,
+            @Size(max = 64) String displayName) {}
+
+    /**
      * 刷新访问令牌的请求参数。
      *
      * @author heyu

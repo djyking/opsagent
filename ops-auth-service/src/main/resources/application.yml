@@ -36,6 +36,7 @@ ops:
     access-token-ttl: 30m
     permit-all:
       - /api/auth/login
+      - /api/auth/register
       - /api/auth/refresh
       - /actuator/health
       - /actuator/info

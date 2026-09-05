@@ -19,6 +19,16 @@ public class User {
     private String status;
     @TableLogic private Integer deleted;
 
+    static User registered(String username, String encodedPassword, String displayName) {
+        User user = new User();
+        user.username = username;
+        user.password = encodedPassword;
+        user.displayName = displayName;
+        user.status = "enable";
+        user.deleted = 0;
+        return user;
+    }
+
     public Long getId() {
         return id;
     }

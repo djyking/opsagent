@@ -7,4 +7,9 @@ package com.opsagent.rag;
  * @since 2026/8/30
  */
 public record LlmResult(
-        String text, String provider, String model, int inputTokens, int outputTokens) {}
+        String text, String provider, String model, int inputTokens, int outputTokens,
+        boolean generationComplete, String finishReason, int continuationCount) {
+    public LlmResult(String text, String provider, String model, int inputTokens, int outputTokens) {
+        this(text, provider, model, inputTokens, outputTokens, true, "stop", 0);
+    }
+}

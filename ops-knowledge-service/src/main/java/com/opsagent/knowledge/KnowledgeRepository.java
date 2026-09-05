@@ -407,24 +407,19 @@ public class KnowledgeRepository {
     }
 
     long createIndexTaskAndOutbox(long documentId, int documentVersion, String strategyVersion) {
-        KeyHolder holder = new GeneratedKeyHolder();
         jdbc.update(
-                connection -> {
-                    PreparedStatement statement = connection.prepareStatement(
                             "INSERT INTO knowledge_index_task(document_id,document_version,operation,"
                                     + "status,retry_count,next_retry_time,create_time,update_time)"
                                     + " VALUES(?,?,'INDEX','PENDING',0,NOW(),NOW(),NOW())"
-                                    + " ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),"
+                                    + " ON DUPLICATE KEY UPDATE "
                                     + "document_version=VALUES(document_version),status='PENDING',"
                                     + "retry_count=0,next_retry_time=NOW(),error_message=NULL,"
                                     + "update_time=NOW()",
-                            Statement.RETURN_GENERATED_KEYS);
-                    statement.setLong(1, documentId);
-                    statement.setInt(2, documentVersion);
-                    return statement;
-                },
-                holder);
-        long taskId = Objects.requireNonNull(holder.getKey()).longValue();
+                documentId, documentVersion);
+        // MySQL upserts may report multiple generated keys; the unique business key is stable.
+        long taskId = Objects.requireNonNull(jdbc.queryForObject(
+                "SELECT id FROM knowledge_index_task WHERE document_id=? AND operation='INDEX'",
+                Long.class, documentId));
         String eventId = UUID.randomUUID().toString();
         DomainEvent<DocumentIndexRequested> event = new DomainEvent<>(
                 eventId,

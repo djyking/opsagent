@@ -53,8 +53,9 @@ public class LlmInvocationService {
         try {
             LlmResult result = client.generate(request);
             long latency = elapsedMillis(started);
-            record(client, question, result, latency, true, null, context);
-            metric(client.provider(), "success", latency);
+            record(client, question, result, latency, result.generationComplete(),
+                    result.generationComplete() ? null : "INCOMPLETE_" + result.finishReason(), context);
+            metric(client.provider(), result.generationComplete() ? "success" : "incomplete", latency);
             return new Invocation(result, latency);
         } catch (AiProviderException exception) {
             long latency = elapsedMillis(started);
@@ -77,8 +78,9 @@ public class LlmInvocationService {
         try {
             LlmResult result = client.stream(request, onDelta);
             long latency = elapsedMillis(started);
-            record(client, question, result, latency, true, null, context);
-            metric(client.provider(), "success", latency);
+            record(client, question, result, latency, result.generationComplete(),
+                    result.generationComplete() ? null : "INCOMPLETE_" + result.finishReason(), context);
+            metric(client.provider(), result.generationComplete() ? "success" : "incomplete", latency);
             return new Invocation(result, latency);
         } catch (AiProviderException exception) {
             long latency = elapsedMillis(started);

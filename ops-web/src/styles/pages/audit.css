@@ -1,3 +1,7 @@
+.audit-table { min-width: 940px; }
+.audit-table td { height: 62px; }
+.audit-table time { white-space: nowrap; }
+.audit-surface .oa-filter-bar { padding: 16px 20px; }
 .audit-filter {
   display: grid;
     grid-template-columns: minmax(220px, 360px) 180px max-content;
@@ -22,7 +26,7 @@
 }
 
 .audit-detail {
-  margin: 0 0 18px;
+  margin: 0 0 22px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   overflow: hidden;
   border: 1px solid var(--oa-border-subtle);
@@ -77,7 +81,7 @@
   max-height: 280px;
   overflow: auto;
   margin: 0;
-  padding: 14px;
+  padding: 18px;
   border: 1px solid var(--oa-border-subtle);
   border-radius: 0 0 var(--oa-radius-panel) var(--oa-radius-panel);
   color: var(--oa-text-primary);
@@ -87,27 +91,11 @@
   white-space: pre-wrap;
 }
 
-.trace-metrics {
-  display: grid;
-    gap: 1px;
-    background: var(--oa-border-subtle);
-}
+.trace-metrics { display: grid; gap: 12px; padding: 20px; }
 
-.trace-metrics span {
-  padding: 11px 16px;
-    color: var(--oa-primary);
-    background: var(--oa-bg-surface);
-    font-family: var(--oa-font-mono);
-    font-size: var(--oa-font-size-xs);
-}
+.trace-metrics span { padding: 14px; display: flex; align-items: center; gap: 12px; color: var(--oa-text-secondary); background: var(--oa-bg-subtle); border-radius: var(--oa-radius-control); font-size: var(--oa-font-size-sm); }
 
-.trace-metrics strong {
-  display: inline-block;
-    min-width: 30px;
-    color: var(--oa-primary);
-    font-family: var(--oa-font-sans);
-    font-size: var(--oa-font-size-body);
-}
+.trace-metrics strong { min-width: 30px; color: var(--oa-text-primary); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .trace-button {
   width: calc(100% - 32px);
@@ -159,11 +147,9 @@
     outline-offset: -2px;
 }
 
-.trace-cell {
-  max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
+.trace-cell > span { display: block; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (hover: none) { .audit-page .reveal-on-row { opacity: 1; } }
 
 @media (max-width: 760px) {
   .trace-detail article {

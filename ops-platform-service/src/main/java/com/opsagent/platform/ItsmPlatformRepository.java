@@ -315,7 +315,7 @@ public class ItsmPlatformRepository {
         return jdbc.update("DELETE FROM oncall_shift WHERE id=?", id);
     }
 
-    Map<String, Object> currentOnCall(String serviceCiCode) {
+    CurrentOnCallResponse currentOnCall(String serviceCiCode) {
         metrics.counter("opsagent.oncall.lookup").increment();
         String service = serviceCiCode == null ? "" : serviceCiCode.trim();
         List<Map<String, Object>> rows = jdbc.queryForList(
@@ -333,11 +333,8 @@ public class ItsmPlatformRepository {
                 service);
         if (rows.isEmpty()) {
             metrics.counter("opsagent.oncall.miss").increment();
-            return Map.of(
-                    "fallback", true,
-                    "message", "当前无有效排班，请联系系统管理员",
-                    "members", List.of());
+            return new CurrentOnCallResponse(true, "当前无有效排班，请联系系统管理员", List.of());
         }
-        return Map.of("fallback", false, "members", rows);
+        return new CurrentOnCallResponse(false, "", rows);
     }
 }

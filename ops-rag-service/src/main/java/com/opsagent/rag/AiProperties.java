@@ -19,7 +19,8 @@ public class AiProperties {
     private String provider = "deepseek";
     private int timeoutSeconds = 45;
     private int maximumAttempts = 3;
-    private int maxOutputTokens = 1200;
+    private int maxOutputTokens = 4096;
+    private int maximumContinuations = 2;
     private Map<String, ProviderSettings> providers = new LinkedHashMap<>();
 
     public boolean isEnabled() {
@@ -60,6 +61,20 @@ public class AiProperties {
 
     public void setMaxOutputTokens(int maxOutputTokens) {
         this.maxOutputTokens = maxOutputTokens;
+    }
+
+    public int getMaximumContinuations() {
+        return Math.max(0, Math.min(maximumContinuations, 3));
+    }
+
+    public void setMaximumContinuations(int maximumContinuations) {
+        this.maximumContinuations = maximumContinuations;
+    }
+
+    long streamTimeoutMillis() {
+        long perAttempt = Math.max(3, Math.min(timeoutSeconds, 120));
+        int attempts = Math.max(1, Math.min(maximumAttempts, 3));
+        return ((perAttempt * attempts + 2) * (getMaximumContinuations() + 1) + 30) * 1000L;
     }
 
     public Map<String, ProviderSettings> getProviders() {

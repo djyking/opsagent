@@ -18,19 +18,25 @@ import type { MetricStripItem } from "@/components/MetricStrip.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import PriorityIndicator from "@/components/PriorityIndicator.vue";
 import { itsmApi, ticketApi } from "@/api/modules";
+import { slaApi, type SlaSummary } from "@/api/sla";
 import { request } from "@/api/http";
-import type { MonitorSummary, Ticket } from "@/types/api";
+import type { CurrentOnCall, MonitorSummary, Ticket } from "@/types/api";
 import { useAuthStore } from "@/stores/auth";
+import DashboardFocusPanel from "@/components/experience/DashboardFocusPanel.vue";
+import { usePageFeedback } from "@/composables/usePageFeedback";
 
 const auth = useAuthStore();
 const tickets = ref<Ticket[]>([]);
-const slaRows = ref<Record<string, unknown>[]>([]);
+const slaSummary = ref<SlaSummary>();
 const alerts = ref<Record<string, unknown>[]>([]);
-const currentOnCall = ref<Record<string, unknown>>();
+const currentOnCall = ref<CurrentOnCall>();
 const monitor = ref<MonitorSummary>();
 const loading = ref(true);
 const error = ref("");
 const checkedAt = ref("");
+const toast = usePageFeedback(error, load);
+const focusCollapsed = ref(localStorage.getItem('opsagent-dashboard-focus-collapsed') === 'true');
+function toggleFocus() { focusCollapsed.value = !focusCollapsed.value; localStorage.setItem('opsagent-dashboard-focus-collapsed', String(focusCollapsed.value)); }
 
 const activeTickets = computed(() =>
   tickets.value
@@ -39,18 +45,12 @@ const activeTickets = computed(() =>
     .slice(0, 7),
 );
 const highPriority = computed(
-  () => activeTickets.value.filter((ticket) => ["URGENT", "HIGH"].includes(ticket.priority)).length,
+  () => tickets.value.filter((ticket) => !["CLOSED", "REJECTED"].includes(ticket.status) && ["URGENT", "HIGH"].includes(ticket.priority)).length,
 );
 const processing = computed(
   () => tickets.value.filter((ticket) => ["ASSIGNED", "PROCESSING", "SUSPENDED"].includes(ticket.status)).length,
 );
-const slaRisk = computed(() => {
-  const threshold = Date.now() + 2 * 60 * 60 * 1000;
-  return slaRows.value.filter((row) => {
-    const deadline = new Date(String(row.resolutionDeadline || "")).getTime();
-    return row.resolutionStatus === "RUNNING" && deadline > 0 && deadline <= threshold;
-  }).length;
-});
+const slaRisk = computed(() => slaSummary.value?.counts.dashboardRisk || 0);
 const firingAlerts = computed(
   () => alerts.value.filter((alert) => String(alert.currentStatus).toLowerCase() === "firing").length,
 );
@@ -67,15 +67,12 @@ const statusMetrics = computed(() => [
   { label: "已关闭", value: tickets.value.filter((ticket) => ticket.status === "CLOSED").length },
 ]);
 const maxStatusMetric = computed(() => Math.max(...statusMetrics.value.map((item) => item.value), 1));
-const onCallName = computed(
-  () =>
-    String(
-      currentOnCall.value?.displayName ||
-        currentOnCall.value?.username ||
-        currentOnCall.value?.userName ||
-        "未排班",
-    ),
-);
+const onCallName = computed(() => {
+  if (!currentOnCall.value) return "未获取";
+  const members = currentOnCall.value.members;
+  return members.find((member) => member.roleType === "PRIMARY")?.userName
+    || members[0]?.userName || "未排班";
+});
 const overviewMetrics = computed<MetricStripItem[]>(() => [
   {
     key: "priority",
@@ -142,7 +139,7 @@ async function load() {
   error.value = "";
   const tasks: Promise<unknown>[] = [
     ticketApi.page({ pageNum: 1, pageSize: 100 }).then((page) => (tickets.value = page.records)),
-    itsmApi.slaOverview().then((rows) => (slaRows.value = rows)),
+    slaApi.summary().then((summary) => (slaSummary.value = summary)),
     itsmApi.currentOnCall().then((row) => (currentOnCall.value = row)),
     request<MonitorSummary>({ url: "/api/platform/monitor/summary" }).then(
       (summary) => (monitor.value = summary),
@@ -154,6 +151,8 @@ async function load() {
   const results = await Promise.allSettled(tasks);
   if (results.every((result) => result.status === "rejected")) {
     error.value = "总览数据暂时无法获取，请检查网关和后端服务。";
+  } else if (results.some((result) => result.status === "rejected")) {
+    error.value = "部分总览数据刷新失败，已保留最近获取的数据，请重试。";
   }
   checkedAt.value = new Date().toLocaleTimeString("zh-CN", {
     hour: "2-digit",
@@ -166,19 +165,21 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="dashboard-page oa-dashboard">
+  <div class="dashboard-page oa-dashboard" :data-refreshing="loading && !!checkedAt">
     <PageHeader
       title="运行总览"
-      :description="`系统运行${monitor?.prometheus.healthy ? '正常' : '状态待确认'} · 数据更新于 ${checkedAt || '--:--'}`"
+      :description="`把需要关注的工作放在一起 · 最近同步 ${checkedAt || '--:--'}`"
     >
       <template #actions>
+        <button class="button secondary" :aria-expanded="!focusCollapsed" @click="toggleFocus">{{ focusCollapsed ? '展开当前重点' : '暂时收起重点' }}</button>
         <button class="button secondary" :disabled="loading" @click="load">
-          <RefreshCw :size="15" />{{ loading ? "刷新中…" : "刷新" }}
+          <RefreshCw :size="15" :class="{ 'motion-spin': loading }" />{{ loading ? "刷新中…" : "刷新" }}
         </button>
       </template>
     </PageHeader>
 
     <p v-if="error" class="inline-error">{{ error }}</p>
+    <DashboardFocusPanel v-if="!focusCollapsed" :priority="highPriority" :sla-risk="slaRisk" :alerts="firingAlerts" :on-call-name="onCallName" :ready="!!checkedAt && !error" />
 
     <MetricStrip class="oa-dashboard-metrics" :items="overviewMetrics" label="核心运维指标" />
 
@@ -192,7 +193,7 @@ onMounted(load);
         <div v-else-if="!activeTickets.length" class="empty-state small-empty">
           <CheckCircle2 :size="28" /><strong>当前没有活跃工单</strong><span>所有问题均已闭环。</span>
         </div>
-        <div v-else class="dashboard-table-wrap">
+        <div v-else class="dashboard-table-wrap responsive-table" tabindex="0" aria-label="活跃工单表格">
           <table class="oa-compact-table">
             <thead><tr><th>级别</th><th>工单</th><th class="dashboard-service-column">服务</th><th>状态</th><th>负责人</th><th>更新</th></tr></thead>
             <tbody>
@@ -201,8 +202,8 @@ onMounted(load);
                 <td><RouterLink class="table-title" :to="`/tickets/${ticket.id}`"><strong>{{ ticket.title }}</strong><span>{{ ticket.ticketNo }} · {{ ticket.affectedCiCode || "未关联服务" }}</span></RouterLink></td>
                 <td class="dashboard-service-column">{{ ticket.affectedCiCode || "未关联" }}</td>
                 <td><StatusBadge :value="ticket.status" /></td>
-                <td>{{ ticket.assigneeId ? `#${ticket.assigneeId}` : "待分配" }}</td>
-                <td>{{ formatTime(ticket.updateTime) }}</td>
+                <td class="dashboard-ticket-owner">{{ ticket.assigneeId ? `#${ticket.assigneeId}` : "待分配" }}</td>
+                <td class="dashboard-ticket-updated">{{ formatTime(ticket.updateTime) }}</td>
               </tr>
             </tbody>
           </table>
@@ -232,8 +233,8 @@ onMounted(load);
       </article>
     </section>
 
-    <section class="panel oa-dashboard-lower">
-      <article class="oa-health-card">
+    <section class="oa-dashboard-lower">
+      <article class="panel oa-health-card">
         <header class="panel-header"><div><h3>服务健康</h3><span class="panel-count">Prometheus 实时抓取</span></div><RouterLink class="text-button" to="/system/monitor">深度监控 <ArrowUpRight :size="15" /></RouterLink></header>
         <div class="oa-health-summary"><strong>{{ healthyServices }}/{{ monitor?.services.length || 0 }}</strong><span>服务正常</span></div>
         <div class="oa-health-list">
@@ -241,13 +242,13 @@ onMounted(load);
           <span v-if="!monitor?.services.length" class="muted">暂无监控目标数据</span>
         </div>
       </article>
-      <article class="oa-status-card">
+      <article class="panel oa-status-card">
         <header class="panel-header"><div><h3>工单状态分布</h3><span class="panel-count">真实工单数据</span></div></header>
         <div class="oa-bars">
           <div v-for="item in statusMetrics" :key="item.label"><span>{{ item.label }}</span><i><b :style="{ width: `${(item.value / maxStatusMetric) * 100}%` }" /></i><strong>{{ item.value }}</strong></div>
         </div>
       </article>
-      <article class="oa-recent-card">
+      <article class="panel oa-recent-card">
         <header class="panel-header"><div><h3>最近活动</h3><span class="panel-count">按工单更新时间</span></div></header>
         <div v-if="!tickets.length" class="empty-state small-empty">暂无活动记录</div>
         <RouterLink v-for="ticket in tickets.slice(0, 4)" :key="ticket.id" :to="`/tickets/${ticket.id}`" class="oa-activity-row"><i /><span><strong>{{ ticket.title }}</strong><small>{{ ticket.ticketNo }} · {{ formatTime(ticket.updateTime) }}</small></span></RouterLink>

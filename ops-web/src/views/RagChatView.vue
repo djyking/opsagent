@@ -2,7 +2,7 @@
 import { nextTick, ref } from "vue";
 import AnswerContent from "@/components/AnswerContent.vue";
 import RagSources from "@/components/RagSources.vue";
-import { streamRagAnswer } from "@/api/rag-stream";
+import { ragAnswerLabel, streamRagAnswer } from "@/api/rag-stream";
 import type { AiReference } from "@/types/api";
 const question = ref("");
 const answer = ref("");
@@ -32,7 +32,7 @@ async function ask() {
     );
     answer.value = result.answer || answer.value;
     references.value = result.references;
-    model.value = `${result.provider}/${result.model}`;
+    model.value = ragAnswerLabel(result);
     latencyMs.value = result.latencyMs;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "问答请求失败";

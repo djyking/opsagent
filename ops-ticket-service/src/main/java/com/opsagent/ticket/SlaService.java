@@ -2,12 +2,14 @@ package com.opsagent.ticket;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.opsagent.common.core.PageResult;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
@@ -68,6 +70,25 @@ public class SlaService {
 
     List<Map<String, Object>> overview() {
         return mapper.overview(200);
+    }
+
+    @Transactional(readOnly = true)
+    PageResult<SlaDtos.Row> page(SlaDtos.Query query) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime riskUntil = now.plusHours(2);
+        long total = mapper.countPage(query, now, riskUntil);
+        long lastPage = Math.max(1, (total + query.pageSize() - 1) / query.pageSize());
+        long pageNum = Math.min(query.pageNum(), lastPage);
+        List<SlaDtos.Row> records = total == 0
+                ? List.of()
+                : mapper.page(query, now, riskUntil, (pageNum - 1) * query.pageSize());
+        return new PageResult<>(records, total, pageNum, query.pageSize());
+    }
+
+    @Transactional(readOnly = true)
+    SlaDtos.Summary summary() {
+        LocalDateTime now = LocalDateTime.now();
+        return new SlaDtos.Summary(mapper.counts(now, now.plusHours(2)), mapper.services(), now);
     }
 
     @Scheduled(fixedDelayString = "${ops.sla.scan-delay-millis:10000}")

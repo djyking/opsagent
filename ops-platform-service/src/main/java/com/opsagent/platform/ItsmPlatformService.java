@@ -60,7 +60,7 @@ public class ItsmPlatformService {
         return repository.shifts(scheduleId);
     }
 
-    Map<String, Object> currentOnCall(String serviceCiCode) {
+    CurrentOnCallResponse currentOnCall(String serviceCiCode) {
         return repository.currentOnCall(serviceCiCode);
     }
 

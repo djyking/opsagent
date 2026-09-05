@@ -132,7 +132,7 @@ public class ItsmPlatformController {
     }
 
     @GetMapping("/oncall/current")
-    ApiResponse<Map<String, Object>> currentOnCall(
+    ApiResponse<CurrentOnCallResponse> currentOnCall(
             @RequestParam(required = false) String serviceCiCode) {
         return ApiResponse.success(service.currentOnCall(serviceCiCode));
     }

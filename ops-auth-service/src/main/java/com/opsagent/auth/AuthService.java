@@ -7,6 +7,7 @@ import com.opsagent.common.core.*;
 import com.opsagent.common.security.*;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,6 +48,30 @@ public class AuthService {
                 || !encoder.matches(req.password(), u.getPassword()))
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "用户名或密码错误");
         return issue(u);
+    }
+
+    @Transactional
+    void register(RegisterRequest request) {
+        if (request.password().getBytes(StandardCharsets.UTF_8).length > 72) {
+            throw new BusinessException(ErrorCode.VALIDATION, "密码的 UTF-8 编码不能超过 72 字节");
+        }
+        String username = request.username().trim();
+        if (find(username) != null) {
+            throw new BusinessException(ErrorCode.CONFLICT, "用户名已存在");
+        }
+        Long roleId = users.registrationRoleId();
+        if (roleId == null) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "普通用户角色暂不可用，请联系管理员");
+        }
+        String displayName = request.displayName() == null || request.displayName().isBlank()
+                ? username : request.displayName().trim();
+        User user = User.registered(username, encoder.encode(request.password()), displayName);
+        try {
+            users.insert(user);
+        } catch (DuplicateKeyException exception) {
+            throw new BusinessException(ErrorCode.CONFLICT, "用户名已存在");
+        }
+        users.assignRegistrationRole(user.getId(), roleId);
     }
 
     @Transactional

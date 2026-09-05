@@ -56,6 +56,16 @@ class KnowledgeIndexPipelineTest {
         assertThat(event.get("payload").toString())
                 .contains("\"documentId\":1001", "\"documentVersion\":3", "structure-v1");
         assertThat(event.get("status")).isEqualTo("PENDING");
+
+        long retriedTaskId = repository.createIndexTaskAndOutbox(1001L, 4, "structure-v1");
+        assertThat(retriedTaskId).isEqualTo(taskId);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM knowledge_index_task", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "SELECT document_version FROM knowledge_index_task WHERE id=?",
+                Integer.class, taskId)).isEqualTo(4);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM knowledge_event_outbox", Integer.class)).isEqualTo(2);
     }
 
     @Test

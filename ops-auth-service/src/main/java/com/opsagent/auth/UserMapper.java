@@ -13,6 +13,12 @@ import java.util.List;
  * @since 2026/8/6
  */
 public interface UserMapper extends BaseMapper<User> {
+    @Select("SELECT id FROM sys_role WHERE code='USER' AND status='enable' AND deleted=0")
+    Long registrationRoleId();
+
+    @Insert("INSERT INTO sys_user_role(user_id,role_id) VALUES(#{userId},#{roleId})")
+    int assignRegistrationRole(@Param("userId") long userId, @Param("roleId") long roleId);
+
     @Select(
             "SELECT r.code FROM sys_role r JOIN sys_user_role ur ON ur.role_id=r.id WHERE"
                     + " ur.user_id=#{userId} AND r.status='enable' AND r.deleted=0")

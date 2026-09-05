@@ -12,10 +12,13 @@ import DetailPanel from "@/components/DetailPanel.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import FormField from "@/components/FormField.vue";
 import { formatDateTime, formatShortDateTime } from "@/utils/datetime";
+import { usePageFeedback } from "@/composables/usePageFeedback";
+import ActionButton from "@/components/feedback/ActionButton.vue";
 
 const rows = ref<Record<string, unknown>[]>([]);
 const status = ref("IN_REVIEW");
 const error = ref("");
+const toast = usePageFeedback(error, load);
 const busy = ref(0);
 const loading = ref(false);
 const selected = ref<Record<string, unknown>>();
@@ -31,7 +34,7 @@ async function load() {
 function open(row: Record<string, unknown>) { selected.value = row; rejectComment.value = ""; }
 async function approve(id: number) {
   busy.value = id;
-  try { await itsmApi.approveDocument(id, "审核通过并发布"); selected.value = undefined; await load(); }
+  try { await itsmApi.approveDocument(id, "审核通过并发布"); toast.show("知识审核已通过并发布"); selected.value = undefined; await load(); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : "审核失败"; }
   finally { busy.value = 0; }
 }
@@ -39,7 +42,7 @@ async function reject(id: number) {
   const comment = rejectComment.value.trim();
   if (!comment) { error.value = "请输入驳回意见"; return; }
   busy.value = id;
-  try { await itsmApi.rejectDocument(id, comment); selected.value = undefined; await load(); }
+  try { await itsmApi.rejectDocument(id, comment); toast.show("知识已驳回，审核意见已保存"); selected.value = undefined; await load(); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : "驳回失败"; }
   finally { busy.value = 0; }
 }
@@ -51,6 +54,11 @@ onMounted(load);
     <PageHeader title="知识审核" description="审核解析完成的知识文档并决定是否发布">
       <template #actions><button class="button secondary" :disabled="loading" @click="load"><RefreshCw :size="16" />{{ loading ? "刷新中…" : "刷新" }}</button></template>
     </PageHeader>
+    <section class="knowledge-review-intro" aria-label="知识发布流程">
+      <span class="knowledge-review-symbol"><BookCheck :size="26" /></span>
+      <div><h2>让值得信赖的知识，进入团队的答案。</h2><p>核对文档内容与解析状态，留下明确的审核意见。</p></div>
+      <ol><li><span>1</span>核对内容</li><li><span>2</span>记录意见</li><li><span>3</span>审核发布</li></ol>
+    </section>
     <ListSurface>
       <template #toolbar><FilterBar>
       <div class="segmented-control">
@@ -63,7 +71,7 @@ onMounted(load);
       </FilterBar></template>
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
 
-      <LoadingState v-if="loading" text="正在读取审核队列…" />
+      <LoadingState v-if="loading && !rows.length" text="正在读取审核队列…" />
       <EmptyState v-else-if="!rows.length" title="当前筛选下没有知识文档" description="新的待审核文档会显示在这里" :icon="BookCheck" />
       <table v-else>
         <thead><tr><th>文档</th><th>知识库</th><th>解析状态</th><th>审核状态</th><th>提交时间</th><th>意见</th><th></th></tr></thead>
@@ -84,7 +92,7 @@ onMounted(load);
       <FormField v-if="selected.reviewStatus === 'IN_REVIEW'" class="drawer-field" label="驳回意见" help="驳回时必须填写原因"><textarea v-model.trim="rejectComment" rows="4" maxlength="500" placeholder="说明需要修改的内容" /></FormField>
       <template v-if="selected.reviewStatus === 'IN_REVIEW'" #footer>
         <button class="button secondary danger-text" :disabled="busy === Number(selected.id)" @click="reject(Number(selected.id))"><X :size="15" />驳回</button>
-        <button class="button primary" :disabled="busy === Number(selected.id)" @click="approve(Number(selected.id))"><Check :size="15" />通过并发布</button>
+        <ActionButton class="primary" :loading="busy === Number(selected.id)" loading-text="正在提交审核…" @click="approve(Number(selected.id))">通过并发布</ActionButton>
       </template>
     </DetailPanel>
   </div>

@@ -1,6 +1,8 @@
 package com.opsagent.rag;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InOrder;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -28,6 +30,7 @@ class RagServiceTest {
         LlmInvocationService invocationService = mock(LlmInvocationService.class);
         AiProperties ai = new AiProperties();
         ai.setEnabled(true);
+        configureModel(ai);
         Map<String, Object> row = Map.of(
                 "chunkId", 7L,
                 "documentId", 3L,
@@ -95,6 +98,124 @@ class RagServiceTest {
 
         assertThat(answer.answer()).contains("知识库内容不足");
         verifyNoInteractions(knowledge, promptBuilder, invocationService);
+    }
+
+    @Test
+    void shouldExposeIncompleteGenerationAndPreserveItsText() {
+        AiProperties ai = new AiProperties();
+        ai.setEnabled(true);
+        configureModel(ai);
+        RagProperties properties = new RagProperties();
+        SimpleMeterRegistry metrics = new SimpleMeterRegistry();
+        LlmInvocationService invocation = mock(LlmInvocationService.class);
+        LlmRequest request = new LlmRequest("system", "user", 4096);
+        String partial = "## 排查步骤\n需要检查的连接参数是";
+        when(invocation.stream(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(request),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new LlmInvocationService.Invocation(
+                        new LlmResult(partial, "deepseek", "model", 20, 4096, false, "length", 2), 100));
+        RagService service = new RagService(
+                mock(KnowledgeClient.class), properties, ai, mock(PromptBuilder.class), invocation,
+                new CitationValidator(), rerankService(properties, metrics),
+                new ContextAssembler(properties, metrics), metrics);
+        RagService.StreamPlan plan = new RagService.StreamPlan(
+                "问题", List.of(), List.of(), List.of(), request,
+                new RagService.AnswerMetadata("NONE", false, 0, 0, 0, false, null), null, 0);
+
+        RagService.Answer answer = service.stream(
+                plan, delta -> {}, new LlmInvocationService.AuditContext(1, "test"));
+
+        assertThat(answer.answer()).isEqualTo(partial);
+        assertThat(answer.metadata().generationComplete()).isFalse();
+        assertThat(answer.metadata().finishReason()).isEqualTo("length");
+        assertThat(answer.metadata().continuationCount()).isEqualTo(2);
+        assertThat(answer.metadata().degradedReason()).isEqualTo("LLM_INCOMPLETE");
+    }
+
+    @Test
+    void shouldUseHistoryOnlyAsConversationContextAndSearchCurrentQuestion() {
+        AiProperties ai = new AiProperties();
+        ai.setEnabled(true);
+        configureModel(ai);
+        RagProperties properties = new RagProperties();
+        SimpleMeterRegistry metrics = new SimpleMeterRegistry();
+        KnowledgeClient knowledge = mock(KnowledgeClient.class);
+        PromptBuilder builder = mock(PromptBuilder.class);
+        String question = "连接超时如何排查？";
+        when(knowledge.search(question, 30, null))
+                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(), "test"));
+        when(builder.build(org.mockito.ArgumentMatchers.eq(question),
+                org.mockito.ArgumentMatchers.any(ContextAssembler.AssembledContext.class)))
+                .thenReturn(new LlmRequest("system", "current question and evidence", 4096));
+        RagService service = new RagService(
+                knowledge, properties, ai, builder, mock(LlmInvocationService.class),
+                new CitationValidator(), rerankService(properties, metrics),
+                new ContextAssembler(properties, metrics), metrics);
+
+        RagService.StreamPlan plan = service.prepareStream(question, 5, null, "用户：旧问题\n助手：旧答案");
+
+        org.mockito.Mockito.verify(knowledge).search(question, 30, null);
+        assertThat(plan.request().systemPrompt()).contains("不是外部事实证据", "本次知识上下文");
+        assertThat(plan.request().userPrompt()).contains("<conversation_history>", "旧答案");
+        assertThat(plan.sources()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "false,false,LLM_DISABLED,未启用",
+        "true,false,LLM_NOT_CONFIGURED,尚未配置",
+        "true,true,LLM_UNAVAILABLE,调用失败"
+    })
+    void shouldExplainFallbackWithoutPretendingToGenerate(
+            boolean enabled, boolean configured, String reason, String explanation) {
+        KnowledgeClient knowledge = mock(KnowledgeClient.class);
+        PromptBuilder promptBuilder = mock(PromptBuilder.class);
+        LlmInvocationService invocation = mock(LlmInvocationService.class);
+        AiProperties ai = new AiProperties();
+        ai.setEnabled(enabled);
+        if (configured) {
+            configureModel(ai);
+        }
+        String question = "磁盘使用率过高如何排查？";
+        when(knowledge.search(question, 30, null)).thenReturn(new KnowledgeClient.Envelope<>(
+                0, "ok", List.of(Map.of(
+                        "chunkId", 7L, "documentId", 3L, "chunkIndex", 0,
+                        "content", "先检查磁盘空间。", "documentName", "磁盘手册.md")), "trace"));
+        if (configured) {
+            LlmRequest request = new LlmRequest("system", "user", 100);
+            when(promptBuilder.build(
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(ContextAssembler.AssembledContext.class)))
+                    .thenReturn(request);
+            when(invocation.invoke(question, request)).thenThrow(
+                    new AiProviderException("deepseek", 503, "服务暂不可用", null));
+        }
+        RagProperties properties = new RagProperties();
+        SimpleMeterRegistry metrics = new SimpleMeterRegistry();
+        try {
+            RagService service = new RagService(
+                    knowledge, properties, ai, promptBuilder, invocation,
+                    new CitationValidator(), rerankService(properties, metrics),
+                    new ContextAssembler(properties, metrics), metrics);
+            RagService.Answer answer = service.ask(question, 5);
+            assertThat(answer.model()).isEqualTo("retrieval-only");
+            assertThat(answer.metadata().degradedReason()).isEqualTo(reason);
+            assertThat(answer.answer()).contains(explanation, "未经 AI 生成", "[S1]");
+            assertThat(answer.outputTokens()).isZero();
+            if (!configured) {
+                verifyNoInteractions(promptBuilder, invocation);
+            }
+        } finally {
+            metrics.close();
+        }
+    }
+
+    private void configureModel(AiProperties ai) {
+        AiProperties.ProviderSettings settings = new AiProperties.ProviderSettings();
+        settings.setApiKey("unit-test-placeholder");
+        settings.setModel("test-model");
+        ai.setProviders(Map.of("deepseek", settings));
     }
 
     private RerankService rerankService(

@@ -1,1 +1,0 @@
-import{d as n,o as t,c as o,t as a,j as i,a as c,K as l}from"./index-Da9_i_Iz.js";const r={class:"oa-inline-notice"},d={key:0},p=n({__name:"InlineNotice",props:{title:{}},setup(e){return(s,m)=>(t(),o("aside",r,[e.title?(t(),o("strong",d,a(e.title),1)):i("",!0),c("span",null,[l(s.$slots,"default")])]))}});export{p as _};

@@ -12,6 +12,9 @@ import {
 } from "@lucide/vue";
 import { useAuthStore } from "@/stores/auth";
 import InlineError from "@/components/InlineError.vue";
+import AuthMotionScene from "@/components/auth/AuthMotionScene.vue";
+import ActionButton from "@/components/feedback/ActionButton.vue";
+import { useToast } from "@/composables/useToast";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -21,11 +24,20 @@ const password = ref("");
 const showPassword = ref(false);
 const error = ref("");
 const busy = ref(false);
+const succeeded = ref(false);
+const toast = useToast();
+const formFocused = ref(false);
+function onFormFocusOut(event: FocusEvent) {
+  formFocused.value = (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null);
+}
 async function submit() {
+  if (busy.value) return;
   error.value = "";
   busy.value = true;
   try {
     await auth.login(username.value, password.value);
+    succeeded.value = true;
+    toast.show("登录成功，欢迎回到工作台");
     await router.push(String(route.query.redirect || "/dashboard"));
   } catch (e) {
     error.value = e instanceof Error ? e.message : "登录失败";
@@ -35,33 +47,14 @@ async function submit() {
 }
 </script>
 <template>
-  <main class="auth-page">
-    <section class="auth-story">
-      <div class="auth-brand">
-        <span><Activity :size="22" /></span> OpsAgent
-      </div>
-      <div class="story-copy">
-        <span class="eyebrow light">INTELLIGENT OPERATIONS</span>
-        <h1>让每一次故障处理，<br /><em>都有迹可循。</em></h1>
-        <p>
-          统一管理运维工单、故障文档与智能问答，在一个清晰的工作流中完成问题闭环。
-        </p>
-        <ul>
-          <li><CheckCircle2 :size="18" /> 工单状态与责任人全程可追踪</li>
-          <li><CheckCircle2 :size="18" /> 多格式文档解析与结构化切片</li>
-          <li><CheckCircle2 :size="18" /> 基于文档上下文的可信问答</li>
-        </ul>
-      </div>
-      <div class="story-metric">
-        <strong>01</strong><span>业务闭环<br />从创建到归档</span>
-      </div>
-    </section>
+  <main class="auth-page auth-page--login">
+    <AuthMotionScene :form-focused="formFocused" />
     <section class="auth-panel">
-      <form class="auth-card" @submit.prevent="submit">
+      <form class="auth-card" @focusin="formFocused = true" @focusout="onFormFocusOut" @submit.prevent="submit">
         <div>
           <span class="eyebrow">WELCOME BACK</span>
-          <h2>登录工作台</h2>
-          <p>使用你的 OpsAgent 账号继续</p>
+          <h2>欢迎回来</h2>
+          <p>登录 OpsAgent，继续今天的工作</p>
         </div>
         <label
           >用户名
@@ -93,9 +86,7 @@ async function submit() {
             </button></div
         ></label>
         <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
-        <button class="button primary auth-submit" :disabled="busy">
-          {{ busy ? "正在验证…" : "进入工作台" }} <ArrowRight :size="18" />
-        </button>
+        <ActionButton class="primary auth-submit" :loading="busy && !succeeded" :success="succeeded" loading-text="正在验证…" success-text="登录成功">进入工作台 <ArrowRight :size="18" /></ActionButton>
         <p class="auth-switch">
           还没有账号？<RouterLink to="/register">创建账号</RouterLink>
         </p>

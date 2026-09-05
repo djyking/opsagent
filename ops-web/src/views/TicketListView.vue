@@ -20,6 +20,8 @@ import TechnicalMetadata from "@/components/TechnicalMetadata.vue";
 import InlineNotice from "@/components/InlineNotice.vue";
 import { formatDateTime, formatRelativeTime } from "@/utils/datetime";
 import { parseTicketDescription } from "@/utils/ticket-description";
+import { usePageFeedback } from "@/composables/usePageFeedback";
+import ActionButton from "@/components/feedback/ActionButton.vue";
 const route = useRoute();
 const router = useRouter();
 const page = ref<PageResponse<Ticket>>({
@@ -30,6 +32,7 @@ const page = ref<PageResponse<Ticket>>({
 });
 const loading = ref(false);
 const error = ref("");
+const toast = usePageFeedback(error, load);
 const showCreate = ref(false);
 const creating = ref(false);
 const preview = ref<Ticket>();
@@ -63,10 +66,12 @@ async function load() {
   }
 }
 async function create() {
+  if (creating.value) return;
   creating.value = true;
   error.value = "";
   try {
     const ticket = await ticketApi.create(form);
+    toast.show("工单已创建");
     showCreate.value = false;
     await router.push(`/tickets/${ticket.id}`);
   } catch (e) {
@@ -88,9 +93,24 @@ function reset() {
 watch(
   () => route.query.create,
   (v) => {
-    if (v === "1") showCreate.value = true;
+    if (v === "1") {
+      showCreate.value = true;
+      router.replace({ query: { ...route.query, create: undefined } });
+    }
   },
   { immediate: true },
+);
+// Query-only navigation keeps this view mounted, so refresh the queue explicitly.
+watch(
+  () => route.query.keyword,
+  (value, previous) => {
+    if (route.name !== "tickets") return;
+    const keyword = String(value || "");
+    if (keyword === String(previous || "")) return;
+    filters.keyword = keyword;
+    filters.pageNum = 1;
+    load();
+  },
 );
 onMounted(async () => {
   filters.keyword = String(route.query.keyword || "");
@@ -103,11 +123,12 @@ onMounted(async () => {
 });
 </script>
 <template>
-  <div class="stack-page">
+  <div class="stack-page ticket-list-page">
     <PageHeader title="工单中心" description="创建、跟踪并完成每一个运维问题闭环">
       <template #actions><button class="button primary" @click="showCreate = true"><Plus :size="18" />新建工单</button></template>
     </PageHeader>
-    <ListSurface>
+    <ListSurface class="ticket-list-surface">
+      <template #header><div><h3>工单队列</h3><p>筛选当前任务，查看详情并跟进处理</p></div><span class="panel-count">{{ page.total }} 张工单</span></template>
       <template #toolbar><FilterBar>
       <div class="search-box">
         <Search :size="18" /><input
@@ -152,10 +173,10 @@ onMounted(async () => {
       </FilterBar></template>
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
 
-      <LoadingState v-if="loading" text="正在加载工单…" />
+      <LoadingState v-if="loading && !page.records.length" text="正在加载工单…" />
       <EmptyState v-else-if="!page.records.length" title="没有符合条件的工单" description="调整筛选条件或创建一张新工单" :icon="TicketCheck" />
       <template v-else>
-        <table>
+        <div class="responsive-table" role="region" aria-label="工单列表" tabindex="0"><table class="ticket-table">
           <thead>
             <tr>
               <th>工单</th>
@@ -184,22 +205,17 @@ onMounted(async () => {
               <td><PriorityIndicator :value="ticket.priority" /></td>
               <td><StatusBadge :value="ticket.status" /></td>
               <td>
-                <span class="identity-pair"
-                  >#{{ ticket.creatorId }} <i>→</i>
-                  {{
-                    ticket.assigneeId ? "#" + ticket.assigneeId : "待分配"
-                  }}</span
-                >
+                <span class="ticket-assignment"><strong>{{ ticket.assigneeId ? "#" + ticket.assigneeId : "待分配" }}</strong><small>创建人 #{{ ticket.creatorId }}</small></span>
               </td>
               <td><time :title="formatDateTime(ticket.updateTime)">{{ formatRelativeTime(ticket.updateTime) }}</time></td>
               <td>
-                <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`" @click.stop
+                <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`" title="打开工单详情" @click.stop
                   ><ArrowUpRight :size="17"
                 /></RouterLink>
               </td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </template>
       <template v-if="page.total" #footer><PaginationBar :page="filters.pageNum" :page-size="filters.pageSize" :total="page.total" @change="(p) => { filters.pageNum = p; load(); }" /></template>
     </ListSurface>
@@ -267,9 +283,7 @@ onMounted(async () => {
             @click="showCreate = false"
           >
             取消</button
-          ><button class="button primary" :disabled="creating">
-            {{ creating ? "创建中…" : "创建工单" }}
-          </button>
+          ><ActionButton class="primary" :loading="creating" loading-text="创建中…">创建工单</ActionButton>
         </div>
       </form></BaseModal
     >

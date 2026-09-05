@@ -28,6 +28,12 @@ public class AuthController {
         return ApiResponse.success(service.login(r));
     }
 
+    @PostMapping("/register")
+    ApiResponse<Void> register(@Valid @RequestBody RegisterRequest request) {
+        service.register(request);
+        return ApiResponse.success();
+    }
+
     @PostMapping("/refresh")
     ApiResponse<TokenResponse> refresh(@Valid @RequestBody RefreshRequest r) {
         return ApiResponse.success(service.refresh(r));

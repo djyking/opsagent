@@ -1,16 +1,21 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { useRouter } from "vue-router";
-import { Activity, ArrowLeft, UserPlus, Eye, EyeOff } from "@lucide/vue";
+import { ArrowLeft, UserPlus, Eye, EyeOff } from "@lucide/vue";
 import { authApi } from "@/api/modules";
 import InlineError from "@/components/InlineError.vue";
+import { usePageFeedback } from "@/composables/usePageFeedback";
+import ActionButton from "@/components/feedback/ActionButton.vue";
+import AuthBrandPanel from "@/components/auth/AuthBrandPanel.vue";
 const router = useRouter();
 const form = ref({ username: "", displayName: "", password: "", confirm: "" });
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
 const error = ref("");
+const toast = usePageFeedback(error);
 const busy = ref(false);
 async function submit() {
+  if (busy.value) return;
   if (form.value.password !== form.value.confirm) {
     error.value = "两次输入的密码不一致";
     return;
@@ -24,6 +29,7 @@ async function submit() {
       displayName: form.value.displayName || undefined,
     });
     await router.push({ path: "/login", query: { registered: "1" } });
+    toast.show("账号已创建，请登录工作台");
   } catch (e) {
     error.value = e instanceof Error ? e.message : "注册失败";
   } finally {
@@ -32,21 +38,10 @@ async function submit() {
 }
 </script>
 <template>
-  <main class="auth-page compact">
-    <section class="auth-story">
-      <div class="auth-brand">
-        <span><Activity :size="22" /></span> OpsAgent
-      </div>
-      <div class="story-copy">
-        <span class="eyebrow light">START HERE</span>
-        <h1>加入运维协作，<br /><em>从一个工单开始。</em></h1>
-        <p>
-          新注册账号默认获得普通用户权限。运维和管理员角色由数据库管理员分配。
-        </p>
-      </div>
-    </section>
-    <section class="auth-panel">
-      <form class="auth-card" @submit.prevent="submit">
+  <main class="register-page">
+    <AuthBrandPanel />
+    <section class="auth-panel register-panel">
+      <form class="auth-card register-card" @submit.prevent="submit">
         <div>
           <button
             type="button"
@@ -62,11 +57,13 @@ async function submit() {
           >用户名<input
             v-model.trim="form.username"
             required
+            autocomplete="username"
             maxlength="64"
             placeholder="用于登录" /></label
         ><label
           >显示名称<input
             v-model.trim="form.displayName"
+            autocomplete="nickname"
             maxlength="64"
             placeholder="选填" /></label
         ><label
@@ -113,10 +110,26 @@ async function submit() {
             </button></div
         ></label>
         <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
-        <button class="button primary auth-submit" :disabled="busy">
-          <UserPlus :size="18" />{{ busy ? "创建中…" : "创建账号" }}
-        </button>
+        <ActionButton class="primary auth-submit" :loading="busy" loading-text="创建中…">
+          <UserPlus :size="18" />创建账号
+        </ActionButton>
       </form>
     </section>
   </main>
 </template>
+
+<style scoped>
+.register-page { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(390px, .85fr); min-height: 100svh; background: var(--oa-bg-surface); }
+.register-page .register-panel { padding: 42px clamp(28px, 4vw, 72px); }
+.register-page .register-card { width: min(400px, 100%); gap: 18px; }
+.register-card > div:first-child { margin-bottom: 4px; }
+.register-card h2 { margin: 18px 0 9px; font-size: 32px; line-height: 1.25; color: var(--oa-text-primary); }
+.register-card .text-button { color: var(--oa-text-secondary); padding: 0; }
+.register-card .text-button:hover { color: var(--oa-primary); }
+@media (max-width: 900px) {
+  .register-page { display: flex; flex-direction: column; }
+  .register-page .register-panel { flex: 1; min-height: 0; padding: 28px; }
+  .register-page .register-card { gap: 16px; }
+  .register-card h2 { font-size: 28px; margin-top: 12px; }
+}
+</style>

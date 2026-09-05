@@ -9,6 +9,11 @@
     <artifactId>ops-platform-service</artifactId>
     <dependencies>
         <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>com.opsagent</groupId>
             <artifactId>ops-common-web</artifactId>
             <version>${project.version}</version>

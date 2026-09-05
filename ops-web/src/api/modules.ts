@@ -5,6 +5,7 @@ import type {
   AiReference,
   AiTask,
   CurrentUser,
+  CurrentOnCall,
   DocumentChunk,
   DocumentRecord,
   LoginResponse,
@@ -168,7 +169,7 @@ export const itsmApi = {
       params: { scheduleId },
     }),
   currentOnCall: (serviceCiCode?: string) =>
-    request<Record<string, unknown>>({
+    request<CurrentOnCall>({
       url: "/api/platform/oncall/current",
       params: { serviceCiCode },
     }),

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
+import { useDialogFocus } from "@/composables/useDialogFocus";
+const dialogRoot = ref<HTMLElement>();
+useDialogFocus(dialogRoot);
 import { ArrowUpRight, X } from "@lucide/vue";
 
 const props = defineProps<{
@@ -22,7 +25,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
 <template>
   <Teleport to="body">
     <button class="detail-panel-mask" aria-label="关闭详情" @click="emit('close')" />
-    <aside class="detail-panel" :class="{ 'detail-panel-wide': width === 'wide' }" role="dialog" aria-modal="true" :aria-label="title">
+    <aside class="detail-panel" ref="dialogRoot" data-motion :class="{ 'detail-panel-wide': width === 'wide' }" role="dialog" aria-modal="true" :aria-label="title">
       <header>
         <div><span v-if="subtitle">{{ subtitle }}</span><h2>{{ title }}</h2></div>
         <div class="detail-panel-header-actions">

@@ -32,7 +32,7 @@ public class AiStreamHttpExecutor {
         this.mapper = mapper;
     }
 
-    void post(
+    boolean post(
             String provider,
             String baseUrl,
             String path,
@@ -45,7 +45,7 @@ public class AiStreamHttpExecutor {
         for (int attempt = 1; attempt <= attempts; attempt++) {
             AtomicBoolean emitted = new AtomicBoolean();
             try {
-                streamOnce(
+                return streamOnce(
                         provider,
                         baseUrl,
                         path,
@@ -54,7 +54,6 @@ public class AiStreamHttpExecutor {
                         timeoutSeconds,
                         handler,
                         emitted);
-                return;
             } catch (AiProviderException exception) {
                 boolean retryable = exception.statusCode() == 429
                         || exception.statusCode() >= 500
@@ -71,9 +70,10 @@ public class AiStreamHttpExecutor {
                 pause(provider, attempt);
             }
         }
+        throw new AiProviderException(provider, 0, "AI 流式响应未完成。", null);
     }
 
-    private void streamOnce(
+    private boolean streamOnce(
             String provider,
             String baseUrl,
             String path,
@@ -83,7 +83,7 @@ public class AiStreamHttpExecutor {
             StreamEventHandler handler,
             AtomicBoolean emitted) {
         RestClient client = client(timeoutSeconds);
-        client.post()
+        Boolean done = client.post()
                 .uri(normalize(baseUrl) + path)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.TEXT_EVENT_STREAM)
@@ -94,12 +94,12 @@ public class AiStreamHttpExecutor {
                     if (status < 200 || status >= 300) {
                         throw failure(provider, status);
                     }
-                    readEvents(provider, response.getBody(), handler, emitted);
-                    return null;
+                    return readEvents(provider, response.getBody(), handler, emitted);
                 });
+        return Boolean.TRUE.equals(done);
     }
 
-    private void readEvents(
+    private boolean readEvents(
             String provider,
             java.io.InputStream input,
             StreamEventHandler handler,
@@ -110,7 +110,7 @@ public class AiStreamHttpExecutor {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isEmpty()) {
-                    dispatch(provider, data, handler, emitted);
+                    if (dispatch(provider, data, handler, emitted)) return true;
                     data.setLength(0);
                 } else if (line.startsWith("data:")) {
                     if (!data.isEmpty()) {
@@ -119,25 +119,25 @@ public class AiStreamHttpExecutor {
                     data.append(line.substring(5).stripLeading());
                 }
             }
-            dispatch(provider, data, handler, emitted);
+            return dispatch(provider, data, handler, emitted);
         } catch (IOException exception) {
             throw new AiProviderException(provider, 0, "AI 流式响应读取失败。", exception);
         }
     }
 
-    private void dispatch(
+    private boolean dispatch(
             String provider,
             StringBuilder data,
             StreamEventHandler handler,
             AtomicBoolean emitted) {
-        if (data.isEmpty() || "[DONE]".contentEquals(data)) {
-            return;
-        }
+        if (data.isEmpty()) return false;
+        if ("[DONE]".contentEquals(data)) return true;
         try {
             JsonNode event = mapper.readTree(data.toString());
             if (handler.handle(event)) {
                 emitted.set(true);
             }
+            return false;
         } catch (JsonProcessingException exception) {
             throw new AiProviderException(provider, 502, "AI 服务返回了无效的流式事件。", exception);
         }

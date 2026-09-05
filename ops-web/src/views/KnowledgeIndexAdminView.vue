@@ -9,6 +9,9 @@ import PageHeader from "@/components/PageHeader.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
 import FormField from "@/components/FormField.vue";
 import InlineNotice from "@/components/InlineNotice.vue";
+import { usePageFeedback } from "@/composables/usePageFeedback";
+import ActionButton from "@/components/feedback/ActionButton.vue";
+import GuidedEmptyState from "@/components/experience/GuidedEmptyState.vue";
 
 const consistency = ref<Record<string, unknown>>({});
 const failedTasks = ref<Record<string, unknown>[]>([]);
@@ -17,7 +20,9 @@ const repairDocumentId = ref<number>();
 const repairOpen = ref(false);
 const busy = ref("");
 const error = ref("");
+const toast = usePageFeedback(error, load);
 const success = ref("");
+const loaded = ref(false);
 
 const healthMetrics = computed<MetricStripItem[]>(() => [
   { key: "published", label: "已发布", value: Number(consistency.value.publishedDocumentCount || 0), meta: "MySQL 发布文档", icon: DatabaseZap },
@@ -36,11 +41,13 @@ const checks = computed(() => [
 async function load() {
   busy.value = "load";
   error.value = "";
+  loaded.value = false;
   try {
     [consistency.value, failedTasks.value] = await Promise.all([
       adminApi.knowledgeIndexConsistency(),
       adminApi.failedKnowledgeIndexTasks(),
     ]);
+    loaded.value = true;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "索引状态读取失败";
   } finally {
@@ -57,6 +64,7 @@ async function startReindex() {
   try {
     const taskId = await adminApi.requestKnowledgeReindex();
     success.value = `Reindex 任务 #${taskId} 已提交`;
+    toast.show(success.value);
     for (let attempt = 0; attempt < 120; attempt += 1) {
       reindexTask.value = await adminApi.knowledgeReindexTask(taskId);
       if (["SUCCESS", "FAILED"].includes(String(reindexTask.value.status || ""))) break;
@@ -81,6 +89,7 @@ async function repair(documentId?: number) {
   try {
     const taskId = await adminApi.repairKnowledgeIndex(id);
     success.value = `文档 #${id} 的索引修复任务 #${taskId} 已进入 Outbox 队列`;
+    toast.show("索引修复任务已提交，可在任务列表跟进");
     repairDocumentId.value = undefined;
     repairOpen.value = false;
     await load();
@@ -95,7 +104,7 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="index-admin-page">
+  <div class="stack-page index-admin-page">
     <PageHeader title="知识索引" description="检查 MySQL、Elasticsearch 与 Qdrant 的发布一致性">
       <template #actions>
         <button class="button secondary" :disabled="busy === 'load'" @click="load"><RefreshCw :size="15" />{{ busy === "load" ? "检查中…" : "刷新" }}</button>
@@ -114,9 +123,10 @@ onMounted(load);
     <p v-if="success" class="inline-success">{{ success }}</p>
 
     <section class="panel index-health-surface">
-      <header class="section-header"><div><h3>索引健康</h3><p>来自后端一致性检查的实时结果</p></div><span class="health-indicator" :class="{ issue: checks.some((item) => item.count) }"><i />{{ checks.some((item) => item.count) ? "需要处理" : "一致" }}</span></header>
-      <MetricStrip :items="healthMetrics" label="索引健康指标" />
-      <div class="index-details-grid">
+      <header class="section-header"><div><h3>索引健康</h3><p>核对知识发布与检索状态，让问题有处可查</p></div><span v-if="loaded" class="health-indicator" :class="{ issue: checks.some((item) => item.count) }"><i />{{ checks.some((item) => item.count) ? "需要处理" : "一致" }}</span><span v-else class="panel-count">{{ busy === 'load' ? '正在检查' : '状态未获取' }}</span></header>
+      <MetricStrip v-if="loaded" :items="healthMetrics" label="索引健康指标" />
+      <p v-else class="index-status-note">{{ busy === 'load' ? '正在读取索引指标与一致性结果…' : '暂未获取索引状态，请刷新重试。' }}</p>
+      <div v-if="loaded" class="index-details-grid">
         <section>
           <header class="section-header compact"><div><h3>索引配置</h3><p>当前读写 Alias 与物理资源</p></div></header>
           <dl class="index-definition-list">
@@ -144,7 +154,7 @@ onMounted(load);
 
     <section class="panel failed-task-surface">
       <header class="section-header"><div><h3>失败任务</h3><p>索引管线中等待人工处理的任务</p></div><span class="panel-count">{{ failedTasks.length }}</span></header>
-      <div v-if="!failedTasks.length" class="inline-empty"><Check :size="17" />当前没有失败的索引任务</div>
+      <GuidedEmptyState v-if="!failedTasks.length && !busy && !error" kind="index" title="当前没有失败的索引任务" description="失败任务会集中显示在这里。可以重新检查一致性，核对文档与索引的状态。" action="重新检查一致性" @action="load" />
       <div v-else class="index-task-table">
         <article v-for="task in failedTasks" :key="String(task.id)">
           <code>#{{ task.id }}</code>
@@ -158,7 +168,7 @@ onMounted(load);
       <InlineNotice title="单文档修复">重新投递指定文档的索引事件，适用于失败任务或人工核查后的补偿。</InlineNotice>
       <form class="index-repair-form drawer-form" @submit.prevent="repair()">
         <FormField label="文档 ID" help="输入需要重新投递索引事件的文档编号"><input v-model.number="repairDocumentId" min="1" type="number" placeholder="输入正整数文档 ID" /></FormField>
-        <div><button type="button" class="button secondary" @click="repairOpen = false">取消</button><button class="button primary" :disabled="Boolean(busy) || !repairDocumentId"><RotateCw :size="15" />重新索引</button></div>
+        <div><button type="button" class="button secondary" @click="repairOpen = false">取消</button><ActionButton class="primary" :disabled="!repairDocumentId" :loading="Boolean(busy)" loading-text="正在提交修复…">重新索引</ActionButton></div>
       </form>
     </DetailPanel>
   </div>

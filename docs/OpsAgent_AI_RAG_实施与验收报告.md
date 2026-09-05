@@ -6,7 +6,7 @@
 
 本轮已完成 OpenAI、DeepSeek、Kimi 三 Provider 抽象与真实调用，完成 OpenAI Embedding、Elasticsearch SmartCN/BM25、Qdrant 向量检索、检索前数据权限、版本化 Prompt、Citation 校验、用量审计、真实 SSE、Sentinel 限流、文档删除补偿、管理员诊断和前端接入。
 
-三家生成模型均曾通过真实 `OK` 请求；完整 RAG 使用无敏感合成 Runbook 验收成功。用户已明确授权把最初 21 篇内部文档发送给 OpenAI `text-embedding-3-small`。截至 2026-09-04，本机数据库有 32 篇未删除文档，其中 26 篇已发布、49 个有效切片；已有 49 个向量已在不再次调用外部 Embedding 的前提下从旧 ES 向量索引迁入 Qdrant。当前 Compose 容器未注入三家 API Key，因此运行态会降级为 retrieval-only；把 Key 通过不提交 Git 的 `.env` 注入并重建应用容器后才会恢复生成式回答。
+三家生成模型均曾通过真实 `OK` 请求；完整 RAG 使用无敏感合成 Runbook 验收成功。用户已明确授权把最初 21 篇内部文档发送给 OpenAI `text-embedding-3-small`。截至 2026-09-04，本机数据库有 32 篇未删除文档，其中 26 篇已发布、49 个有效切片；已有 49 个向量已在不再次调用外部 Embedding 的前提下从旧 ES 向量索引迁入 Qdrant。2026-09-05 已修复 Docker 迁移遗漏生成模型密钥的问题：从本机原有密钥配置恢复当前选定的 DeepSeek，通过不提交 Git 的 `.env` 注入 RAG 容器，真实连通性探测通过。OpenAI Embedding 与其他生成供应商没有随本次修复启用。降级响应现区分未启用、未配置和模型调用失败，前端明确标识仅知识检索。
 
 ## 2. 架构
 

@@ -64,6 +64,7 @@
 
   --oa-rail-width: 56px;
   --oa-context-width: 216px;
+  --oa-workspace-sidebar-width: 240px;
   --oa-topbar-height: 52px;
   --oa-control-small: 32px;
   --oa-control-default: 36px;
@@ -89,6 +90,47 @@
   --oa-z-drawer: 80;
   --oa-z-modal: 90;
   --oa-z-toast: 100;
-  --oa-duration-fast: 120ms;
-  --oa-duration-normal: 180ms;
+  --oa-motion-instant: 70ms;
+  --oa-motion-fast: 120ms;
+  --oa-motion-enter: 180ms;
+  --oa-motion-panel: 240ms;
+  --oa-motion-story: 360ms;
+  --oa-ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --oa-ease-emphasized: cubic-bezier(.2, .8, .2, 1);
+  --oa-ease-exit: cubic-bezier(.4, 0, 1, 1);
+  --oa-duration-fast: var(--oa-motion-fast);
+  --oa-duration-normal: var(--oa-motion-enter);
+  --oa-bg-experience: #f4f7ff;
+  --oa-accent-knowledge: #16845f;
+  --oa-accent-review: #ad6b18;
+  --oa-accent-index: #7656c5;
+}
+/* Auth remains the approved baseline; the interior contract also reaches teleported dialogs. */
+body:has(.app-shell) {
+  --oa-bg-shell: #f5f9ff;
+  --oa-bg-canvas: #f0f6fe;
+  --oa-bg-subtle: #f5f9fd;
+  --oa-bg-hover: #edf4fd;
+  --oa-bg-selected: #eaf1ff;
+  --oa-border-subtle: #e1eaf4;
+  --oa-border-default: #d6e2f0;
+  --oa-border-strong: #b9cee6;
+  --oa-text-primary: #234366;
+  --oa-text-secondary: #526d88;
+  --oa-text-tertiary: #71869c;
+  --oa-radius-control: 10px;
+  --oa-radius-panel: 16px;
+  --oa-radius-raised: 20px;
+  --oa-font-size-page: 26px;
+  --oa-line-height-page: 34px;
+  --oa-font-size-metric: 28px;
+  --oa-line-height-metric: 36px;
+  --oa-control-default: 38px;
+  --oa-topbar-height: 68px;
+  --oa-sidebar-width: 240px;
+  --oa-shadow-surface: 0 5px 20px #375e8506;
+  --oa-shadow-card: 0 8px 24px #375e850b;
+  --oa-shadow-float: 0 16px 42px #2343661a;
+  --oa-shadow-composer: 0 10px 30px #375e8512;
+  --oa-bg-feature: radial-gradient(ellipse at 0 0, #deebff 0, transparent 65%), radial-gradient(ellipse at 100% 100%, #e6f5f2 0, transparent 50%), #f4f8ff;
 }

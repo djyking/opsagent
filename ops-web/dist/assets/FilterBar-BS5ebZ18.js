@@ -1,1 +1,0 @@
-import{_ as a,o as s,c as o,K as t,j as r}from"./index-Da9_i_Iz.js";const c={},n={class:"oa-filter-bar","aria-label":"筛选条件"},l={key:0,class:"oa-filter-actions"};function i(e,_){return s(),o("section",n,[t(e.$slots,"default"),e.$slots.actions?(s(),o("div",l,[t(e.$slots,"actions")])):r("",!0)])}const f=a(c,[["render",i]]);export{f as F};

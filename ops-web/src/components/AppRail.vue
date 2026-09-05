@@ -28,7 +28,7 @@ const primary: Array<{ domain: string; label: string; icon: Component }> = [
   { domain: "overview", label: "总览", icon: LayoutDashboard },
   { domain: "operations", label: "运维", icon: TicketCheck },
   { domain: "observability", label: "可观测", icon: Monitor },
-  { domain: "ai", label: "AI", icon: Bot },
+  { domain: "ai", label: "AI 智能", icon: Bot },
 ];
 </script>
 
@@ -43,6 +43,8 @@ const primary: Array<{ domain: string; label: string; icon: Component }> = [
         :key="item.domain"
         :class="{ active: activeDomain === item.domain }"
         :title="item.label"
+        :aria-label="item.label"
+        :aria-pressed="activeDomain === item.domain"
         @click="emit('select', item.domain)"
       >
         <component :is="item.icon" :size="16" :stroke-width="1.75" />

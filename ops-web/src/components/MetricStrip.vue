@@ -16,7 +16,7 @@ defineProps<{ items: MetricStripItem[]; label?: string }>();
 </script>
 
 <template>
-  <section class="metric-strip" :aria-label="label || '关键指标'">
+  <section class="metric-strip" :style="{ '--metric-columns': Math.max(1, Math.min(items.length, 5)) }" :aria-label="label || '关键指标'">
     <component
       :is="item.to ? RouterLink : 'div'"
       v-for="item in items"

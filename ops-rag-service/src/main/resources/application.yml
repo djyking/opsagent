@@ -56,7 +56,8 @@ ops:
     provider: ${OPS_AI_PROVIDER:deepseek}
     timeout-seconds: ${OPS_AI_TIMEOUT_SECONDS:90}
     maximum-attempts: ${OPS_AI_MAX_ATTEMPTS:3}
-    max-output-tokens: ${OPS_AI_MAX_OUTPUT_TOKENS:1200}
+    max-output-tokens: ${OPS_AI_MAX_OUTPUT_TOKENS:4096}
+    maximum-continuations: ${OPS_AI_MAX_CONTINUATIONS:2}
     providers:
       openai:
         base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}

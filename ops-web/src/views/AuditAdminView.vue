@@ -15,6 +15,7 @@ import InlineError from "@/components/InlineError.vue";
 import LoadingState from "@/components/LoadingState.vue";
 import { businessTypeLabel, operationLabel } from "@/ui/status-map";
 import { formatDateTime, formatShortDateTime } from "@/utils/datetime";
+import { usePageFeedback } from "@/composables/usePageFeedback";
 
 const audits = ref<PageResponse<OperationLog>>({
   records: [],
@@ -25,6 +26,7 @@ const audits = ref<PageResponse<OperationLog>>({
 const page = ref(1);
 const loading = ref(false);
 const error = ref("");
+const toast = usePageFeedback(error, load);
 const bizId = ref("");
 const operation = ref("");
 const selected = ref<OperationLog>();
@@ -60,7 +62,9 @@ function formatContent(content: string) {
 }
 async function copyPayload() {
   if (!selected.value) return;
-  await navigator.clipboard.writeText(formatContent(selected.value.content));
+  try { await navigator.clipboard.writeText(formatContent(selected.value.content)); }
+  catch { error.value = "复制失败，请检查浏览器剪贴板权限"; return; }
+  toast.show("审计内容已复制");
   payloadCopied.value = true;
   window.setTimeout(() => (payloadCopied.value = false), 1200);
 }
@@ -68,11 +72,12 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="stack-page">
+  <div class="stack-page audit-page">
     <PageHeader title="操作审计" description="审阅工单、值班与配置项等关键业务操作">
       <template #actions><button class="button secondary" :disabled="loading" @click="load"><RefreshCw :size="16" />{{ loading ? "刷新中…" : "刷新" }}</button></template>
     </PageHeader>
-    <ListSurface>
+    <ListSurface class="audit-surface">
+      <template #header><div><h3>操作记录</h3><p>按业务对象、操作人与时间核对过程</p></div><span class="panel-count">{{ audits.total }} 条记录</span></template>
       <template #toolbar><FilterBar>
       <form class="audit-filter" @submit.prevent="search">
         <label>工单 ID<input v-model="bizId" inputmode="numeric" placeholder="例如 2000" /></label>
@@ -84,7 +89,7 @@ onMounted(load);
     <LoadingState v-if="loading && !audits.records.length" text="正在加载审计记录…" />
     <EmptyState v-else-if="!audits.records.length" title="暂无审计记录" description="符合当前筛选条件的操作会显示在这里" :icon="ClipboardList" />
 
-        <table v-else class="audit-table">
+        <div v-else class="responsive-table" role="region" aria-label="操作审计列表" tabindex="0"><table class="audit-table">
           <thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>业务对象</th><th>服务</th><th>Trace ID</th><th></th></tr></thead>
           <tbody>
             <tr v-for="item in audits.records" :key="item.id" tabindex="0" @click="selected = item" @keydown.enter="selected = item">
@@ -93,11 +98,11 @@ onMounted(load);
               <td><strong :title="item.operationType">{{ operationLabel(item.operationType) }}</strong></td>
               <td><span :title="item.bizType">{{ businessTypeLabel(item.bizType) }}</span> <span class="mono">#{{ item.bizId }}</span></td>
               <td>{{ item.serviceName }}</td>
-              <td class="mono trace-cell">{{ item.traceId || "未记录" }}</td>
+              <td class="mono trace-cell"><span :title="item.traceId || undefined">{{ item.traceId || "未记录" }}</span></td>
               <td><div class="row-actions reveal-on-row"><button class="icon-button" title="查看事件详情" @click.stop="selected = item"><Eye :size="17" /></button><button v-if="item.bizType === 'TICKET'" class="icon-button" title="进入对应工单" @click.stop="router.push(`/tickets/${item.bizId}`)"><ExternalLink :size="17" /></button></div></td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       <template #footer>
       <PaginationBar
         v-if="audits.total"

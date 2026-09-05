@@ -32,6 +32,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityAutoConfiguration {
     @Bean
+    @ConditionalOnMissingBean(MethodSecurityExceptionHandler.class)
+    MethodSecurityExceptionHandler methodSecurityExceptionHandler() {
+        return new MethodSecurityExceptionHandler();
+    }
+
+    @Bean
     JwtService jwtService(JwtProperties p) {
         return new JwtService(p);
     }

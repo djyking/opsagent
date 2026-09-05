@@ -1,3 +1,12 @@
+.sla-table { min-width: 1040px; }
+.sla-table td { height: 66px; }
+.sla-table .table-title { max-width: 400px; gap: 4px; }
+.sla-table .table-title strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.sla-table .table-title span { font-family: var(--oa-font-mono); font-size: 11px; }
+.sla-page-footer { width: 100%; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; }
+.sla-page-footer > label { display: flex; align-items: center; gap: 8px; color: var(--oa-text-secondary); font-size: var(--oa-font-size-xs); white-space: nowrap; }
+.sla-page-footer select { width: 88px; height: var(--oa-control-small); }
+.sla-page-footer .pagination { gap: 16px; }
 .sla-detail-card dl {
   display: grid;
     gap: 1px;
@@ -27,8 +36,8 @@
 }
 
 .sla-controls {
-  min-height: 60px;
-  padding: 12px;
+  min-height: 74px;
+  padding: 16px 20px;
   display: grid;
   grid-template-columns: auto 160px 160px minmax(260px, 1fr);
   align-items: center;
@@ -58,7 +67,7 @@
   padding-left: 32px;
 }
 
-.priority-indicator, .sla-state {
+.sla-state {
   display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -91,7 +100,7 @@
 
 .escalation-level {
   color: var(--oa-text-tertiary);
-    font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+    font: var(--oa-font-size-xs) var(--oa-font-mono);
 }
 
 @media (max-width: 1100px) {

@@ -12,12 +12,14 @@ defineEmits<{ change: [page: number] }>();
     <div>
       <button
         class="icon-button"
+        aria-label="上一页"
         :disabled="page <= 1"
         @click="$emit('change', page - 1)"
       >
         <ChevronLeft :size="18" /></button
       ><button
         class="icon-button"
+        aria-label="下一页"
         :disabled="page * pageSize >= total"
         @click="$emit('change', page + 1)"
       >

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
+import { useDialogFocus } from "@/composables/useDialogFocus";
+const dialogRoot = ref<HTMLElement>();
+useDialogFocus(dialogRoot);
 import { X } from "@lucide/vue";
 defineProps<{ title: string; description?: string; wide?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
@@ -17,6 +20,9 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKeydown));
     <div class="modal-backdrop" @click.self="close">
       <section
         class="modal"
+        ref="dialogRoot"
+        data-motion
+        :aria-label="title"
         :class="{ 'modal-wide': wide }"
         role="dialog"
         aria-modal="true"
