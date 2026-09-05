@@ -1,0 +1,10 @@
+.env
+secret.env
+server.env
+secrets/*
+!secrets/.gitkeep
+runtime/*
+!runtime/.gitkeep
+config/nginx/active.conf
+!README.md
+!DEPLOYMENT_REPORT.md

@@ -67,7 +67,7 @@ public class MonitoringService {
         grafana.put("url", grafanaPublicUrl);
         grafana.put(
                 "dashboardUrl",
-                grafanaPublicUrl + "/d/opsagent-overview/opsagent-overview");
+                publicLink(grafanaPublicUrl, "/d/opsagent-overview/opsagent-overview"));
         try {
             JsonNode health = get(grafanaUrl + "/api/health");
             grafana.put("healthy", "ok".equalsIgnoreCase(health.path("database").asText()));
@@ -80,7 +80,7 @@ public class MonitoringService {
         long up = services.stream().filter(item -> "up".equals(item.get("health"))).count();
         Map<String, Object> prometheus = new LinkedHashMap<>();
         prometheus.put("url", prometheusPublicUrl);
-        prometheus.put("targetsUrl", prometheusPublicUrl + "/targets");
+        prometheus.put("targetsUrl", publicLink(prometheusPublicUrl, "/targets"));
         prometheus.put("healthy", prometheusError == null);
         prometheus.put("targetCount", services.size());
         prometheus.put("upCount", up);
@@ -105,5 +105,10 @@ public class MonitoringService {
             throw new IllegalStateException("HTTP " + response.statusCode());
         }
         return json.readTree(response.body());
+    }
+
+    static String publicLink(String baseUrl, String path) {
+        if (baseUrl == null || baseUrl.isBlank()) return "";
+        return baseUrl.replaceAll("/+$", "") + path;
     }
 }

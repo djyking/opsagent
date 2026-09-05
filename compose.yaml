@@ -33,7 +33,7 @@ x-java-service: &java-service
     qdrant:
       condition: service_healthy
     nacos:
-      condition: service_started
+      condition: service_healthy
     sentinel:
       condition: service_started
 
@@ -85,6 +85,14 @@ services:
       - "8848:8848"
       - "9848:9848"
       - "8849:8080"
+    volumes:
+      - nacos-data:/home/nacos/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8848/nacos/v3/admin/core/state/readiness | grep -q '\"code\":0'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
 
   sentinel:
     image: eclipse-temurin:17-jre-jammy
@@ -97,6 +105,8 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
+    # Keep the node identity stable so container recreation reuses the same Mnesia data.
+    hostname: ${OPS_RABBITMQ_HOSTNAME:-opsagent-rabbitmq}
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${OPS_RABBITMQ_USERNAME:-opsagent}
@@ -396,6 +406,7 @@ services:
       start_period: 5m
 
 volumes:
+  nacos-data:
   mysql-data:
   redis-data:
   rabbitmq-data:

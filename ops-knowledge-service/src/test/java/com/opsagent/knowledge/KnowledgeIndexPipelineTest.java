@@ -79,7 +79,7 @@ class KnowledgeIndexPipelineTest {
                 "operation", "INDEX",
                 "document_id", 1001L,
                 "document_version", 3));
-        when(repository.claimIndexTask(9L)).thenReturn(1);
+        when(repository.claimIndexTask(9L, 3)).thenReturn(1);
         when(repository.validDocumentVersion(1001L, 3)).thenReturn(true);
         KnowledgeIndexCompensationService service = new KnowledgeIndexCompensationService(
                 repository,
@@ -91,7 +91,7 @@ class KnowledgeIndexPipelineTest {
         assertThat(service.process(9L)).isEqualTo("SUCCESS");
 
         verify(indexService).indexDocument(1001L);
-        verify(repository).indexTaskSuccess(9L);
+        verify(repository).indexTaskSuccess(9L, 3);
     }
 
     @Test
@@ -100,12 +100,12 @@ class KnowledgeIndexPipelineTest {
         KnowledgeIndexService index = mock(KnowledgeIndexService.class);
         when(repository.indexTask(8L)).thenReturn(Map.of("status", "RETRYING", "operation", "INDEX",
                 "document_id", 1035L, "document_version", 1));
-        when(repository.claimIndexTask(8L)).thenReturn(1);
+        when(repository.claimIndexTask(8L, 1)).thenReturn(1);
         when(repository.validDocumentVersion(1035L, 1)).thenReturn(false);
         var service = new KnowledgeIndexCompensationService(repository, mock(ElasticsearchVectorStore.class),
                 mock(QdrantVectorStore.class), index, new SimpleMeterRegistry());
         assertThat(service.process(8L)).isEqualTo("FAILED");
-        verify(repository).indexTaskObsolete(8L);
+        verify(repository).indexTaskObsolete(8L, 1);
         org.mockito.Mockito.verifyNoInteractions(index);
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).indexTaskFailure(
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),

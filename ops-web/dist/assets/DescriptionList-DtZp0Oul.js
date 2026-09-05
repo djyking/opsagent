@@ -1,0 +1,1 @@
+import{_ as e}from"./_plugin-vue_export-helper-DlAUqK2U.js";import{k as o,b as t,P as r}from"./index-UkUAKKhm.js";const c={},n={class:"oa-description-list"};function a(s,i){return o(),t("dl",n,[r(s.$slots,"default")])}const d=e(c,[["render",a]]);export{d as D};

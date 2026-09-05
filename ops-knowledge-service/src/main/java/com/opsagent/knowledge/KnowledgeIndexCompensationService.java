@@ -49,33 +49,38 @@ public class KnowledgeIndexCompensationService {
             return "NOT_FOUND";
         }
         String status = text(task, "status");
-        if ("SUCCESS".equals(status)) {
+        if ("SUCCESS".equals(status) || "FAILED".equals(status)) {
             return status;
         }
-        if (repository.claimIndexTask(taskId) == 0) {
+        String operation = text(task, "operation");
+        Integer version = "INDEX".equals(operation)
+                ? (int) number(task, "document_version", "documentVersion") : null;
+        if (repository.claimIndexTask(taskId, version) == 0) {
             Map<String, Object> current = repository.indexTask(taskId);
             return current == null ? "NOT_FOUND" : text(current, "status");
         }
         long documentId = number(task, "document_id", "documentId");
-        String operation = text(task, "operation");
         try {
             if ("DELETE".equals(operation)) {
                 vectorStore.deleteDocument(documentId);
                 qdrantStore.deleteDocument(documentId);
             } else if ("INDEX".equals(operation)) {
-                int version = (int) number(task, "document_version", "documentVersion");
                 if (!repository.validDocumentVersion(documentId, version)) {
-                    repository.indexTaskObsolete(taskId);
+                    repository.indexTaskObsolete(taskId, version);
                     return "FAILED";
                 }
                 indexService.indexDocument(documentId);
             } else {
                 throw new IllegalStateException("未知索引补偿操作：" + operation);
             }
-            repository.indexTaskSuccess(taskId);
+            repository.indexTaskSuccess(taskId, version);
             return "SUCCESS";
         } catch (RuntimeException exception) {
-            repository.indexTaskFailure(taskId, exception.getMessage(), MAXIMUM_ATTEMPTS);
+            if (version == null) {
+                repository.indexTaskFailure(taskId, exception.getMessage(), MAXIMUM_ATTEMPTS);
+            } else {
+                repository.indexTaskFailure(taskId, version, exception.getMessage(), MAXIMUM_ATTEMPTS);
+            }
             metrics.counter("rag.index.retry", "operation", operation).increment();
             LOG.warn("知识索引补偿暂时失败，taskId={}，将按退避策略重试", taskId);
             return text(repository.indexTask(taskId), "status");

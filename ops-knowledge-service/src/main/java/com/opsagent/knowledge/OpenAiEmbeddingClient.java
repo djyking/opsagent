@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -26,6 +29,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Component
 public class OpenAiEmbeddingClient implements EmbeddingClient {
+    private static final Logger LOG = LoggerFactory.getLogger(OpenAiEmbeddingClient.class);
     private static final int MAXIMUM_ATTEMPTS = 3;
     private final VectorProperties properties;
     private final MeterRegistry metrics;
@@ -88,6 +92,9 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
             return result;
         } catch (RuntimeException exception) {
             metrics.counter("rag.embedding.request", "status", "failure").increment();
+            LOG.warn("Embedding request failed: exceptionType={}, rootCauseType={}",
+                    exception.getClass().getSimpleName(),
+                    NestedExceptionUtils.getMostSpecificCause(exception).getClass().getSimpleName());
             throw exception;
         } finally {
             metrics.timer("rag.embedding.duration")

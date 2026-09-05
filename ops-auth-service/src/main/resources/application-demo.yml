@@ -1,0 +1,15 @@
+# Low-concurrency demo resource budget. Activate with SPRING_PROFILES_ACTIVE=demo.
+# Standard Spring environment variables can override every setting below.
+server:
+  tomcat:
+    threads:
+      min-spare: 2
+      max: 32
+    max-connections: 256
+    accept-count: 64
+spring:
+  datasource:
+    hikari:
+      minimum-idle: 1
+      maximum-pool-size: 5
+      idle-timeout: 60000

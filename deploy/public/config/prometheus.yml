@@ -1,0 +1,42 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+rule_files:
+  - /etc/prometheus/opsagent-alerts.yml
+
+scrape_configs:
+  - job_name: opsagent-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ops-gateway-app:18080"]
+
+  - job_name: opsagent-auth
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ops-auth-app:8101"]
+
+  - job_name: opsagent-ticket
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ops-ticket-app:8102"]
+
+  - job_name: opsagent-knowledge
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ops-knowledge-app:8103"]
+
+  - job_name: opsagent-rag
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ops-rag-app:8104"]
+
+  - job_name: opsagent-platform
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ops-platform-app:8105"]

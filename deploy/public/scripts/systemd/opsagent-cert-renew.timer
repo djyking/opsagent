@@ -1,0 +1,11 @@
+[Unit]
+Description=Check OpsAgent TLS renewal twice daily
+
+[Timer]
+OnCalendar=*-*-* 00,12:15:00 UTC
+RandomizedDelaySec=1h
+Persistent=true
+Unit=opsagent-cert-renew.service
+
+[Install]
+WantedBy=timers.target

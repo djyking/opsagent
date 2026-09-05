@@ -53,6 +53,10 @@ ops:
     max-chunks-per-document: ${OPS_RAG_MAX_CHUNKS_PER_DOCUMENT:3}
     neighbor-window: ${OPS_RAG_NEIGHBOR_WINDOW:1}
   ai:
+    budget:
+      enabled: ${OPS_AI_BUDGET_ENABLED:false}
+      maximum-concurrent: ${OPS_AI_MAX_CONCURRENT:2}
+      requests-per-day: ${OPS_AI_REQUESTS_PER_DAY:100}
     enabled: ${OPS_AI_ENABLED:false}
     provider: ${OPS_AI_PROVIDER:deepseek}
     timeout-seconds: ${OPS_AI_TIMEOUT_SECONDS:90}

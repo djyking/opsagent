@@ -1,0 +1,14 @@
+apiVersion: 1
+
+deleteDatasources:
+  - name: OpsAgent Prometheus
+    orgId: 1
+
+datasources:
+  - name: OpsAgent Prometheus
+    uid: opsagent-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

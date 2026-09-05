@@ -8,6 +8,7 @@ import com.opsagent.common.security.*;
 
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,9 @@ public class AuthService {
     private final PasswordEncoder encoder;
     private final JwtService jwt;
     private final CaptchaService captcha;
+
+    @Value("${ops.auth.registration-enabled:true}")
+    private boolean registrationEnabled = true;
 
     AuthService(
             UserMapper users,
@@ -56,6 +60,9 @@ public class AuthService {
 
     @Transactional
     void register(RegisterRequest request) {
+        if (!registrationEnabled) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "当前环境未开放注册，请使用已分配的账号登录");
+        }
         if (request.password().getBytes(StandardCharsets.UTF_8).length > 72) {
             throw new BusinessException(ErrorCode.VALIDATION, "密码的 UTF-8 编码不能超过 72 字节");
         }
@@ -87,8 +94,14 @@ public class AuthService {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Refresh Token 无效或已过期");
         refreshTokens.revoke(hash);
         User u = users.selectById(userId);
-        if (u == null) throw new BusinessException(ErrorCode.UNAUTHENTICATED, "用户不存在");
+        if (u == null || !"enable".equalsIgnoreCase(u.getStatus()) || !Integer.valueOf(0).equals(u.getDeleted())) {
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED, "账号不可用，请重新登录或联系管理员");
+        }
         return issue(u);
+    }
+
+    boolean registrationEnabled() {
+        return registrationEnabled;
     }
 
     @Transactional

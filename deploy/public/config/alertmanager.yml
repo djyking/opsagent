@@ -1,0 +1,19 @@
+global:
+  resolve_timeout: 2m
+
+route:
+  receiver: opsagent-webhook
+  group_by: [alertname, service]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 4h
+
+receivers:
+  - name: opsagent-webhook
+    webhook_configs:
+      - url: http://ops-gateway-app:18080/api/integrations/alertmanager/webhook
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/opsagent-webhook-token

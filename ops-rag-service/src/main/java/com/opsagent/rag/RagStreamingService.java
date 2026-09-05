@@ -1,5 +1,7 @@
 package com.opsagent.rag;
 
+import com.opsagent.common.core.BusinessException;
+
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -9,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -66,13 +69,22 @@ public class RagStreamingService {
         emitter.onCompletion(() -> {
             if (settled.compareAndSet(false, true)) notifyError.accept("连接已关闭，回答未完成。");
         });
-        executor.execute(() -> run(emitter, plan, context, onComplete, notifyError, settled));
+        try {
+            executor.execute(() -> run(emitter, plan, context, onComplete, notifyError, settled));
+        } catch (RejectedExecutionException exception) {
+            settled.set(true);
+            String message = "当前问答人数较多，请稍后重试。";
+            notifyError.accept(message);
+            sendError(emitter, message);
+        }
         return emitter;
     }
 
     SseEmitter error(String message) {
         SseEmitter emitter = new SseEmitter(10_000L);
-        executor.execute(() -> sendError(emitter, message));
+        // SseEmitter buffers this short error until MVC attaches the response handler.
+        // Reporting a rejected request must not need another worker from the saturated pool.
+        sendError(emitter, message);
         return emitter;
     }
 
@@ -105,6 +117,10 @@ public class RagStreamingService {
             onError.accept("连接中断，回答未完成。");
             emitter.complete();
         } catch (AiProviderException exception) {
+            settled.set(true);
+            onError.accept(exception.getMessage());
+            sendError(emitter, exception.getMessage());
+        } catch (BusinessException exception) {
             settled.set(true);
             onError.accept(exception.getMessage());
             sendError(emitter, exception.getMessage());

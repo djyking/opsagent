@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ArrowLeft, UserPlus, Eye, EyeOff } from "@lucide/vue";
 import { authApi } from "@/api/modules";
@@ -14,8 +14,15 @@ const showConfirmPassword = ref(false);
 const error = ref("");
 const toast = usePageFeedback(error);
 const busy = ref(false);
+const registrationEnabled = ref(false);
+const featuresLoading = ref(true);
+onMounted(async () => {
+  try { registrationEnabled.value = (await authApi.features()).registrationEnabled; }
+  catch { error.value = "暂时无法确认注册状态，请稍后重试"; }
+  finally { featuresLoading.value = false; }
+});
 async function submit() {
-  if (busy.value) return;
+  if (busy.value || !registrationEnabled.value) return;
   if (form.value.password !== form.value.confirm) {
     error.value = "两次输入的密码不一致";
     return;
@@ -41,7 +48,7 @@ async function submit() {
   <main class="register-page">
     <AuthBrandPanel />
     <section class="auth-panel register-panel">
-      <form class="auth-card register-card" @submit.prevent="submit">
+      <form v-if="registrationEnabled" class="auth-card register-card" @submit.prevent="submit">
         <div>
           <button
             type="button"
@@ -114,6 +121,11 @@ async function submit() {
           <UserPlus :size="18" />创建账号
         </ActionButton>
       </form>
+      <div v-else class="auth-card register-card">
+        <h2>{{ featuresLoading ? '正在确认注册状态' : '使用已有账号登录' }}</h2>
+        <p>{{ error || (featuresLoading ? '请稍候…' : '当前环境未开放注册，请联系管理员获取账号。') }}</p>
+        <RouterLink to="/login" class="button secondary"><ArrowLeft :size="16" />返回登录</RouterLink>
+      </div>
     </section>
   </main>
 </template>

@@ -34,6 +34,12 @@ public class AuthController {
         return ApiResponse.success(captcha.issue(request.getRemoteAddr()));
     }
 
+    @GetMapping("/features")
+    ApiResponse<java.util.Map<String, Boolean>> features(HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
+        return ApiResponse.success(java.util.Map.of("registrationEnabled", service.registrationEnabled()));
+    }
+
     @PostMapping("/login")
     ApiResponse<TokenResponse> login(@Valid @RequestBody LoginRequest r) {
         return ApiResponse.success(service.login(r));

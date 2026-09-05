@@ -1,0 +1,14 @@
+[Unit]
+Description=Renew OpsAgent TLS certificates and reload its existing Nginx
+Requires=docker.service
+Wants=network-online.target
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/opt/opsagent/deploy/public
+ExecStart=/usr/bin/bash /opt/opsagent/deploy/public/scripts/renew-certificates.sh
+TimeoutStartSec=15min

@@ -13,6 +13,8 @@ import jakarta.servlet.AsyncEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -100,6 +102,54 @@ class RagStreamingServiceTest {
         properties.setMaximumAttempts(3);
         properties.setMaximumContinuations(2);
         assertThat(properties.streamTimeoutMillis()).isEqualTo(846000L);
+    }
+
+    @Test
+    void shouldReturnSseErrorAndPersistFailureWhenDemoWorkersAreBusy() throws Exception {
+        var executor = new RagStreamConfiguration().ragStreamExecutor(2, 8, 0, 30, true);
+        executor.initialize();
+        CountDownLatch startedWorkers = new CountDownLatch(8);
+        CountDownLatch releaseWorkers = new CountDownLatch(1);
+        List<String> errors = new ArrayList<>();
+        List<RagService.Answer> saved = new ArrayList<>();
+        try {
+            for (int i = 0; i < 8; i++) {
+                executor.execute(() -> {
+                    startedWorkers.countDown();
+                    try { releaseWorkers.await(10, TimeUnit.SECONDS); }
+                    catch (InterruptedException exception) { Thread.currentThread().interrupt(); }
+                });
+            }
+            assertThat(startedWorkers.await(5, TimeUnit.SECONDS)).isTrue();
+            MockMvc mvc = mvc(executor, saved::add, errors::add);
+            MvcResult started = mvc.perform(get("/test-stream"))
+                    .andExpect(request().asyncStarted()).andReturn();
+            String body = mvc.perform(asyncDispatch(started)).andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+
+            assertThat(body).contains("event:error").doesNotContain("event:done");
+            assertThat(errors).containsExactly("当前问答人数较多，请稍后重试。");
+            assertThat(saved).isEmpty();
+            verifyNoInteractions(rag);
+        } finally {
+            releaseWorkers.countDown();
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    void shouldDeliverImmediateErrorWithoutSchedulingAnotherWorker() throws Exception {
+        Executor rejecting = command -> { throw new AssertionError("Error delivery must not occupy a worker"); };
+        RagStreamingService streaming = new RagStreamingService(rag, properties, rejecting);
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(new StreamController(
+                () -> streaming.error("请求过于频繁，请稍后重试。"))).build();
+        MvcResult started = mvc.perform(get("/test-stream"))
+                .andExpect(request().asyncStarted()).andReturn();
+        String body = mvc.perform(asyncDispatch(started)).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).contains("event:error").doesNotContain("event:done");
+        verifyNoInteractions(rag);
     }
 
     private void stubAnswer() {

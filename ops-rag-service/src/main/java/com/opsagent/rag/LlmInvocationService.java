@@ -26,14 +26,17 @@ public class LlmInvocationService {
     private final LlmClientRouter router;
     private final MeterRegistry registry;
     private final AiUsageRepository usageRepository;
+    private final AiBudgetGuard budget;
 
     LlmInvocationService(
             LlmClientRouter router,
             MeterRegistry registry,
-            AiUsageRepository usageRepository) {
+            AiUsageRepository usageRepository,
+            AiBudgetGuard budget) {
         this.router = router;
         this.registry = registry;
         this.usageRepository = usageRepository;
+        this.budget = budget;
     }
 
     Invocation invoke(String question, LlmRequest request) {
@@ -50,7 +53,7 @@ public class LlmInvocationService {
             LlmRequest request,
             AuditContext context) {
         long started = System.nanoTime();
-        try {
+        try (AiBudgetGuard.Permit permit = budget.acquire()) {
             LlmResult result = client.generate(request);
             long latency = elapsedMillis(started);
             record(client, question, result, latency, result.generationComplete(),
@@ -75,7 +78,7 @@ public class LlmInvocationService {
             AuditContext context) {
         LlmClient client = router.selected();
         long started = System.nanoTime();
-        try {
+        try (AiBudgetGuard.Permit permit = budget.acquire()) {
             LlmResult result = client.stream(request, onDelta);
             long latency = elapsedMillis(started);
             record(client, question, result, latency, result.generationComplete(),

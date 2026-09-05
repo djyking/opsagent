@@ -36,6 +36,7 @@ const busy = ref(false);
 const succeeded = ref(false);
 const toast = useToast();
 const formFocused = ref(false);
+const registrationEnabled = ref(false);
 function onFormFocusOut(event: FocusEvent) {
   formFocused.value = (event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null);
 }
@@ -81,6 +82,10 @@ async function submit() {
   }
 }
 onMounted(refreshCaptcha);
+onMounted(async () => {
+  try { registrationEnabled.value = (await authApi.features()).registrationEnabled; }
+  catch { registrationEnabled.value = false; }
+});
 onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); });
 </script>
 <template>
@@ -137,7 +142,8 @@ onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); });
         <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
         <ActionButton class="primary auth-submit" :disabled="captchaLoading || !captchaId || captchaExpired" :loading="busy && !succeeded" :success="succeeded" loading-text="正在验证…" success-text="登录成功">进入工作台 <ArrowRight :size="18" /></ActionButton>
         <p class="auth-switch">
-          还没有账号？<RouterLink to="/register">创建账号</RouterLink>
+          <template v-if="registrationEnabled">还没有账号？<RouterLink to="/register">创建账号</RouterLink></template>
+          <template v-else>请使用已分配的账号登录</template>
         </p>
       </form>
     </section>

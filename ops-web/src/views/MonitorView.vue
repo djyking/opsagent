@@ -49,12 +49,12 @@ onMounted(load);
       <section class="monitor-overview" :class="{ 'has-attention': !targetsHealthy }" aria-label="采集状态概况">
         <span class="monitor-overview-icon"><ShieldCheck v-if="targetsHealthy" :size="26" /><Activity v-else :size="26" /></span>
         <div><span class="monitor-eyebrow">服务可观测性</span><h3>{{ targetSummary }}</h3><p>这里显示指标端点的可抓取性；业务请求、资源用量与历史趋势在 Grafana 中查看。</p></div>
-        <a class="button secondary" :href="summary.grafana.dashboardUrl" target="_blank" rel="noopener noreferrer">打开指标看板 <ExternalLink :size="14" /></a>
+        <a v-if="summary.grafana.dashboardUrl" class="button secondary" :href="summary.grafana.dashboardUrl" target="_blank" rel="noopener noreferrer">打开指标看板 <ExternalLink :size="14" /></a>
       </section>
       <MetricStrip :items="metrics" label="监控摘要" />
       <div class="monitor-workspace">
       <TableSurface class="monitor-service-surface">
-        <template #header><div><h3>服务采集状态</h3><p>Prometheus 最近一次抓取结果 · {{ summary.services.length }} 个目标</p></div><a class="text-button" :href="summary.prometheus.targetsUrl" target="_blank" rel="noopener noreferrer">检查目标 <ExternalLink :size="13" /></a></template>
+        <template #header><div><h3>服务采集状态</h3><p>Prometheus 最近一次抓取结果 · {{ summary.services.length }} 个目标</p></div><a v-if="summary.prometheus.targetsUrl" class="text-button" :href="summary.prometheus.targetsUrl" target="_blank" rel="noopener noreferrer">检查目标 <ExternalLink :size="13" /></a></template>
         <table v-if="summary.services.length" class="monitor-service-table"><thead><tr><th>服务</th><th>采集目标</th><th>状态</th><th>最近抓取</th></tr></thead><tbody>
           <tr v-for="item in summary.services" :key="item.job"><td><span class="service-primary"><Server :size="16" /><strong>{{ serviceNames[item.job] || item.job }}</strong></span><small v-if="item.lastError" class="service-error">{{ item.lastError }}</small></td><td><span class="table-title"><strong>{{ item.job }}</strong><code class="monitor-endpoint">{{ item.scrapeUrl || '未返回采集地址' }}</code></span></td><td><StatusBadge :value="item.health === 'up' ? 'ACTIVE' : 'WARNING'" /></td><td>{{ item.lastScrape ? new Date(item.lastScrape).toLocaleTimeString('zh-CN') : '—' }}</td></tr>
         </tbody></table>
@@ -62,8 +62,8 @@ onMounted(load);
         <template #footer><span class="monitor-scope-note">检查时间：{{ new Date(summary.checkedAt).toLocaleString('zh-CN') }} · 页面不会自动刷新</span></template>
       </TableSurface>
       <aside class="monitor-tools" aria-label="监控组件">
-        <article class="panel monitor-tool-card"><header><span class="monitor-tool-icon"><Activity :size="21" /></span><div><h3>Prometheus</h3><small>目标发现与指标采集</small></div><StatusBadge :value="summary.prometheus.healthy ? 'ACTIVE' : 'WARNING'" /></header><p :class="{ 'service-error': summary.prometheus.error }">{{ summary.prometheus.error || '查看每个目标的抓取结果，定位连接与采集错误。' }}</p><code>{{ summary.prometheus.url }}</code><a class="button secondary" :href="summary.prometheus.targetsUrl" target="_blank" rel="noopener noreferrer">检查采集目标 <ExternalLink :size="14" /></a></article>
-        <article class="panel monitor-tool-card"><header><span class="monitor-tool-icon grafana"><Gauge :size="21" /></span><div><h3>Grafana</h3><small>{{ summary.grafana.version ? `版本 ${summary.grafana.version}` : '指标与历史趋势' }}</small></div><StatusBadge :value="summary.grafana.healthy ? 'ACTIVE' : 'WARNING'" /></header><p :class="{ 'service-error': summary.grafana.error }">{{ summary.grafana.error || '关联请求、JVM 与资源使用变化，查看服务运行趋势。' }}</p><code>{{ summary.grafana.url }}</code><a class="button secondary" :href="summary.grafana.dashboardUrl" target="_blank" rel="noopener noreferrer">查看指标看板 <ExternalLink :size="14" /></a></article>
+        <article class="panel monitor-tool-card"><header><span class="monitor-tool-icon"><Activity :size="21" /></span><div><h3>Prometheus</h3><small>目标发现与指标采集</small></div><StatusBadge :value="summary.prometheus.healthy ? 'ACTIVE' : 'WARNING'" /></header><p :class="{ 'service-error': summary.prometheus.error }">{{ summary.prometheus.error || '查看每个目标的抓取结果，定位连接与采集错误。' }}</p><code v-if="summary.prometheus.url">{{ summary.prometheus.url }}</code><a v-if="summary.prometheus.targetsUrl" class="button secondary" :href="summary.prometheus.targetsUrl" target="_blank" rel="noopener noreferrer">检查采集目标 <ExternalLink :size="14" /></a></article>
+        <article class="panel monitor-tool-card"><header><span class="monitor-tool-icon grafana"><Gauge :size="21" /></span><div><h3>Grafana</h3><small>{{ summary.grafana.version ? `版本 ${summary.grafana.version}` : '指标与历史趋势' }}</small></div><StatusBadge :value="summary.grafana.healthy ? 'ACTIVE' : 'WARNING'" /></header><p :class="{ 'service-error': summary.grafana.error }">{{ summary.grafana.error || '关联请求、JVM 与资源使用变化，查看服务运行趋势。' }}</p><code v-if="summary.grafana.url">{{ summary.grafana.url }}</code><a v-if="summary.grafana.dashboardUrl" class="button secondary" :href="summary.grafana.dashboardUrl" target="_blank" rel="noopener noreferrer">查看指标看板 <ExternalLink :size="14" /></a></article>
       </aside>
       </div>
     </template>

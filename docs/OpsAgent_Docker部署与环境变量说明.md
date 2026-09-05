@@ -69,7 +69,9 @@ AI 开关开启而密钥为空时，只能返回知识原文片段。当前本�
 已启用本地 `BAAI/bge-reranker-v2-m3`。项目 `.env` 设置
 `OPS_RERANK_ENABLED=true`、`COMPOSE_PROFILES=apps,rerank`，确保常规 Compose 启动包含重排服务。
 本机 CPU 配置为：12 个检索候选、每个 query-passage 对最多 512 Token（超出截断）、
-batch size 8、4 个 PyTorch 线程、Java 重排请求超时 20 秒。
+基础配置为 batch size 8、4 个 PyTorch 线程、Java 重排请求超时 20 秒。
+低并发展示默认加载 `compose.demo.yaml`，覆盖为 batch size 2、2 个线程、推理并发 1、
+重排超时 60 秒，并设置各服务的 JVM、连接池和容器资源预算。
 对应变量为 `OPS_RAG_RETRIEVAL_CANDIDATES`、`OPS_RERANK_MAX_LENGTH`、
 `OPS_RERANK_BATCH_SIZE`、`OPS_RERANK_CPU_THREADS`、`OPS_RERANK_TIMEOUT_SECONDS`。
 
@@ -81,5 +83,20 @@ Micrometer 记录重排总耗时 20.77 秒 / 2 次，平均约 10.4 秒。此数
 检索当前使用 BM25，Embedding 未启用与重排是否生效是两个独立状态。
 
 重排运行参数可通过 `http://127.0.0.1:8010/health` 查看。密钥和本机配置仍由 Git 忽略。
+
+### 演示资源模式（2026-09-05）
+
+项目 `.env` / `.env.example` 使用 `COMPOSE_FILE=compose.yaml:compose.demo.yaml` 和
+`COMPOSE_PATH_SEPARATOR=:`，普通 `docker compose` 命令默认保留演示预算，Windows / Linux 一致。
+建议使用 `.\scripts\start-containers.ps1 -WithReranker` 启动；加 `-StandardResources`
+可通过显式 `-f compose.yaml` 切回基础配置。旧安装首次添加 Nacos 数据卷前应使用启动脚本，
+让它先停止、备份并迁移原容器内数据；不要直接重建仍未挂载持久化卷的旧 Nacos。
+
+已有 RabbitMQ 安装需保留当前容器 hostname 到 `.env` 的 `OPS_RABBITMQ_HOSTNAME`，
+以继续使用原 Mnesia 节点目录。本机已完成，新安装使用 `opsagent-rabbitmq` 固定主机名。
+
+本轮预热后容器工作集约 4.75 GiB，原约 9.70 GiB。选型仍需计入模型冷缓存和系统开销，
+不能按 Docker 工作集直接购买等量内存。完整参数、125 项后端测试与真实负载结果见
+[演示环境资源优化与验收](OpsAgent_演示环境资源优化与验收.md)。
 
 MySQL 是知识文档、Chunk、审核和任务状态的事实源。Elasticsearch 只负责 SmartCN/BM25；Qdrant 负责 cosine 向量、权限 Payload 与 kNN。Knowledge Service 同时写入两侧、同时清理两侧，并将两路检索结果以 RRF 融合。任一向量环节不可用时降级到 BM25，但监控会记录降级原因。

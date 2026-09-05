@@ -36,6 +36,7 @@ ops:
     access-token-ttl: 30m
     permit-all:
       - /api/auth/captcha
+      - /api/auth/features
       - /api/auth/login
       - /api/auth/register
       - /api/auth/refresh
@@ -43,6 +44,7 @@ ops:
       - /actuator/info
       - /actuator/prometheus
   auth:
+    registration-enabled: ${OPS_AUTH_REGISTRATION_ENABLED:true}
     captcha:
       peer-limit-per-minute: ${OPS_CAPTCHA_PEER_LIMIT:60}
       global-limit-per-minute: ${OPS_CAPTCHA_GLOBAL_LIMIT:1000}

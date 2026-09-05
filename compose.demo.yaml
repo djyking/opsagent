@@ -1,0 +1,171 @@
+# Low-concurrency demo budgets. Use together with compose.yaml; all services remain enabled.
+# Limits include JVM/native memory, and are ceilings rather than reserved RAM.
+x-demo-java: &demo-java
+  mem_limit: 768m
+  mem_reservation: 320m
+  cpus: 2.0
+  stop_grace_period: 45s
+
+x-demo-environment: &demo-environment
+  SPRING_PROFILES_INCLUDE: demo
+  MALLOC_ARENA_MAX: "2"
+  JAVA_TOOL_OPTIONS: >-
+    -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms64m -Xmx320m
+    -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=96m
+    -Dreactor.netty.ioWorkerCount=2
+    -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+    -Dio.netty.allocator.maxOrder=7
+
+services:
+  ops-auth-app:
+    <<: *demo-java
+    environment: *demo-environment
+  ops-ticket-app:
+    <<: *demo-java
+    environment: *demo-environment
+  ops-platform-app:
+    <<: *demo-java
+    environment: *demo-environment
+  ops-rag-app:
+    <<: *demo-java
+    mem_limit: 896m
+    environment:
+      <<: *demo-environment
+      # 12 x 512-token candidates took ~19s on 2 CPUs; leave room for shared-server contention.
+      OPS_RERANK_TIMEOUT_SECONDS: ${OPS_DEMO_RERANK_TIMEOUT_SECONDS:-60}
+  ops-knowledge-app:
+    <<: *demo-java
+    mem_limit: 1024m
+    environment:
+      <<: *demo-environment
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms64m -Xmx448m
+        -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=128m
+        -Dreactor.netty.ioWorkerCount=2
+        -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+        -Dio.netty.allocator.maxOrder=7
+  ops-gateway-app:
+    <<: *demo-java
+    environment:
+      <<: *demo-environment
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms64m -Xmx256m
+        -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=96m
+        -Dreactor.netty.ioWorkerCount=2
+        -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+        -Dio.netty.allocator.maxOrder=7
+
+  nacos:
+    mem_limit: 768m
+    mem_reservation: 384m
+    cpus: 2.0
+    stop_grace_period: 60s
+    environment:
+      JVM_XMS: "128m"
+      JVM_XMX: "384m"
+      JVM_XMN: ""
+      # Verified against Nacos 3.0.3 RemoteUtils/EnvUtil: 2 processors * 4 = 8 RPC workers.
+      # JAVA_OPT_EXT is appended AFTER -jar by this image; JVM flags belong here instead.
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC
+        -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m
+        -Dnacos.core.sys.basic.processors=2
+        -Dremote.executor.times.of.processors=4 -Dremote.executor.queue.size=256
+        -Dserver.tomcat.threads.min-spare=2 -Dserver.tomcat.threads.max=32
+        -Dserver.tomcat.max-connections=128
+        -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+
+  sentinel:
+    mem_limit: 512m
+    mem_reservation: 192m
+    cpus: 1.0
+    environment:
+      MALLOC_ARENA_MAX: "2"
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms32m -Xmx192m
+        -XX:ReservedCodeCacheSize=48m
+        -Dserver.tomcat.min-spare-threads=2 -Dserver.tomcat.max-threads=16
+
+  mysql:
+    mem_limit: 768m
+    mem_reservation: 256m
+    cpus: 2.0
+    stop_grace_period: 60s
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=50
+      - --table-open-cache=256
+      - --table-definition-cache=400
+      - --thread-cache-size=4
+      - --temptable-max-ram=64M
+    environment:
+      MALLOC_ARENA_MAX: "2"
+  redis:
+    mem_limit: 128m
+    mem_reservation: 32m
+    cpus: 1.0
+    # Preserve authentication, AOF and the existing noeviction policy for sessions/locks.
+  rabbitmq:
+    mem_limit: 384m
+    mem_reservation: 128m
+    cpus: 1.0
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2 +A 4"
+  elasticsearch:
+    mem_limit: 1536m
+    mem_reservation: 768m
+    cpus: 2.0
+    environment:
+      node.processors: "2"
+      MALLOC_ARENA_MAX: "2"
+      ES_JAVA_OPTS: >-
+        -Xms512m -Xmx512m -XX:ActiveProcessorCount=2 -XX:ReservedCodeCacheSize=96m
+  qdrant:
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 2.0
+    volumes:
+      - ./config/demo/qdrant.yaml:/qdrant/config/production.yaml:ro
+  reranker:
+    # Float32 model files alone are about 2.1 GiB. Budget for a cold host, not just hot-cache stats.
+    mem_limit: 3072m
+    mem_reservation: 768m
+    cpus: 2.0
+    environment:
+      RERANK_BATCH_SIZE: ${OPS_DEMO_RERANK_BATCH_SIZE:-2}
+      RERANK_CPU_THREADS: ${OPS_DEMO_RERANK_CPU_THREADS:-2}
+      RERANK_INTEROP_THREADS: "1"
+      RERANK_MAX_CONCURRENCY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      MALLOC_ARENA_MAX: "2"
+  grafana:
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 1.0
+    environment:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: "320MiB"
+  prometheus:
+    mem_limit: 256m
+    mem_reservation: 64m
+    cpus: 1.0
+    environment:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: "192MiB"
+  alertmanager:
+    mem_limit: 128m
+    mem_reservation: 32m
+    cpus: 1.0
+    environment:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: "80MiB"
+  ops-web-app:
+    mem_limit: 64m
+    mem_reservation: 16m
+    cpus: 1.0
+    environment:
+      NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"

@@ -56,7 +56,8 @@ interface StreamPayload {
   metadata?: RagStreamResult["metadata"];
 }
 
-const FIRST_TOKEN_TIMEOUT_MS = 30_000;
+const RETRIEVAL_TIMEOUT_MS = 90_000;
+const GENERATION_FIRST_TOKEN_TIMEOUT_MS = 90_000;
 
 export async function streamRagAnswer(
   data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string },
@@ -64,16 +65,31 @@ export async function streamRagAnswer(
   signal?: AbortSignal,
 ): Promise<RagStreamResult> {
   const controller = new AbortController();
-  const abort = () => controller.abort();
-  signal?.addEventListener("abort", abort, { once: true });
-  if (signal?.aborted) controller.abort();
   let receivedToken = false;
   let retrievalOnly = false;
-  let timeoutTriggered = false;
-  const firstTokenTimer = window.setTimeout(() => {
-    timeoutTriggered = true;
+  let generationStarted = false;
+  let timeoutStage: "retrieval" | "generation" | undefined;
+  let firstContentTimer: number | undefined;
+  const clearFirstContentTimer = () => {
+    if (firstContentTimer !== undefined) window.clearTimeout(firstContentTimer);
+    firstContentTimer = undefined;
+  };
+  const waitForFirstContent = (stage: "retrieval" | "generation") => {
+    clearFirstContentTimer();
+    firstContentTimer = window.setTimeout(() => {
+      firstContentTimer = undefined;
+      if (controller.signal.aborted) return;
+      timeoutStage = stage;
+      controller.abort();
+    }, stage === "retrieval" ? RETRIEVAL_TIMEOUT_MS : GENERATION_FIRST_TOKEN_TIMEOUT_MS);
+  };
+  const abort = () => {
+    clearFirstContentTimer();
     controller.abort();
-  }, FIRST_TOKEN_TIMEOUT_MS);
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) controller.abort();
+  else waitForFirstContent("retrieval");
 
   try {
     const baseUrl = String(import.meta.env.VITE_API_BASE_URL || "").replace(
@@ -121,22 +137,26 @@ export async function streamRagAnswer(
         const payload = event.payload;
         if (event.name === "status") {
           retrievalOnly = payload.phase === "retrieval-only" || payload.phase === "cmdb";
+          if (payload.phase === "generating" && !generationStarted && !receivedToken && !controller.signal.aborted) {
+            generationStarted = true;
+            waitForFirstContent("generation");
+          }
           handlers.onStatus?.(
             payload.phase === "cmdb" ? "正在读取服务目录" : payload.phase === "generating"
-              ? "知识检索已完成，正在等待模型返回首段内容（最长 30 秒）"
+              ? "知识检索已完成，正在等待模型返回首段内容"
               : retrievalOnly ? "正在返回参考资料" : "正在处理请求",
           );
         } else if (event.name === "token") {
           if (!receivedToken) {
             receivedToken = true;
-            window.clearTimeout(firstTokenTimer);
+            clearFirstContentTimer();
             handlers.onStatus?.(retrievalOnly ? "正在返回查询结果" : "正在生成回答");
           }
           await handlers.onToken?.(String(payload.delta || ""));
         } else if (event.name === "sources") {
           handlers.onSources?.(normalizeReferences(payload.references));
         } else if (event.name === "done") {
-          window.clearTimeout(firstTokenTimer);
+          clearFirstContentTimer();
           result = {
             answer: String(payload.answer || ""),
             references: normalizeReferences(payload.references),
@@ -154,15 +174,18 @@ export async function streamRagAnswer(
     if (!result) throw new Error("流式问答连接提前结束，请重试");
     return result;
   } catch (cause) {
-    if (timeoutTriggered) {
-      throw new Error("30 秒内未收到模型回答，请稍后重试或联系管理员检查 AI 服务状态");
+    if (timeoutStage === "retrieval") {
+      throw new Error("知识检索或请求准备超过 90 秒，请稍后重试");
+    }
+    if (timeoutStage === "generation") {
+      throw new Error("模型在 90 秒内未返回首段内容，请稍后重试或联系管理员检查 AI 服务状态");
     }
     if (cause instanceof DOMException && cause.name === "AbortError") {
       throw new Error("问答请求已取消");
     }
     throw cause;
   } finally {
-    window.clearTimeout(firstTokenTimer);
+    clearFirstContentTimer();
     signal?.removeEventListener("abort", abort);
     controller.abort();
   }

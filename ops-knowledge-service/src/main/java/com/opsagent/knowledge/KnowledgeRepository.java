@@ -5,10 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsagent.common.mq.DocumentIndexRequested;
 import com.opsagent.common.mq.DomainEvent;
 import com.opsagent.common.mq.MqNames;
+import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.core.ErrorCode;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.*;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.*;
 import java.time.Instant;
@@ -142,6 +145,31 @@ public class KnowledgeRepository {
         return Objects.requireNonNull(holder.getKey()).longValue();
     }
 
+    @Transactional
+    public ParseReservation reserveParseTask(long documentId, long userId, boolean administrator) {
+        List<Map<String, Object>> documents = jdbc.queryForList(
+                "SELECT create_by FROM knowledge_document WHERE id=? AND deleted=0 FOR UPDATE", documentId);
+        if (documents.isEmpty()) throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
+        long owner = ((Number) documents.get(0).get("create_by")).longValue();
+        if (!administrator && owner != userId) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "只能解析本人上传的文档");
+        }
+        List<Long> pending = jdbc.queryForList(
+                "SELECT id FROM document_parse_task WHERE document_id=?"
+                        + " AND status IN ('QUEUED','PROCESSING','RETRYING') ORDER BY id DESC LIMIT 1",
+                Long.class, documentId);
+        if (!pending.isEmpty()) return new ParseReservation(pending.get(0), false);
+        return new ParseReservation(createParseTask(documentId), true);
+    }
+
+    /**
+     * 区分新解析任务与已经在处理的任务，只有创建者需要派发消息。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record ParseReservation(long taskId, boolean created) {}
+
     Map<String, Object> parseTask(long taskId) {
         List<Map<String, Object>> rows =
                 jdbc.queryForList("SELECT * FROM document_parse_task WHERE id=?", taskId);
@@ -189,15 +217,9 @@ public class KnowledgeRepository {
 
     void taskAttemptFailed(long taskId, long documentId, String message, int maximumAttempts) {
         String safe = safeMessage(message);
-        jdbc.update(
-                "UPDATE document_parse_task SET retry_count=retry_count+1,"
-                        + "status=IF(retry_count+1>=?,'FAILED','RETRYING'),"
-                        + "next_retry_time=DATE_ADD(NOW(), INTERVAL POW(2,retry_count+1) SECOND),"
-                        + "error_message=?,update_time=NOW() WHERE id=?",
-                maximumAttempts,
-                safe,
-                taskId);
-        failed(documentId, safe);
+        if (recordTaskFailure("document_parse_task", taskId, safe, maximumAttempts) > 0) {
+            failed(documentId, safe);
+        }
     }
 
     void parsed(long id, List<StructuredChunk> chunks) {
@@ -517,9 +539,11 @@ public class KnowledgeRepository {
 
     void outboxFailed(long id, String message) {
         jdbc.update(
-                "UPDATE knowledge_event_outbox SET status='RETRYING',retry_count=retry_count+1,"
-                        + "next_retry_time=DATE_ADD(NOW(),INTERVAL LEAST(300,POW(2,retry_count+1)) SECOND),"
-                        + "last_error=?,update_time=NOW() WHERE id=?",
+                "UPDATE knowledge_event_outbox SET status='RETRYING',"
+                        + "next_retry_time=TIMESTAMPADD(SECOND,"
+                        + "LEAST(300,POWER(2,LEAST(8,GREATEST(0,retry_count))+1)),NOW()),"
+                        + "last_error=?,update_time=NOW(),"
+                        + "retry_count=LEAST(29,GREATEST(0,retry_count))+1 WHERE id=? AND status<>'SENT'",
                 safeMessage(message),
                 id);
     }
@@ -687,36 +711,69 @@ public class KnowledgeRepository {
     }
 
     int claimIndexTask(long taskId) {
+        return claimIndexTask(taskId, null);
+    }
+
+    int claimIndexTask(long taskId, Integer version) {
         return jdbc.update(
                 "UPDATE knowledge_index_task SET status='PROCESSING',update_time=NOW()"
-                        + " WHERE id=? AND ((status IN ('PENDING','RETRYING')"
+                        + " WHERE id=? AND (? IS NULL OR document_version=?)"
+                        + " AND ((status IN ('PENDING','RETRYING')"
                         + " AND (next_retry_time IS NULL OR next_retry_time<=NOW()))"
                         + " OR (status='PROCESSING'"
-                        + " AND update_time<=DATE_SUB(NOW(),INTERVAL 5 MINUTE)))",
-                taskId);
+                        + " AND update_time<=TIMESTAMPADD(MINUTE,-5,NOW())))",
+                taskId, version, version);
     }
 
     void indexTaskSuccess(long taskId) {
+        indexTaskSuccess(taskId, null);
+    }
+
+    void indexTaskSuccess(long taskId, Integer version) {
         jdbc.update(
                 "UPDATE knowledge_index_task SET status='SUCCESS',next_retry_time=NULL,"
-                        + "error_message=NULL,update_time=NOW() WHERE id=?",
-                taskId);
+                        + "error_message=NULL,update_time=NOW() WHERE id=? AND status='PROCESSING'"
+                        + " AND (? IS NULL OR document_version=?)",
+                taskId, version, version);
     }
 
     void indexTaskFailure(long taskId, String message, int maximumAttempts) {
-        jdbc.update(
-                "UPDATE knowledge_index_task SET retry_count=retry_count+1,"
-                        + "status=IF(retry_count+1>=?,'FAILED','RETRYING'),"
-                        + "next_retry_time=DATE_ADD(NOW(),INTERVAL POW(2,retry_count+1) SECOND),"
-                        + "error_message=?,update_time=NOW() WHERE id=?",
-                maximumAttempts,
-                safeMessage(message),
-                taskId);
+        recordTaskFailure("knowledge_index_task", taskId, safeMessage(message), maximumAttempts);
+    }
+
+    void indexTaskFailure(long taskId, int version, String message, int maximumAttempts) {
+        recordTaskFailure("knowledge_index_task", taskId, safeMessage(message), maximumAttempts, version);
+    }
+
+    private int recordTaskFailure(String table, long taskId, String message, int maximumAttempts) {
+        return recordTaskFailure(table, taskId, message, maximumAttempts, null);
+    }
+
+    private int recordTaskFailure(
+            String table, long taskId, String message, int maximumAttempts, Integer version) {
+        int attempts = Math.max(1, maximumAttempts);
+        // MySQL evaluates assignments left to right; update the counter last, after the old value is used.
+        String sql = "UPDATE " + table
+                        + " SET status=CASE WHEN retry_count>=?-1 THEN 'FAILED' ELSE 'RETRYING' END,"
+                        + "next_retry_time=CASE WHEN retry_count>=?-1 THEN NULL ELSE TIMESTAMPADD(SECOND,"
+                        + "LEAST(300,POWER(2,LEAST(8,GREATEST(0,retry_count))+1)),NOW()) END,"
+                        + "error_message=?,update_time=NOW(),retry_count=LEAST(?-1,GREATEST(0,retry_count))+1"
+                        + " WHERE id=? AND status NOT IN ('SUCCESS','FAILED')";
+        if (version != null) {
+            return jdbc.update(sql + " AND status='PROCESSING' AND document_version=?",
+                    attempts, attempts, message, attempts, taskId, version);
+        }
+        return jdbc.update(sql, attempts, attempts, message, attempts, taskId);
     }
 
     void indexTaskObsolete(long taskId) {
+        indexTaskObsolete(taskId, null);
+    }
+
+    void indexTaskObsolete(long taskId, Integer version) {
         jdbc.update("UPDATE knowledge_index_task SET status='FAILED',next_retry_time=NULL,"
-                + "error_message='文档已删除或版本失效，停止重试',update_time=NOW() WHERE id=?", taskId);
+                + "error_message='文档已删除或版本失效，停止重试',update_time=NOW() WHERE id=?"
+                + " AND status='PROCESSING' AND (? IS NULL OR document_version=?)", taskId, version, version);
     }
 
     /**

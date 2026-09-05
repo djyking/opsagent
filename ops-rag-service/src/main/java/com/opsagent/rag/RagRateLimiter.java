@@ -18,8 +18,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class RagRateLimiter {
     static final String RESOURCE = "ops-rag-ask";
+    private final AiBudgetGuard budget;
+
+    RagRateLimiter(AiBudgetGuard budget) {
+        this.budget = budget;
+    }
 
     void check() {
+        budget.checkRequestRate();
         Entry entry = null;
         try {
             entry = SphU.entry(RESOURCE);

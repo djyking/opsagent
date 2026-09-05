@@ -99,11 +99,11 @@ public class KnowledgeService {
     }
 
     long requestParse(long id) {
-        Map<String, Object> document = repo.document(id);
-        if (document == null) throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
-        long taskId = repo.createParseTask(id);
-        publisher.publish(id, taskId);
-        return taskId;
+        var principal = SecurityUsers.current();
+        var reservation = repo.reserveParseTask(id, principal.userId(), administrator(principal.roles()));
+        // The repository transaction commits before delivery, so the consumer can see the task.
+        if (reservation.created()) publisher.publish(id, reservation.taskId());
+        return reservation.taskId();
     }
 
     Map<String, Object> parseTask(long taskId) {

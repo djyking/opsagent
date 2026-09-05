@@ -9,6 +9,8 @@ HELP.md
 !docs/OpsAgent_问答完整性与会话拓扑分页_修复验收.md
 !docs/OpsAgent_运行总览与能力搜索_设计及验收.md
 !docs/OpsAgent_入口验证码与服务知识联动_实施验收.md
+!docs/OpsAgent_演示环境资源优化与验收.md
+!rag-inference/reranker/README.md
 !docs/rag/architecture.md
 !docs/rag/current-rag-audit.md
 !docs/rag/evaluation-report.md

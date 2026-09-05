@@ -1,0 +1,465 @@
+name: opsagent
+
+x-common: &common
+  restart: unless-stopped
+  networks: [backplane]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-java: &java
+  <<: *common
+  mem_limit: 768m
+  mem_reservation: 320m
+  cpus: 2.0
+  stop_grace_period: 45s
+  depends_on:
+    mysql: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
+    elasticsearch: {condition: service_healthy}
+    qdrant: {condition: service_healthy}
+    nacos: {condition: service_healthy}
+    sentinel: {condition: service_started}
+
+x-java-options: &java-options >-
+  -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms64m -Xmx320m
+  -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=96m
+  -Dreactor.netty.ioWorkerCount=2
+  -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+  -Dio.netty.allocator.maxOrder=7
+
+x-app-env: &app-env
+  SPRING_PROFILES_INCLUDE: demo
+  MALLOC_ARENA_MAX: "2"
+  JAVA_TOOL_OPTIONS: *java-options
+  OPS_JWT_SECRET: ${OPS_JWT_SECRET:?Set an independent public JWT secret}
+  NACOS_ENABLED: "true"
+  NACOS_CONFIG_ENABLED: "true"
+  NACOS_SERVER_ADDR: nacos:8848
+  SENTINEL_ENABLED: "true"
+  SENTINEL_EAGER: "true"
+  SENTINEL_DASHBOARD: sentinel:8858
+  OPS_REDIS_HOST: redis
+  OPS_REDIS_PORT: "6379"
+  OPS_REDIS_PASSWORD: ${OPS_REDIS_PASSWORD:?Set the public Redis password}
+  OPS_REDIS_DATABASE: "0"
+  OPS_RABBITMQ_HOST: rabbitmq
+  OPS_RABBITMQ_PORT: "5672"
+  OPS_RABBITMQ_USERNAME: ${OPS_RABBITMQ_USERNAME:?Set the RabbitMQ application user}
+  OPS_RABBITMQ_PASSWORD: ${OPS_RABBITMQ_PASSWORD:?Set the RabbitMQ application password}
+  TZ: Asia/Shanghai
+
+x-java-health: &java-health
+  interval: 15s
+  timeout: 5s
+  retries: 20
+  start_period: 45s
+
+services:
+  mysql:
+    <<: *common
+    image: mysql:8.4
+    mem_limit: 768m
+    mem_reservation: 256m
+    cpus: 2.0
+    stop_grace_period: 60s
+    environment:
+      MYSQL_ROOT_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:?Set the public MySQL root password}
+      MALLOC_ARENA_MAX: "2"
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=50
+      - --table-open-cache=256
+      - --table-definition-cache=400
+      - --thread-cache-size=4
+      - --temptable-max-ram=64M
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$${MYSQL_ROOT_PASSWORD}" mysqladmin ping -h 127.0.0.1 -uroot --silent']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    <<: *common
+    image: redis:7.4-alpine
+    mem_limit: 128m
+    mem_reservation: 32m
+    cpus: 1.0
+    environment:
+      REDIS_PASSWORD: ${OPS_REDIS_PASSWORD:?Set the public Redis password}
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    <<: *common
+    image: rabbitmq:3.13-management-alpine
+    # Must match the migrated Mnesia node, including an existing generated hostname.
+    hostname: ${OPS_RABBITMQ_HOSTNAME:?Set the source RabbitMQ node hostname}
+    mem_limit: 384m
+    mem_reservation: 128m
+    cpus: 1.0
+    environment:
+      RABBITMQ_DEFAULT_USER: ${OPS_RABBITMQ_USERNAME:?Set the RabbitMQ application user}
+      RABBITMQ_DEFAULT_PASS: ${OPS_RABBITMQ_PASSWORD:?Set the RabbitMQ application password}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2 +A 4"
+    volumes: [rabbitmq-data:/var/lib/rabbitmq]
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  nacos:
+    <<: *common
+    image: nacos/nacos-server:v3.0.3
+    mem_limit: 768m
+    mem_reservation: 384m
+    cpus: 2.0
+    stop_grace_period: 60s
+    environment:
+      MODE: standalone
+      # No host ports; only application containers can reach this configuration service.
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: ${NACOS_AUTH_TOKEN:?Set an independent Base64 Nacos token}
+      NACOS_AUTH_IDENTITY_KEY: ${NACOS_AUTH_IDENTITY_KEY:?Set the Nacos identity key}
+      NACOS_AUTH_IDENTITY_VALUE: ${NACOS_AUTH_IDENTITY_VALUE:?Set the Nacos identity value}
+      JVM_XMS: "128m"
+      JVM_XMX: "384m"
+      JVM_XMN: ""
+      MALLOC_ARENA_MAX: "2"
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC
+        -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=64m
+        -Dnacos.core.sys.basic.processors=2
+        -Dremote.executor.times.of.processors=4 -Dremote.executor.queue.size=256
+        -Dserver.tomcat.threads.min-spare=2 -Dserver.tomcat.threads.max=32
+        -Dserver.tomcat.max-connections=128
+        -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+    volumes: [nacos-data:/home/nacos/data]
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS http://localhost:8848/nacos/v3/admin/core/state/readiness | grep -q ''"code":0''']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+  sentinel:
+    <<: *common
+    image: eclipse-temurin:17-jre-jammy
+    mem_limit: 512m
+    mem_reservation: 192m
+    cpus: 1.0
+    environment:
+      MALLOC_ARENA_MAX: "2"
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms32m -Xmx192m
+        -XX:ReservedCodeCacheSize=48m
+        -Dserver.tomcat.min-spare-threads=2 -Dserver.tomcat.max-threads=16
+    command: [java, '-Dserver.port=8858', '-Dcsp.sentinel.dashboard.server=localhost:8858', '-Dproject.name=sentinel-dashboard', -jar, /opt/sentinel/sentinel-dashboard.jar]
+    volumes:
+      - type: bind
+        source: ./runtime/sentinel-dashboard-1.8.9.jar
+        target: /opt/sentinel/sentinel-dashboard.jar
+        read_only: true
+        bind: {create_host_path: false}
+
+  elasticsearch:
+    <<: *common
+    image: opsagent/elasticsearch:8.19.0-smartcn
+    mem_limit: 1536m
+    mem_reservation: 768m
+    cpus: 2.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      node.processors: "2"
+      MALLOC_ARENA_MAX: "2"
+      ES_JAVA_OPTS: >-
+        -Xms512m -Xmx512m -XX:ActiveProcessorCount=2 -XX:ReservedCodeCacheSize=96m
+    volumes: [elasticsearch-data:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS http://localhost:9200/_cluster/health || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 30
+
+  qdrant:
+    <<: *common
+    image: qdrant/qdrant:v1.15.4
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 2.0
+    volumes:
+      - qdrant-data:/qdrant/storage
+      - ./config/qdrant.yaml:/qdrant/config/production.yaml:ro
+    healthcheck:
+      test: [CMD-SHELL, "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  ops-auth-app:
+    <<: *java
+    image: opsagent/auth-service:1.0.0
+    environment:
+      <<: *app-env
+      OPS_AUTH_DB_URL: jdbc:mysql://mysql:3306/ops_auth?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_AUTH_DB_USERNAME: opsagent_app
+      OPS_AUTH_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
+      OPS_REDIS_ENABLED: "true"
+      OPS_AUTH_REGISTRATION_ENABLED: "false"
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:8101/actuator/health']
+
+  ops-ticket-app:
+    <<: *java
+    image: opsagent/ticket-service:1.0.0
+    environment:
+      <<: *app-env
+      OPS_TICKET_DB_URL: jdbc:mysql://mysql:3306/ops_ticket?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_TICKET_DB_USERNAME: opsagent_app
+      OPS_TICKET_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
+      OPS_ALERTMANAGER_ENABLED: "true"
+      OPS_ALERTMANAGER_WEBHOOK_TOKEN: ${OPS_ALERTMANAGER_WEBHOOK_TOKEN:?Set the alert webhook bearer token}
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:8102/actuator/health']
+
+  ops-knowledge-app:
+    <<: *java
+    image: opsagent/knowledge-service:1.0.0
+    mem_limit: 1024m
+    environment:
+      <<: *app-env
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms64m -Xmx448m
+        -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=128m
+        -Dreactor.netty.ioWorkerCount=2
+        -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+        -Dio.netty.allocator.maxOrder=7
+      OPS_KNOWLEDGE_DB_URL: jdbc:mysql://mysql:3306/ops_knowledge?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_KNOWLEDGE_DB_USERNAME: opsagent_app
+      OPS_KNOWLEDGE_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
+      OPS_UPLOAD_DIR: /app/data/uploads
+      OPS_VECTOR_ENABLED: ${OPS_VECTOR_ENABLED:?Explicitly preserve the approved vector setting}
+      OPS_ES_URL: http://elasticsearch:9200
+      OPS_QDRANT_URL: http://qdrant:6333
+      OPS_QDRANT_COLLECTION: ${OPS_QDRANT_COLLECTION:-ops_knowledge_vector_v1}
+      OPS_QDRANT_ALIAS: ${OPS_QDRANT_ALIAS:-ops_knowledge_vector_read}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+    volumes: [knowledge-uploads:/app/data/uploads]
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:8103/actuator/health']
+
+  ops-rag-app:
+    <<: *java
+    image: opsagent/rag-service:1.0.0
+    mem_limit: 896m
+    environment:
+      <<: *app-env
+      OPS_RAG_DB_URL: jdbc:mysql://mysql:3306/ops_rag?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_RAG_DB_USERNAME: opsagent_app
+      OPS_RAG_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
+      OPS_KNOWLEDGE_URL: http://ops-knowledge-app:8103
+      OPS_AI_ENABLED: "true"
+      OPS_AI_PROVIDER: deepseek
+      OPS_AI_TIMEOUT_SECONDS: "90"
+      OPS_AI_MAX_OUTPUT_TOKENS: "4096"
+      OPS_AI_MAX_CONTINUATIONS: "2"
+      OPS_AI_BUDGET_ENABLED: "true"
+      OPS_AI_MAX_CONCURRENT: "2"
+      OPS_RAG_REQUESTS_PER_MINUTE: "10"
+      OPS_AI_REQUESTS_PER_DAY: "100"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-luna}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?Set the DeepSeek API key}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      OPS_RAG_NEIGHBOR_WINDOW: "1"
+      OPS_RAG_RETRIEVAL_CANDIDATES: ${OPS_RAG_RETRIEVAL_CANDIDATES:-12}
+      OPS_RERANK_ENABLED: "true"
+      OPS_RERANK_TIMEOUT_SECONDS: ${OPS_RERANK_TIMEOUT_SECONDS:-60}
+      OPS_RERANK_BASE_URL: http://reranker:8010
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:8104/actuator/health']
+
+  ops-platform-app:
+    <<: *java
+    image: opsagent/platform-service:1.0.0
+    environment:
+      <<: *app-env
+      OPS_PLATFORM_DB_URL: jdbc:mysql://mysql:3306/ops_platform?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_PLATFORM_DB_USERNAME: opsagent_app
+      OPS_PLATFORM_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
+      OPS_PROMETHEUS_URL: http://prometheus:9090
+      OPS_GRAFANA_URL: http://grafana:3000
+      OPS_PROMETHEUS_PUBLIC_URL: ""
+      OPS_GRAFANA_PUBLIC_URL: ""
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:8105/actuator/health']
+
+  ops-gateway-app:
+    <<: *java
+    image: opsagent/gateway:1.0.0
+    environment:
+      <<: *app-env
+      OPS_GATEWAY_PORT: "18080"
+      JAVA_TOOL_OPTIONS: >-
+        -XX:ActiveProcessorCount=2 -XX:+UseSerialGC -Xms64m -Xmx256m
+        -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=96m
+        -Dreactor.netty.ioWorkerCount=2
+        -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.allocator.numHeapArenas=2
+        -Dio.netty.allocator.maxOrder=7
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:18080/actuator/health']
+
+  reranker:
+    <<: *common
+    image: opsagent/bge-reranker-v2-m3:1.0.0
+    mem_limit: 3072m
+    mem_reservation: 768m
+    cpus: 4.0
+    environment:
+      MODEL_NAME: BAAI/bge-reranker-v2-m3
+      RERANK_MAX_LENGTH: "512"
+      RERANK_BATCH_SIZE: "2"
+      RERANK_CPU_THREADS: "4"
+      RERANK_INTEROP_THREADS: "1"
+      RERANK_MAX_CONCURRENCY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      MALLOC_ARENA_MAX: "2"
+      HF_HOME: /models
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    volumes: [reranker-models:/models]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 5m
+
+  prometheus:
+    <<: *common
+    image: prom/prometheus:v3.14.0
+    mem_limit: 256m
+    mem_reservation: 64m
+    cpus: 1.0
+    environment: {GOMAXPROCS: "2", GOMEMLIMIT: "192MiB"}
+    command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus', '--storage.tsdb.retention.time=15d']
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/opsagent-alerts.yml:/etc/prometheus/opsagent-alerts.yml:ro
+      - prometheus-data:/prometheus
+
+  alertmanager:
+    <<: *common
+    image: prom/alertmanager:v0.28.1
+    mem_limit: 128m
+    mem_reservation: 32m
+    cpus: 1.0
+    environment: {GOMAXPROCS: "2", GOMEMLIMIT: "80MiB"}
+    command: ['--config.file=/etc/alertmanager/alertmanager.yml', '--storage.path=/alertmanager']
+    volumes:
+      - ./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+      - type: bind
+        source: ./secrets/alertmanager-webhook-token.txt
+        target: /run/secrets/opsagent-webhook-token
+        read_only: true
+        bind: {create_host_path: false}
+
+  grafana:
+    <<: *common
+    image: grafana/grafana:13.2.1
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 1.0
+    environment:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: "320MiB"
+      GF_SECURITY_ADMIN_USER: ${OPS_GRAFANA_ADMIN_USER:?Set the Grafana admin user}
+      GF_SECURITY_ADMIN_PASSWORD: ${OPS_GRAFANA_ADMIN_PASSWORD:?Set the Grafana admin password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus]
+
+  ops-web-app:
+    <<: *common
+    image: opsagent/web:1.0.0
+    mem_limit: 96m
+    mem_reservation: 24m
+    cpus: 1.0
+    environment:
+      NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE: "1"
+    ports: ['80:80', '443:443']
+    depends_on:
+      ops-gateway-app: {condition: service_healthy}
+    volumes:
+      - type: bind
+        source: ./config/nginx/active.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+        bind: {create_host_path: false}
+      - ./config/nginx/snippets:/etc/nginx/opsagent-snippets:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - acme-webroot:/var/www/certbot:ro
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1/healthz']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  certbot:
+    image: certbot/certbot:v4.2.0
+    profiles: [tls]
+    networks: [backplane]
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - acme-webroot:/var/www/certbot
+    command: ['--help']
+
+networks:
+  # A private Docker bridge with outbound access for AI APIs. No middleware host ports.
+  backplane:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  nacos-data:
+  elasticsearch-data:
+  qdrant-data:
+  knowledge-uploads:
+  reranker-models:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  letsencrypt:
+  acme-webroot:

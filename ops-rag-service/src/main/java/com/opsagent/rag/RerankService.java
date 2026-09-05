@@ -3,6 +3,9 @@ package com.opsagent.rag;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -16,6 +19,7 @@ import java.util.List;
  */
 @Service
 public class RerankService {
+    private static final Logger LOG = LoggerFactory.getLogger(RerankService.class);
     private final RagProperties properties;
     private final BgeRemoteRerankProvider remote;
     private final NoOpRerankProvider noOp;
@@ -47,6 +51,7 @@ public class RerankService {
         }
         metrics.summary("rag.rerank.candidate.count").record(documents.size());
         Timer.Sample sample = Timer.start(metrics);
+        long started = System.nanoTime();
         try {
             boolean applied = remote.available();
             List<RerankResult> ranked = (applied ? remote : noOp)
@@ -58,6 +63,12 @@ public class RerankService {
             metrics.counter("rag.rerank", "applied", Boolean.toString(applied)).increment();
             return new Outcome(results, applied, null);
         } catch (RuntimeException exception) {
+            // Do not log exception messages or stack traces: HTTP failures can embed request or response bodies.
+            LOG.warn("Rerank fallback: exceptionType={}, rootCauseType={}, durationMs={}, candidateCount={}",
+                    exception.getClass().getSimpleName(),
+                    NestedExceptionUtils.getMostSpecificCause(exception).getClass().getSimpleName(),
+                    (System.nanoTime() - started) / 1_000_000L,
+                    documents.size());
             metrics.counter("rag.rerank.failure", "reason", "REMOTE_ERROR").increment();
             List<RerankResult> fallback = noOp.rerank(query, documents, topN);
             return new Outcome(

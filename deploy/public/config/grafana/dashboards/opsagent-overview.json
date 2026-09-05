@@ -1,0 +1,187 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "sum(up{job=~\"opsagent.*\"})", "legendFormat": "可用服务", "refId": "A"}],
+      "title": "可用服务数量",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 16, "x": 8, "y": 0},
+      "id": 2,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (job) (rate(http_server_requests_seconds_count[1m]))", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "HTTP 请求速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "id": 3,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "process_cpu_usage{job=~\"opsagent.*\"}", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "进程 CPU 使用率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "id": 4,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (job) (jvm_memory_used_bytes{area=\"heap\",job=~\"opsagent.*\"})", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "JVM 堆内存",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "id": 5,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "hikaricp_connections_active{job=~\"opsagent.*\"}", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "数据库活跃连接",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 24},
+      "id": 6,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "opsagent_outbox_pending", "legendFormat": "待发布", "refId": "A"}],
+      "title": "Outbox 待发布事件",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 24},
+      "id": 7,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "opsagent_outbox_publish_success_total", "legendFormat": "Outbox 发布成功", "refId": "A"},
+        {"expr": "opsagent_outbox_publish_failure_total", "legendFormat": "Outbox 发布失败", "refId": "B"},
+        {"expr": "opsagent_mq_consume_success_total", "legendFormat": "审计消费成功", "refId": "C"},
+        {"expr": "opsagent_mq_consume_failure_total", "legendFormat": "审计消费失败", "refId": "D"}
+      ],
+      "title": "工单 MQ 结果",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 24},
+      "id": 8,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "opsagent_document_parse_success_total", "legendFormat": "解析成功", "refId": "A"},
+        {"expr": "opsagent_document_parse_failure_total", "legendFormat": "解析失败", "refId": "B"},
+        {"expr": "opsagent_document_parse_duration_seconds_sum / clamp_min(opsagent_document_parse_duration_seconds_count, 1)", "legendFormat": "平均耗时（秒）", "refId": "C"}
+      ],
+      "title": "文档解析 MQ 结果",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 31},
+      "id": 9,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "targets": [{"expr": "sum by (mode,status) (rate(rag_query_total[5m]))", "legendFormat": "{{mode}} {{status}}", "refId": "A"}],
+      "title": "RAG QPS",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 31},
+      "id": 10,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(rag_query_duration_seconds_bucket[5m])))", "legendFormat": "RAG P95", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(opsagent_ai_request_duration_seconds_bucket[5m])))", "legendFormat": "LLM P95", "refId": "B"}
+      ],
+      "title": "RAG 与 LLM P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 31},
+      "id": 11,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (le,stage) (rate(rag_retrieval_duration_seconds_bucket[5m])))", "legendFormat": "{{stage}} P95", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(rag_embedding_duration_seconds_bucket[5m])))", "legendFormat": "Embedding P95", "refId": "B"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(rag_rerank_duration_seconds_bucket[5m])))", "legendFormat": "Rerank P95", "refId": "C"}
+      ],
+      "title": "检索阶段 P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 0, "y": 38},
+      "id": 12,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "sum(rag_query_degraded_total)", "legendFormat": "问答降级", "refId": "A"},
+        {"expr": "sum(rag_retrieval_degraded_total)", "legendFormat": "检索降级", "refId": "B"},
+        {"expr": "sum(rag_citation_invalid_total)", "legendFormat": "无效引用", "refId": "C"}
+      ],
+      "title": "RAG 降级与引用",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 8, "y": 38},
+      "id": 13,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "rag_index_task_pending", "legendFormat": "待补偿", "refId": "A"},
+        {"expr": "sum(rag_index_retry_total)", "legendFormat": "重试", "refId": "B"},
+        {"expr": "sum(rag_index_dlq_total)", "legendFormat": "DLQ", "refId": "C"},
+        {"expr": "rag_index_consistency_gap", "legendFormat": "一致性差距", "refId": "D"}
+      ],
+      "title": "知识索引一致性",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 8, "x": 16, "y": 38},
+      "id": 14,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "rag_context_tokens_max", "legendFormat": "Context Tokens", "refId": "A"},
+        {"expr": "rag_context_chunk_count_max", "legendFormat": "Context Chunks", "refId": "B"},
+        {"expr": "sum(rag_embedding_tokens_total)", "legendFormat": "Embedding Tokens", "refId": "C"}
+      ],
+      "title": "RAG 上下文与 Token",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": ["opsagent"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timezone": "browser",
+  "title": "OpsAgent Overview",
+  "uid": "opsagent-overview",
+  "version": 1
+}

@@ -1,0 +1,14 @@
+# Keep idle upstream connections bounded without imposing an SSE response timeout.
+# Reactor event-loop CPU sizing is supplied by the demo JVM options.
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            pool:
+              type: fixed
+              max-connections: 32
+              acquire-timeout: 5000
+              max-idle-time: 30s
+              eviction-interval: 30s

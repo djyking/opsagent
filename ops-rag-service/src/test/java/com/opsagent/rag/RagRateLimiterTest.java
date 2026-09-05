@@ -30,7 +30,7 @@ class RagRateLimiterTest {
         rule.setGrade(RuleConstant.FLOW_GRADE_QPS);
         rule.setCount(1.0D);
         FlowRuleManager.loadRules(List.of(rule));
-        RagRateLimiter limiter = new RagRateLimiter();
+        RagRateLimiter limiter = new RagRateLimiter(org.mockito.Mockito.mock(AiBudgetGuard.class));
 
         limiter.check();
 

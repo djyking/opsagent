@@ -53,6 +53,7 @@ ops:
       # 仅跳过用户 JWT；工单服务仍用独立、常量时间比较的 Bearer Token 鉴权。
       public-paths:
         - /api/auth/captcha
+        - /api/auth/features
         - /api/auth/login
         - /api/auth/register
         - /api/auth/refresh

@@ -1,1 +1,0 @@
-import{d as t,k as r,b as n,n as l,e as i,g as p,t as c}from"./index-Br_CbCyu.js";const d=t({__name:"PriorityIndicator",props:{value:{}},setup(o){const e=o,s={LOW:"低",MEDIUM:"中",HIGH:"高",URGENT:"紧急"};return(u,a)=>(r(),n("span",{class:l(["priority-indicator",`priority-${e.value.toLowerCase()}`])},[a[0]||(a[0]=i("i",null,null,-1)),p(c(s[e.value]||e.value),1)],2))}});export{d as _};

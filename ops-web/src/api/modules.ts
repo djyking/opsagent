@@ -21,6 +21,7 @@ import type {
 } from "@/types/api";
 
 export const authApi = {
+  features: () => request<{ registrationEnabled: boolean }>({ url: "/api/auth/features", timeout: 8000 }),
   captcha: () => request<{ captchaId: string; imageDataUrl: string; expiresInSeconds: number }>({
     url: "/api/auth/captcha", timeout: 8000,
   }),

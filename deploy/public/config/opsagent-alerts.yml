@@ -1,0 +1,12 @@
+groups:
+  - name: opsagent-service-health
+    rules:
+      - alert: OpsAgentServiceDown
+        expr: up{job=~"opsagent.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: "{{ $labels.job }}"
+        annotations:
+          summary: "OpsAgent 服务 {{ $labels.job }} 不可用"
+          description: "Prometheus 连续 2 分钟无法抓取该服务，请检查进程、端口和日志。"
