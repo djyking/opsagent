@@ -86,7 +86,7 @@ class RagConversationServiceTest {
         assertNotFound(() -> controller.messages(id, null));
         assertNotFound(() -> controller.rename(id, new RagConversationController.RenameRequest("篡改")));
         assertNotFound(() -> controller.delete(id));
-        assertNotFound(() -> controller.ask(id, new RagConversationController.QuestionRequest("读取", 5, null)));
+        assertNotFound(() -> controller.ask(id, new RagConversationController.QuestionRequest("读取", 5, null, null)));
         assertNotFound(() -> service.context(id, 2));
         assertNotFound(() -> service.begin(id, 2, "越权提问"));
         assertNotFound(() -> service.complete(id, 2, turnId, answer("越权答案", true)));

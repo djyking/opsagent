@@ -103,8 +103,9 @@ public class KnowledgeController {
     ApiResponse<List<Map<String, Object>>> search(
             @RequestParam String query,
             @RequestParam(defaultValue = "5") int topK,
-            @RequestParam(required = false) Long documentId) {
-        return ApiResponse.success(service.search(query, topK, documentId));
+            @RequestParam(required = false) Long documentId,
+            @RequestParam(required = false) Long ticketId) {
+        return ApiResponse.success(service.search(query, topK, documentId, ticketId));
     }
 
     @PostMapping("/internal/reindex")

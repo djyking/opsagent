@@ -59,7 +59,7 @@ class RagServiceTest {
                 new CitationValidator(),
                 rerankService(properties, metrics),
                 new ContextAssembler(properties, metrics),
-                metrics);
+                metrics, mock(CmdbAnswerService.class));
 
         RagService.Answer answer = service.ask("Redis 主节点挂了以后第一步做什么？", 5);
 
@@ -92,7 +92,7 @@ class RagServiceTest {
                 new CitationValidator(),
                 rerankService(properties, metrics),
                 new ContextAssembler(properties, metrics),
-                metrics);
+                metrics, mock(CmdbAnswerService.class));
 
         RagService.Answer answer = service.ask("OpsAgent 生产 MySQL root 密码是多少？", 5);
 
@@ -118,7 +118,7 @@ class RagServiceTest {
         RagService service = new RagService(
                 mock(KnowledgeClient.class), properties, ai, mock(PromptBuilder.class), invocation,
                 new CitationValidator(), rerankService(properties, metrics),
-                new ContextAssembler(properties, metrics), metrics);
+                new ContextAssembler(properties, metrics), metrics, mock(CmdbAnswerService.class));
         RagService.StreamPlan plan = new RagService.StreamPlan(
                 "问题", List.of(), List.of(), List.of(), request,
                 new RagService.AnswerMetadata("NONE", false, 0, 0, 0, false, null), null, 0);
@@ -151,7 +151,7 @@ class RagServiceTest {
         RagService service = new RagService(
                 knowledge, properties, ai, builder, mock(LlmInvocationService.class),
                 new CitationValidator(), rerankService(properties, metrics),
-                new ContextAssembler(properties, metrics), metrics);
+                new ContextAssembler(properties, metrics), metrics, mock(CmdbAnswerService.class));
 
         RagService.StreamPlan plan = service.prepareStream(question, 5, null, "用户：旧问题\n助手：旧答案");
 
@@ -197,7 +197,7 @@ class RagServiceTest {
             RagService service = new RagService(
                     knowledge, properties, ai, promptBuilder, invocation,
                     new CitationValidator(), rerankService(properties, metrics),
-                    new ContextAssembler(properties, metrics), metrics);
+                    new ContextAssembler(properties, metrics), metrics, mock(CmdbAnswerService.class));
             RagService.Answer answer = service.ask(question, 5);
             assertThat(answer.model()).isEqualTo("retrieval-only");
             assertThat(answer.metadata().degradedReason()).isEqualTo(reason);

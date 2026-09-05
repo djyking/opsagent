@@ -47,12 +47,13 @@ public class RagController {
     record ChatRequest(
             @NotBlank @Size(max = 2000) String question,
             @Min(1) @Max(20) Integer topK,
-            @Min(1) Long documentId) {}
+            @Min(1) Long documentId,
+            @Min(1) Long ticketId) {}
 
     @PostMapping({"/ask", "/chat"})
     ApiResponse<RagService.Answer> chat(@Valid @RequestBody ChatRequest r) {
         rateLimiter.check();
-        return ApiResponse.success(service.ask(r.question(), r.topK(), r.documentId()));
+        return ApiResponse.success(service.ask(r.question(), r.topK(), r.documentId(), r.ticketId()));
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -60,7 +61,7 @@ public class RagController {
         try {
             rateLimiter.check();
             RagService.StreamPlan plan = service.prepareStream(
-                    request.question(), request.topK(), request.documentId());
+                    request.question(), request.topK(), request.documentId(), request.ticketId(), null);
             return streamingService.open(plan, service.auditContext());
         } catch (BusinessException exception) {
             return streamingService.error(exception.getMessage());

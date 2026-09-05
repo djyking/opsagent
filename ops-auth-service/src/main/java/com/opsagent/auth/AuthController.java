@@ -4,6 +4,8 @@ import static com.opsagent.auth.AuthDtos.*;
 
 import com.opsagent.common.core.ApiResponse;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +20,18 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/auth")
 public class AuthController {
     private final AuthService service;
+    private final CaptchaService captcha;
 
-    AuthController(AuthService service) {
+    AuthController(AuthService service, CaptchaService captcha) {
         this.service = service;
+        this.captcha = captcha;
+    }
+
+    @GetMapping("/captcha")
+    ApiResponse<CaptchaResponse> captcha(HttpServletRequest request, HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        response.setHeader("Pragma", "no-cache");
+        return ApiResponse.success(captcha.issue(request.getRemoteAddr()));
     }
 
     @PostMapping("/login")

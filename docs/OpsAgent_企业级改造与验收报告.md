@@ -2,7 +2,7 @@
 
 ## 1. 改造结论
 
-项目已按“星云商城内部生产运维服务台 + 智能知识助手”完成可运行改造。Java 服务没有制作 Docker 镜像；MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus、Grafana 全部由 `compose.yaml` 管理。
+项目已按“OpsAgent内部生产运维服务台 + 智能知识助手”完成可运行改造。Java 服务没有制作 Docker 镜像；MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Prometheus、Grafana 全部由 `compose.yaml` 管理。
 
 数据库迁移前备份位于 `D:\middleware\backups\opsagent-before-docker-20260903-150024.sql`。Docker MySQL 使用独立 named volume，停止脚本不会删除卷。
 

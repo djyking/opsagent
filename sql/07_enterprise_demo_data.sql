@@ -1,4 +1,4 @@
--- 星云商城企业级演示数据。脚本可重复执行，仅重建约定的 2000～2999 演示区间。
+-- OpsAgent企业级演示数据。脚本可重复执行，仅重建约定的 2000～2999 演示区间。
 
 USE ops_auth;
 
@@ -30,7 +30,7 @@ INSERT INTO ticket(
     version,create_time,update_time,deleted
 ) VALUES (
     2000,'OPS-20260828-2000','大促期间订单创建接口大量超时并出现429',
-    '星云商城大促流量上涨后，订单创建接口 P99 从 420ms 升至 8.6s，网关同时出现大量 429。需要联合检查 Sentinel 限流、Redis 热点键、数据库连接池和下游库存接口。',
+    'OpsAgent大促流量上涨后，订单创建接口 P99 从 420ms 升至 8.6s，网关同时出现大量 429。需要联合检查 Sentinel 限流、Redis 热点键、数据库连接池和下游库存接口。',
     'URGENT','CLOSED',2001,2005,5,'2026-08-28 20:03:00','2026-08-29 10:20:00',0
 );
 
@@ -160,13 +160,13 @@ INSERT INTO knowledge_base(id,name,description,status,create_by,update_by,delete
     (201,'生产故障处置手册','网关、订单、支付、库存等生产故障的标准处置 Runbook。','enable',1,1,0),
     (202,'中间件运维手册','MySQL、Redis、RabbitMQ、Nacos 和 Sentinel 运维规范。','enable',1,1,0),
     (203,'发布与变更规范','灰度发布、回滚、容量评估和变更审核规范。','enable',1,1,0),
-    (204,'事故复盘与案例库','星云商城脱敏后的生产事故复盘及改进项。','enable',1,1,0)
+    (204,'事故复盘与案例库','OpsAgent脱敏后的生产事故复盘及改进项。','enable',1,1,0)
 ON DUPLICATE KEY UPDATE description=VALUES(description),status='enable',deleted=0;
 
 USE ops_platform;
 
 INSERT INTO platform_config(config_key,config_value,description,update_by) VALUES
-    ('demo.company.name','星云商城（Nebula Mall）','演示业务背景，不对应真实公司',1),
+    ('demo.company.name','OpsAgent 演示环境','演示业务背景，不对应真实公司',1),
     ('mq.document.parse.max-attempts','3','文档解析监听器最大尝试次数',1),
     ('mq.ticket.audit.consumer','platform-ticket-audit','平台工单审计幂等消费者名称',1)
 ON DUPLICATE KEY UPDATE config_value=VALUES(config_value),description=VALUES(description),update_by=VALUES(update_by);

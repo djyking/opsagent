@@ -111,6 +111,7 @@
     gap: 10px;
     margin-top: 9px;
 }
+.question-scope-hint { display: block; margin-top: 9px; color: var(--oa-text-secondary); font-size: var(--oa-font-size-xs); line-height: 20px; }
 
 .question-form textarea {
   min-height: 76px;

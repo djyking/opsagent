@@ -11,6 +11,8 @@ export interface RagStreamResult {
 
 export function ragCompletionLabel(result: RagStreamResult): string {
   if (result.metadata?.generationComplete === false) return "回答未完成";
+  if (result.provider === "cmdb" && result.metadata?.degradedReason === "CMDB_UNAVAILABLE") return "目录暂不可用";
+  if (result.provider === "cmdb") return "查询完成";
   if (result.provider === "disabled") return "仅返回知识检索结果";
   if (result.provider === "none") return "知识依据不足";
   return "回答完成";
@@ -24,6 +26,8 @@ export function ragIncompleteMessage(result: RagStreamResult): string {
 }
 
 export function ragAnswerLabel(result: RagStreamResult): string {
+  if (result.provider === "cmdb" && result.metadata?.degradedReason === "CMDB_UNAVAILABLE") return "服务目录 · 读取失败";
+  if (result.provider === "cmdb") return "服务目录 · 实时读取";
   if (result.provider === "disabled") {
     const reason = result.metadata?.degradedReason;
     if (reason === "LLM_DISABLED") return "仅知识检索 · AI 生成未启用";
@@ -55,7 +59,7 @@ interface StreamPayload {
 const FIRST_TOKEN_TIMEOUT_MS = 30_000;
 
 export async function streamRagAnswer(
-  data: { question: string; topK?: number; documentId?: number; conversationId?: string },
+  data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string },
   handlers: RagStreamHandlers = {},
   signal?: AbortSignal,
 ): Promise<RagStreamResult> {
@@ -89,6 +93,7 @@ export async function streamRagAnswer(
         question: data.question,
         topK: data.topK || 5,
         documentId: data.documentId,
+        ticketId: data.ticketId,
       }),
       signal: controller.signal,
     });
@@ -115,17 +120,17 @@ export async function streamRagAnswer(
         if (!event) continue;
         const payload = event.payload;
         if (event.name === "status") {
-          retrievalOnly = payload.phase === "retrieval-only";
+          retrievalOnly = payload.phase === "retrieval-only" || payload.phase === "cmdb";
           handlers.onStatus?.(
-            payload.phase === "generating"
+            payload.phase === "cmdb" ? "正在读取服务目录" : payload.phase === "generating"
               ? "知识检索已完成，正在等待模型返回首段内容（最长 30 秒）"
-              : retrievalOnly ? "正在返回知识检索结果" : "正在处理请求",
+              : retrievalOnly ? "正在返回参考资料" : "正在处理请求",
           );
         } else if (event.name === "token") {
           if (!receivedToken) {
             receivedToken = true;
             window.clearTimeout(firstTokenTimer);
-            handlers.onStatus?.(retrievalOnly ? "正在返回知识检索结果" : "模型正在流式生成回答");
+            handlers.onStatus?.(retrievalOnly ? "正在返回查询结果" : "正在生成回答");
           }
           await handlers.onToken?.(String(payload.delta || ""));
         } else if (event.name === "sources") {
@@ -186,6 +191,10 @@ export function normalizeReferences(rows?: Record<string, unknown>[]): AiReferen
     pageNumber: row.pageStart == null && row.page == null ? undefined : Number(row.pageStart ?? row.page),
     relevanceScore: Number(row.score || 0),
     sourceId: row.sourceId == null ? undefined : String(row.sourceId),
+    sourceType: row.sourceType == null ? undefined : String(row.sourceType),
+    sourceUrl: row.sourceUrl == null ? undefined : String(row.sourceUrl),
+    sourceUpdatedAt: row.sourceUpdatedAt == null ? undefined : String(row.sourceUpdatedAt),
+    sourceRetrievedAt: row.sourceRetrievedAt == null ? undefined : String(row.sourceRetrievedAt),
     headingPath: row.headingPath == null ? undefined : String(row.headingPath),
     pageStart: row.pageStart == null ? undefined : Number(row.pageStart),
     pageEnd: row.pageEnd == null ? undefined : Number(row.pageEnd),

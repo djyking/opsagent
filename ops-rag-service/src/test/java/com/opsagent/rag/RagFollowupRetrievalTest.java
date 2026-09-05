@@ -51,7 +51,7 @@ class RagFollowupRetrievalTest {
                 .thenAnswer(call -> new LlmRequest("system", "当前问题：" + call.getArgument(0), 4096));
         service = new RagService(knowledge, properties, ai, prompts,
                 mock(LlmInvocationService.class), new CitationValidator(), rerank,
-                new ContextAssembler(properties, metrics), metrics);
+                new ContextAssembler(properties, metrics), metrics, mock(CmdbAnswerService.class));
     }
 
     @AfterEach
@@ -67,6 +67,9 @@ class RagFollowupRetrievalTest {
         "它为什么会发生连接超时？"
     })
     void shouldAnchorReferencesInTheLastIndependentQuestion(String question) {
+        when(knowledge.search(anyString(), anyInt(), eq(9L)))
+                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(java.util.Map.of(
+                        "chunkId", 1L, "documentId", 9L, "content", "Redis 连接超时排查")), "test"));
         RagService.StreamPlan plan = service.prepareStream(question, 5, 9L, history());
 
         String expected = REDIS_QUESTION + "\n" + question;

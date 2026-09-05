@@ -272,6 +272,53 @@ public class KnowledgeRepository {
                 Long.class);
     }
 
+    List<Map<String, Object>> scopedChunks(Long documentId, Long ticketId, long userId,
+                                            boolean administrator, int limit, List<String> terms) {
+        if (documentId == null && ticketId == null) throw new IllegalArgumentException("必须指定文档或工单范围");
+        StringBuilder sql = new StringBuilder("""
+                SELECT c.id chunkId,c.document_id documentId,c.chunk_index chunkIndex,c.content,
+                       d.original_name documentName,c.page_number page,d.version,d.update_time updateTime
+                FROM knowledge_chunk c JOIN knowledge_document d ON d.id=c.document_id
+                WHERE d.deleted=0 AND d.status IN ('PARSED','INDEXED')
+                  AND ((d.review_status='PUBLISHED' AND (?=1 OR d.visibility='PUBLIC' OR d.create_by=?))
+                    OR (d.review_status IN ('DRAFT','IN_REVIEW','REJECTED') AND (?=1 OR d.create_by=?)))
+                """);
+        List<Object> arguments = new ArrayList<>(List.of(administrator ? 1 : 0, userId, administrator ? 1 : 0, userId));
+        if (documentId != null) {
+            sql.append(" AND d.id=?");
+            arguments.add(documentId);
+        }
+        if (ticketId != null) {
+            sql.append(" AND d.ticket_id=?");
+            arguments.add(ticketId);
+        }
+        if (!terms.isEmpty()) {
+            sql.append(" AND (");
+            for (int i = 0; i < terms.size(); i++) {
+                if (i > 0) sql.append(" OR ");
+                sql.append("LOWER(c.content) LIKE ? OR LOWER(d.original_name) LIKE ?");
+                String like = "%" + terms.get(i).toLowerCase(Locale.ROOT) + "%";
+                arguments.add(like);
+                arguments.add(like);
+            }
+            sql.append(")");
+        }
+        sql.append(" ORDER BY d.id DESC,c.chunk_index LIMIT ?");
+        arguments.add(limit);
+        return jdbc.query(sql.toString(), (row, index) -> {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("chunkId", row.getLong("chunkId"));
+            result.put("documentId", row.getLong("documentId"));
+            result.put("chunkIndex", row.getInt("chunkIndex"));
+            result.put("content", row.getString("content"));
+            result.put("documentName", row.getString("documentName"));
+            result.put("page", row.getObject("page"));
+            result.put("version", row.getInt("version"));
+            result.put("updateTime", row.getObject("updateTime"));
+            return result;
+        }, arguments.toArray());
+    }
+
     List<Map<String, Object>> reviewDocuments(String status) {
         String reviewStatus = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
         return jdbc.queryForList(
@@ -665,6 +712,11 @@ public class KnowledgeRepository {
                 maximumAttempts,
                 safeMessage(message),
                 taskId);
+    }
+
+    void indexTaskObsolete(long taskId) {
+        jdbc.update("UPDATE knowledge_index_task SET status='FAILED',next_retry_time=NULL,"
+                + "error_message='文档已删除或版本失效，停止重试',update_time=NOW() WHERE id=?", taskId);
     }
 
     /**

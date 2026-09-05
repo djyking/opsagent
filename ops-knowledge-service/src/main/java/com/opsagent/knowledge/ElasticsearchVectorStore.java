@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -79,8 +80,9 @@ public class ElasticsearchVectorStore {
         }
         JsonNode response = client.post()
                 .uri("/_bulk?refresh=wait_for")
-                .contentType(MediaType.parseMediaType("application/x-ndjson"))
-                .body(body.toString())
+                .contentType(new MediaType("application", "x-ndjson", StandardCharsets.UTF_8))
+                // StringHttpMessageConverter 对非 application/json 字符串默认使用 ISO-8859-1。
+                .body(body.toString().getBytes(StandardCharsets.UTF_8))
                 .retrieve()
                 .body(JsonNode.class);
         return parseBulkResult(response, documents);

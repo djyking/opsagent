@@ -2,6 +2,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router';
 import { conversationApi, type Conversation, type ConversationTurn } from '@/api/conversations';
 import { ragCompletionLabel, ragIncompleteMessage, streamRagAnswer } from '@/api/rag-stream';
+import { ragNavigation, type RagNavigation } from '@/utils/rag-navigation';
 
 export function useRagConversations() {
   const question = ref('');
@@ -23,10 +24,14 @@ export function useRagConversations() {
   const editTitle = ref('');
   const actionBusy = ref(false);
   const chatScroll = ref<HTMLElement>();
+  const questionInput = ref<HTMLTextAreaElement>();
+  const draftImported = ref(false);
   const route = useRoute();
   const router = useRouter();
   let controller: AbortController | undefined;
   let selectionVersion = 0;
+  let pendingSelectionId = '';
+  let pendingNavigation: RagNavigation | undefined;
   let disposed = false;
   const current = computed(() => sessions.value.find(item => item.id === sessionId.value));
   const referenceTurn = computed(() => turns.value.find(turn => turn.id === selectedTurnId.value) || turns.value.at(-1));
@@ -41,10 +46,12 @@ export function useRagConversations() {
     listPage.value = page;
   }
   async function refreshHistory(more = false) {
+    const refreshingId = sessionId.value;
+    const version = selectionVersion;
     historyError.value = '';
     try {
       await loadSessions(more);
-      if (!more && sessionId.value && !busy.value) await selectSession(sessionId.value);
+      if (!more && refreshingId && refreshingId === sessionId.value && version === selectionVersion && !loading.value && !busy.value && !disposed) await selectSession(refreshingId);
     }
     catch (cause) { historyError.value = message(cause); }
   }
@@ -55,6 +62,7 @@ export function useRagConversations() {
   async function selectSession(id: string) {
     if (busy.value) return;
     const version = ++selectionVersion;
+    pendingSelectionId = id;
     loading.value = true;
     error.value = '';
     historyOpen.value = false;
@@ -66,10 +74,11 @@ export function useRagConversations() {
       hasEarlier.value = result.hasMore;
       selectedTurnId.value = turns.value.at(-1)?.id;
       question.value = '';
+      draftImported.value = false;
       await router.replace({ query: { conversation: id } });
       await scrollBottom();
     } catch (cause) { if (version === selectionVersion) error.value = message(cause); }
-    finally { if (version === selectionVersion) loading.value = false; }
+    finally { if (version === selectionVersion) { loading.value = false; pendingSelectionId = ''; } }
   }
   async function earlier() {
     if (!sessionId.value || loading.value || busy.value) return;
@@ -84,18 +93,25 @@ export function useRagConversations() {
     } catch (cause) { if (version === selectionVersion) error.value = message(cause); }
     finally { if (version === selectionVersion) loading.value = false; }
   }
-  async function newSession() {
+  async function startDraft(draft: string) {
     if (busy.value) return;
     selectionVersion++;
+    pendingSelectionId = '';
     loading.value = false;
     sessionId.value = '';
     turns.value = [];
     hasEarlier.value = false;
     selectedTurnId.value = undefined;
-    question.value = '';
+    question.value = draft;
+    draftImported.value = Boolean(draft);
     error.value = '';
     historyOpen.value = false;
     await router.replace({ query: {} });
+    await nextTick();
+    if (!disposed) questionInput.value?.focus();
+  }
+  async function newSession() {
+    await startDraft('');
   }
   async function ask(value = question.value) {
     const submitted = value.trim();
@@ -119,6 +135,7 @@ export function useRagConversations() {
       turns.value.push(turn);
       selectedTurnId.value = turn.id;
       question.value = '';
+      draftImported.value = false;
       await scrollBottom();
       const activeId = sessionId.value;
       const result = await streamRagAnswer({ question: submitted, topK: 5, conversationId: activeId }, {
@@ -174,23 +191,30 @@ export function useRagConversations() {
     try { await navigator.clipboard.writeText(turn.answer); }
     catch { error.value = '无法复制，请选择正文手动复制。'; }
   }
-  watch(() => route.query.new, value => { if (value === '1' && !busy.value) void newSession(); });
-  watch(() => route.query.conversation, value => {
-    const id = typeof value === 'string' ? value : '';
-    if (id === sessionId.value) return;
+  async function applyNavigation(navigation: RagNavigation) {
+    if (navigation.kind === 'conversation') await selectSession(navigation.id);
+    else await startDraft(navigation.draft);
+  }
+  watch(() => [route.query.new, route.query.draft, route.query.conversation], () => {
+    if (route.path !== '/rag/chat') return;
+    const navigation = ragNavigation(route.query);
+    if (navigation.kind === 'conversation' && navigation.id === sessionId.value && (!pendingSelectionId || pendingSelectionId === navigation.id)) return;
+    // Consuming ?new=1&draft=... replaces the URL with an empty query. That is not a second reset.
+    if (navigation.kind === 'new' && route.query.new !== '1' && !sessionId.value && !pendingSelectionId) return;
     if (busy.value) {
-      // Keep the URL aligned with the conversation receiving the active stream.
-      void router.replace({ query: { conversation: sessionId.value } });
+      pendingNavigation = navigation;
+      void router.replace({ query: sessionId.value ? { conversation: sessionId.value } : {} });
       return;
     }
-    if (id) void selectSession(id);
-    else void newSession();
+    void applyNavigation(navigation);
+  }, { immediate: true });
+  watch(busy, value => {
+    if (value || !pendingNavigation || disposed || route.path !== '/rag/chat') return;
+    const navigation = pendingNavigation;
+    pendingNavigation = undefined;
+    void applyNavigation(navigation);
   });
-  onMounted(async () => {
-    await refreshHistory();
-    if (route.query.new === '1') await newSession();
-    else if (typeof route.query.conversation === 'string') await selectSession(route.query.conversation);
-  });
+  onMounted(() => { void refreshHistory(); });
   onBeforeUnmount(() => { disposed = true; selectionVersion++; controller?.abort(); });
-  return { question, sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen, editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier, newSession, ask, turnLabel, manageSession, copyAnswer };
+  return { question, questionInput, draftImported, sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen, editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier, newSession, ask, turnLabel, manageSession, copyAnswer };
 }

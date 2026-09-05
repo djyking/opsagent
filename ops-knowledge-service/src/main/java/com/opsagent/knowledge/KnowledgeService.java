@@ -40,6 +40,7 @@ public class KnowledgeService {
     private final MeterRegistry metrics;
     private final KnowledgeProperties properties;
     private final AtomicLong consistencyGap;
+    private final TicketAccessClient ticketAccess;
 
     KnowledgeService(
             KnowledgeRepository repo,
@@ -49,7 +50,8 @@ public class KnowledgeService {
             KnowledgeIndexService indexService,
             KnowledgeIndexCompensationService compensationService,
             MeterRegistry metrics,
-            KnowledgeProperties properties) {
+            KnowledgeProperties properties,
+            TicketAccessClient ticketAccess) {
         this.repo = repo;
         this.storage = storage;
         this.parser = parser;
@@ -58,6 +60,7 @@ public class KnowledgeService {
         this.compensationService = compensationService;
         this.metrics = metrics;
         this.properties = properties;
+        this.ticketAccess = ticketAccess;
         this.consistencyGap = metrics.gauge(
                 "rag.index.consistency.gap", new AtomicLong());
     }
@@ -76,6 +79,7 @@ public class KnowledgeService {
 
     List<Map<String, Object>> ticketDocuments(long ticketId) {
         var principal = SecurityUsers.current();
+        ticketAccess.requireVisible(ticketId);
         return repo.ticketDocuments(
                 ticketId, principal.userId(), administrator(principal.roles()));
     }
@@ -83,9 +87,12 @@ public class KnowledgeService {
     long upload(long base, Long ticketId, MultipartFile file, String requestedVisibility) {
         try {
             var principal = SecurityUsers.current();
+            if (ticketId != null) ticketAccess.requireVisible(ticketId);
             String visibility = normalizeVisibility(requestedVisibility, principal.roles());
             return repo.addDocument(
                     base, ticketId, storage.store(file), principal.userId(), visibility);
+        } catch (BusinessException exception) {
+            throw exception;
         } catch (Exception e) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "文件保存失败：" + e.getMessage());
         }
@@ -170,10 +177,12 @@ public class KnowledgeService {
         String visibility = String.valueOf(document.get("visibility"));
         long creator = number(document, "create_by", "createBy");
         if (!administrator(principal.roles())
-                && !"PUBLIC".equals(visibility)
-                && creator != principal.userId()) {
+                && creator != principal.userId()
+                && !("PUBLIC".equals(visibility) && "PUBLISHED".equals(text(document, "review_status")))) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "无权查看该文档切片");
         }
+        long linkedTicket = number(document, "ticket_id");
+        if (linkedTicket > 0) ticketAccess.requireVisible(linkedTicket);
         return repo.chunks(id);
     }
 
@@ -182,10 +191,21 @@ public class KnowledgeService {
     }
 
     List<Map<String, Object>> search(String query, int topK, Long documentId) {
+        return search(query, topK, documentId, null);
+    }
+
+    List<Map<String, Object>> search(String query, int topK, Long documentId, Long ticketId) {
+        if (query == null || query.isBlank() || query.length() > 2000
+                || (documentId != null && documentId < 1) || (ticketId != null && ticketId < 1)) {
+            throw new BusinessException(ErrorCode.VALIDATION, "检索问题或范围参数无效");
+        }
         int limit = Math.min(Math.max(topK, 1), 30);
         var principal = SecurityUsers.current();
         boolean administrator = principal.roles().stream()
                 .anyMatch(role -> "ADMIN".equals(role) || "ROLE_ADMIN".equals(role));
+        if (documentId != null || ticketId != null) {
+            return scopedSearch(query, limit, documentId, ticketId, principal.userId(), administrator);
+        }
         if (indexService.enabled()) {
             try {
                 HybridSearchResult hybrid = indexService.search(new RetrievalRequest(
@@ -219,6 +239,47 @@ public class KnowledgeService {
             }
         }
         return unique.values().stream().limit(limit).toList();
+    }
+
+    private List<Map<String, Object>> scopedSearch(String query, int limit, Long documentId,
+                                                   Long ticketId, long userId, boolean administrator) {
+        if (ticketId != null) ticketAccess.requireVisible(ticketId);
+        if (documentId != null) {
+            Map<String, Object> document = repo.document(documentId);
+            if (document == null || (!administrator && number(document, "create_by") != userId
+                    && !("PUBLIC".equals(text(document, "visibility"))
+                            && "PUBLISHED".equals(text(document, "review_status"))))) {
+                throw new BusinessException(ErrorCode.FORBIDDEN, "文档不存在或当前账号不可访问");
+            }
+            long linkedTicket = number(document, "ticket_id");
+            if (ticketId != null && linkedTicket != ticketId) {
+                throw new BusinessException(ErrorCode.FORBIDDEN, "所选文档不在当前工单附件范围内");
+            }
+            if (ticketId == null && linkedTicket > 0) ticketAccess.requireVisible(linkedTicket);
+            if (!Set.of("PARSED", "INDEXED").contains(text(document, "status"))
+                    || "ARCHIVED".equals(text(document, "review_status"))) {
+                throw new BusinessException(ErrorCode.CONFLICT, "所选文档尚未完成解析或已归档，请先检查附件状态");
+            }
+        }
+        // 显式范围读取数据库切片，允许授权预览草稿，但不会发布到全局索引或扩大到其他知识。
+        List<String> terms = retrievalTerms(query).stream().distinct().limit(24).toList();
+        // 先在完整授权范围中筛选，再截取候选；较旧附件或长文档尾部的匹配片段仍能召回。
+        List<Map<String, Object>> rows = repo.scopedChunks(documentId, ticketId, userId, administrator, 300, terms);
+        if (rows.isEmpty() && !terms.isEmpty()) {
+            rows = repo.scopedChunks(documentId, ticketId, userId, administrator, limit, List.of());
+        }
+        return rows.stream().sorted(java.util.Comparator.<Map<String, Object>>comparingInt(row -> {
+                    String content = (text(row, "content") + " " + text(row, "documentName"))
+                            .toLowerCase(java.util.Locale.ROOT);
+                    return (int) terms.stream()
+                            .filter(term -> content.contains(term.toLowerCase(java.util.Locale.ROOT))).count();
+                }).reversed())
+                .limit(limit).map(row -> {
+                    Map<String, Object> result = new LinkedHashMap<>(row);
+                    result.put("retrievalMode", documentId != null ? "SCOPED_DOCUMENT" : "TICKET_ATTACHMENTS");
+                    result.put("channels", List.of("SCOPED_DATABASE"));
+                    return result;
+                }).toList();
     }
 
     HybridSearchResult debugSearch(

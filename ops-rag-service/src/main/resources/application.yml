@@ -39,6 +39,7 @@ ops:
       - /actuator/prometheus
   rag:
     knowledge-url: ${OPS_KNOWLEDGE_URL:}
+    platform-url: ${OPS_PLATFORM_URL:}
     top-k: ${OPS_RAG_TOP_K:5}
     maximum-top-k: ${OPS_RAG_MAX_TOP_K:20}
     context-character-budget: ${OPS_RAG_CONTEXT_BUDGET:16000}

@@ -1,1 +1,0 @@
-import{d as n,b as o,n as s,e,t as l,k as c}from"./index-C3naI4E3.js";const i=n({__name:"LoadingState",props:{text:{},compact:{type:Boolean}},setup(t){return(p,a)=>(c(),o("div",{class:s(["oa-loading-state",{compact:t.compact}])},[a[0]||(a[0]=e("i",null,null,-1)),e("span",null,l(t.text||"正在加载…"),1)],2))}});export{i as _};

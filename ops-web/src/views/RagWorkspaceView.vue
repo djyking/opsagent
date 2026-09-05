@@ -6,13 +6,13 @@ import AnswerContent from '@/components/AnswerContent.vue';
 import RagSources from '@/components/RagSources.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import BaseModal from '@/components/BaseModal.vue';
-const { question, sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen, editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier, newSession, ask, turnLabel, manageSession, copyAnswer } = useRagConversations();
-const suggestions = ['排查 Redis 连接超时', '分析 RabbitMQ 消息堆积', '查询 SLA 超时处理规范'];
+const { question, questionInput, draftImported, sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen, editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier, newSession, ask, turnLabel, manageSession, copyAnswer } = useRagConversations();
+const suggestions = ['排查 Redis 连接超时', '列出当前服务清单', '查看服务之间的依赖关系'];
 </script>
 
 <template>
   <div class="stack-page rag-page">
-    <PageHeader title="智能问答" description="基于知识库检索来源，辅助分析运维问题" />
+    <PageHeader title="智能问答" description="检索运维知识，查询服务清单与依赖关系" />
     <section class="rag-three-pane" :class="{ 'context-closed': !contextOpen, 'history-open': historyOpen }">
       <aside class="rag-conversations" aria-label="我的会话">
         <header class="panel-header"><div><h3>我的会话</h3><span class="panel-count">{{ total }} 个 · 仅当前账号可见</span></div><button class="icon-button" aria-label="新会话" :disabled="busy" @click="newSession"><Plus :size="15" /></button></header>
@@ -32,7 +32,7 @@ const suggestions = ['排查 Redis 连接超时', '分析 RabbitMQ 消息堆积'
             <button v-if="sessionId" class="icon-button" aria-label="重命名会话" :disabled="busy" @click="editTitle = current?.title || ''; editMode = 'rename'"><Pencil :size="15" /></button>
             <button v-if="sessionId" class="icon-button" aria-label="删除当前会话" :disabled="busy" @click="editMode = 'delete'"><Trash2 :size="15" /></button>
             <button class="button secondary" aria-label="新会话" :disabled="busy" @click="newSession"><Plus :size="15" />新会话</button>
-            <button class="icon-button rag-context-toggle" :aria-expanded="contextOpen" :aria-label="contextOpen ? '收起检索上下文' : '展开检索上下文'" @click="contextOpen = !contextOpen"><PanelRightClose v-if="contextOpen" :size="17" /><PanelRightOpen v-else :size="17" /></button>
+            <button class="icon-button rag-context-toggle" :aria-expanded="contextOpen" :aria-label="contextOpen ? '收起参考上下文' : '展开参考上下文'" @click="contextOpen = !contextOpen"><PanelRightClose v-if="contextOpen" :size="17" /><PanelRightOpen v-else :size="17" /></button>
           </div>
         </header>
         <div ref="chatScroll" class="rag-chat-scroll" :aria-busy="busy || loading">
@@ -48,12 +48,12 @@ const suggestions = ['排查 Redis 连接超时', '分析 RabbitMQ 消息堆积'
               <button v-if="turn.result?.references.length" class="rag-show-sources" @click="selectedTurnId = turn.id; contextOpen = true"><BookOpen :size="14" />查看本条回答的 {{ turn.result.references.length }} 条来源</button>
             </div>
           </article>
-          <div v-if="!turns.length && !loading" class="rag-empty"><span class="rag-empty-icon"><Sparkles :size="28" /></span><small class="rag-welcome-label">从一个问题开始</small><strong>一起找到问题的下一步。</strong><p>描述你遇到的现象，我会检索知识库，<br />把相关来源和分析建议放在一起。</p><div class="suggested-prompts"><button v-for="item in suggestions" :key="item" :disabled="busy" @click="ask(item)"><BookOpen :size="16" /><span>{{ item }}</span><ArrowRight class="suggested-arrow" :size="15" /></button></div></div>
+          <div v-if="!turns.length && !loading" class="rag-empty"><span class="rag-empty-icon"><Sparkles :size="28" /></span><small class="rag-welcome-label">从一个问题开始</small><strong>一起找到问题的下一步。</strong><p>描述你遇到的现象，或查询服务与依赖，<br />把实际来源和分析建议放在一起。</p><div class="suggested-prompts"><button v-for="item in suggestions" :key="item" :disabled="busy" @click="ask(item)"><BookOpen :size="16" /><span>{{ item }}</span><ArrowRight class="suggested-arrow" :size="15" /></button></div></div>
           <p v-if="error" class="inline-error rag-error" role="alert">{{ error }}</p>
         </div>
-        <form class="rag-question-form chat-composer" @submit.prevent="ask()"><textarea v-model="question" required rows="3" maxlength="2000" aria-label="运维问题" :placeholder="sessionId ? '继续追问，或开始新的问题…' : '输入运维问题…'" @keydown.enter.exact.prevent="ask()" /><div class="question-submit-row"><span class="knowledge-scope"><BookOpen :size="14" />知识库</span><span class="composer-hint">Enter 发送 · Shift + Enter 换行</span><button class="composer-send" :disabled="busy || loading || !question.trim()" :title="busy ? '生成中' : '发送问题'" aria-label="发送问题"><Send :size="16" /></button></div></form>
+        <form class="rag-question-form chat-composer" @submit.prevent="ask()"><textarea ref="questionInput" v-model="question" required rows="3" maxlength="2000" aria-label="运维问题" :placeholder="sessionId ? '继续追问，或开始新的问题…' : '输入运维问题…'" @keydown.enter.exact.prevent="ask()" /><div class="question-submit-row"><span class="knowledge-scope"><BookOpen :size="14" />知识与服务</span><span class="composer-hint" role="status">{{ draftImported ? '问题已带入，可修改后发送' : 'Enter 发送 · Shift + Enter 换行' }}</span><button class="composer-send" :disabled="busy || loading || !question.trim()" :title="busy ? '生成中' : '发送问题'" aria-label="发送问题"><Send :size="16" /></button></div></form>
       </main>
-      <aside v-if="contextOpen" class="rag-context-panel"><header class="panel-header"><div><h3>检索上下文</h3><span class="panel-count">{{ references.length }} 条来源</span></div></header><p class="rag-context-note">{{ referenceTurn ? '对应问题：' + referenceTurn.question : '先查看引用，再结合实际环境核对建议。' }}</p><RagSources :references="references" /><div v-if="!references.length" class="rag-context-empty"><BookOpen :size="24" /><strong>让答案有据可查</strong><p>完成提问后，这里显示命中的知识文档、片段与相关度。</p></div></aside>
+      <aside v-if="contextOpen" class="rag-context-panel"><header class="panel-header"><div><h3>参考上下文</h3><span class="panel-count">{{ references.length }} 条来源</span></div></header><p class="rag-context-note">{{ referenceTurn ? '对应问题：' + referenceTurn.question : '先查看引用，再结合实际环境核对建议。' }}</p><RagSources :references="references" /><div v-if="!references.length" class="rag-context-empty"><BookOpen :size="24" /><strong>让答案有据可查</strong><p>完成提问后，这里显示知识片段或服务目录及其读取时间。</p></div></aside>
     </section>
     <BaseModal v-if="editMode" :title="editMode === 'rename' ? '重命名会话' : '删除会话'" @close="!actionBusy && (editMode = '')"><form id="manage-conversation" @submit.prevent="manageSession"><label v-if="editMode === 'rename'">会话名称<input v-model.trim="editTitle" required maxlength="120" /></label><p v-else>删除“{{ current?.title }}”后，该会话及其问答将从历史列表移除。其他会话不受影响。</p><p v-if="error" class="inline-error">{{ error }}</p></form><template #footer><button class="button secondary" :disabled="actionBusy" @click="editMode = ''">取消</button><button class="button primary" form="manage-conversation" :disabled="actionBusy || (editMode === 'rename' && !editTitle.trim())">{{ actionBusy ? '处理中…' : editMode === 'rename' ? '保存名称' : '确认删除' }}</button></template></BaseModal>
   </div>

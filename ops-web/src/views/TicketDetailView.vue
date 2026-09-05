@@ -274,6 +274,7 @@ async function ask() {
   try {
     const answer = await streamRagAnswer({
       question: asked,
+      ticketId: id,
       documentId: selectedDocument.value,
       topK: 5,
     }, {
@@ -459,13 +460,13 @@ onMounted(load);
         <section v-show="activeTab === 'documents'" class="panel ai-panel" data-motion="tab">
           <header class="panel-header">
             <div>
-              <h3>文档智能问答</h3>
+              <h3>文档与服务问答</h3>
             </div>
             <Bot :size="26" />
           </header>
           <form class="question-form" @submit.prevent="ask">
-            <select v-model="selectedDocument">
-              <option :value="undefined">检索本工单全部已解析文档</option>
+            <select v-model="selectedDocument" aria-label="问答文档范围">
+              <option :value="undefined">本工单附件 · 服务目录自动识别</option>
               <option
                 v-for="doc in documents.filter(
                   (d) => d.parseStatus === 'SUCCESS',
@@ -476,11 +477,13 @@ onMounted(load);
                 {{ doc.originalName }}
               </option>
             </select>
+            <small class="question-scope-hint">{{ selectedDocument ? '仅依据所选文档回答。' : '文档问题检索本工单附件；服务清单与依赖问题查询当前服务目录。' }}</small>
             <div>
               <textarea
                 v-model="question"
                 maxlength="2000"
                 rows="3"
+                aria-label="工单问答问题"
                 placeholder="例如：磁盘使用率超过 90% 时应该如何处理？"
               /><button
                 class="button primary"
@@ -492,7 +495,7 @@ onMounted(load);
           </form>
           <div v-if="!questions.length" class="empty-state small-empty">
             <MessageSquareText :size="30" /><span
-              >解析文档后，可以在这里基于内容提问</span
+              >可以基于工单附件提问，也可以查询服务清单与依赖关系</span
             >
           </div>
           <div v-else class="qa-list">

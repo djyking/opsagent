@@ -65,7 +65,8 @@ public class KnowledgeIndexCompensationService {
             } else if ("INDEX".equals(operation)) {
                 int version = (int) number(task, "document_version", "documentVersion");
                 if (!repository.validDocumentVersion(documentId, version)) {
-                    throw new IllegalStateException("文档版本已失效");
+                    repository.indexTaskObsolete(taskId);
+                    return "FAILED";
                 }
                 indexService.indexDocument(documentId);
             } else {

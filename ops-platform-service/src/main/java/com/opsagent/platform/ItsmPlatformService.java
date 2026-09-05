@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsagent.common.core.BusinessException;
 import com.opsagent.common.core.ErrorCode;
+import com.opsagent.common.core.PageResult;
 import com.opsagent.common.security.SecurityUsers;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.ZoneId;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -58,6 +60,25 @@ public class ItsmPlatformService {
 
     List<Map<String, Object>> shifts(Long scheduleId) {
         return repository.shifts(scheduleId);
+    }
+
+    @Transactional(readOnly = true)
+    PageResult<OnCallShiftDtos.Shift> shiftPage(OnCallShiftDtos.PageQuery query) {
+        LocalDateTime checkedAt = repository.shiftQueryTime();
+        long total = repository.countShifts(query.scheduleId(), checkedAt);
+        long lastPage = Math.max(1, (total + query.pageSize() - 1) / query.pageSize());
+        long page = Math.min(query.pageNum(), lastPage);
+        List<OnCallShiftDtos.Shift> records = total == 0 ? List.of() : repository.shiftPage(
+                query.scheduleId(), checkedAt, (page - 1) * query.pageSize(), query.pageSize());
+        return new PageResult<>(records, total, page, query.pageSize());
+    }
+
+    List<OnCallShiftDtos.Shift> shiftCalendar(OnCallShiftDtos.CalendarQuery query) {
+        if (!query.endTime().isAfter(query.startTime())
+                || query.endTime().isAfter(query.startTime().plusDays(31))) {
+            throw new BusinessException(ErrorCode.VALIDATION, "日历结束时间须晚于开始时间，且区间不超过 31 天");
+        }
+        return repository.shiftCalendar(query);
     }
 
     CurrentOnCallResponse currentOnCall(String serviceCiCode) {

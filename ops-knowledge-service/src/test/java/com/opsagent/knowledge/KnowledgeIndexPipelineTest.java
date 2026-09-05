@@ -95,6 +95,24 @@ class KnowledgeIndexPipelineTest {
     }
 
     @Test
+    void shouldStopObsoleteIndexTaskWithoutRecreatingDeletedDocumentIndex() {
+        KnowledgeRepository repository = mock(KnowledgeRepository.class);
+        KnowledgeIndexService index = mock(KnowledgeIndexService.class);
+        when(repository.indexTask(8L)).thenReturn(Map.of("status", "RETRYING", "operation", "INDEX",
+                "document_id", 1035L, "document_version", 1));
+        when(repository.claimIndexTask(8L)).thenReturn(1);
+        when(repository.validDocumentVersion(1035L, 1)).thenReturn(false);
+        var service = new KnowledgeIndexCompensationService(repository, mock(ElasticsearchVectorStore.class),
+                mock(QdrantVectorStore.class), index, new SimpleMeterRegistry());
+        assertThat(service.process(8L)).isEqualTo("FAILED");
+        verify(repository).indexTaskObsolete(8L);
+        org.mockito.Mockito.verifyNoInteractions(index);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).indexTaskFailure(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
     void shouldSwitchReadAndWriteAliasesAtomically() throws Exception {
         MockWebServer server = new MockWebServer();
         server.enqueue(new MockResponse()

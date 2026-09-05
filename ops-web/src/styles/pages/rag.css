@@ -40,6 +40,9 @@
 .rag-source-list p { margin: 5px 0; color: var(--oa-text-secondary); font-size: var(--oa-font-size-xs); overflow-wrap: anywhere; }
 .rag-source-list small { display: flex; flex-wrap: wrap; gap: 5px 9px; color: var(--oa-text-secondary); font-size: var(--oa-font-size-xs); }
 .rag-source-list .source-debug { margin-top: 7px; color: var(--oa-text-secondary); font-family: var(--oa-font-mono); }
+.rag-source-list .cmdb-source { background: linear-gradient(125deg, var(--oa-bg-surface), #f3f9ff); }
+.rag-source-list .cmdb-source small { margin-top: 5px; }
+.source-catalog-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 9px; color: var(--oa-primary); font-size: var(--oa-font-size-xs); }
 .source-section.compact { margin: 12px 0 0 36px; padding: 12px 0 0; border-top-style: dashed; }
 .source-section.compact .rag-source-list { grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); }
 

@@ -24,7 +24,7 @@ assert.ok(!html.includes('<script>') && !html.includes('href="javascript:'));
 console.log('PASS markdown: headings, emphasis, code, tables, trailing content and HTML/link safety');
 globalThis.window = { setTimeout, clearTimeout };
 globalThis.localStorage = { getItem: () => null };
-const { streamRagAnswer, ragCompletionLabel } = load('api/rag-stream.ts', source => source.replaceAll('import.meta.env.VITE_API_BASE_URL', "''"));
+const { streamRagAnswer, ragCompletionLabel, ragAnswerLabel, normalizeReferences } = load('api/rag-stream.ts', source => source.replaceAll('import.meta.env.VITE_API_BASE_URL', "''"));
 const encoder = new TextEncoder();
 const events = 'event: token\r\ndata: {"delta":"三、证据"}\r\n\r\nevent: token\r\ndata: {"delta":"\\n结尾完整。"}\r\n\r\nevent: done\r\ndata: {"answer":"三、证据\\n结尾完整。","provider":"test","model":"test","references":[],"metadata":{"generationComplete":true}}\r\n\r\n';
 const bytes = encoder.encode(events);
@@ -40,3 +40,31 @@ console.log('PASS SSE: byte-split UTF-8, split CRLF, complete final answer, inco
 globalThis.fetch = async () => new Response(JSON.stringify({code:40400,message:'会话不存在或不可访问'}), {headers:{'Content-Type':'application/json'}});
 await assert.rejects(streamRagAnswer({question:'x'}), /会话不存在或不可访问/);
 console.log('PASS SSE endpoint preserves JSON business errors');
+
+const directorySource = { sourceId: 'S1', sourceType: 'CMDB', sourceUrl: '/itsm/cmdb', documentId: 0, chunkId: 0, chunkIndex: 0, documentName: '服务目录', sourceUpdatedAt: '2026-09-05T10:00:00', sourceRetrievedAt: '2026-09-05T11:00:00Z' };
+const directoryResult = { answer: '当前有 6 个服务。 [S1]', provider: 'cmdb', model: 'cmdb-readonly', references: [directorySource], metadata: { generationComplete: true } };
+const statuses = [];
+let sentRequest;
+globalThis.fetch = async (url, options) => {
+  sentRequest = { url, body: JSON.parse(options.body) };
+  return new Response(`event: status\ndata: {"phase":"cmdb"}\n\nevent: sources\ndata: ${JSON.stringify({ references: [directorySource] })}\n\nevent: token\ndata: {"delta":"当前有 6 个服务。 [S1]"}\n\nevent: done\ndata: ${JSON.stringify(directoryResult)}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
+};
+let emittedSources;
+const catalogAnswer = await streamRagAnswer({ question: '服务清单', ticketId: 2053, documentId: 1021 }, { onStatus: value => statuses.push(value), onSources: value => emittedSources = value });
+assert.equal(sentRequest.body.ticketId, 2053, 'ticket scope must be sent to the backend');
+assert.equal(sentRequest.body.documentId, 1021, 'explicit document scope must survive alongside ticket scope');
+assert.deepEqual(statuses, ['正在读取服务目录', '正在返回查询结果']);
+assert.equal(ragCompletionLabel(catalogAnswer), '查询完成');
+assert.equal(ragAnswerLabel(catalogAnswer), '服务目录 · 实时读取');
+const unavailableCatalog = { ...catalogAnswer, metadata: { generationComplete: true, degraded: true, degradedReason: 'CMDB_UNAVAILABLE' } };
+assert.equal(ragCompletionLabel(unavailableCatalog), '目录暂不可用');
+assert.equal(ragAnswerLabel(unavailableCatalog), '服务目录 · 读取失败');
+for (const key of ['sourceId', 'sourceType', 'sourceUrl', 'sourceUpdatedAt', 'sourceRetrievedAt']) {
+  assert.equal(catalogAnswer.references[0][key], directorySource[key]);
+  assert.equal(emittedSources[0][key], directorySource[key]);
+  assert.equal(normalizeReferences(catalogAnswer.references)[0][key], directorySource[key], 'history normalization must preserve directory provenance');
+}
+await streamRagAnswer({ question: '服务依赖', ticketId: 2053, conversationId: 'session-test' });
+assert.equal(sentRequest.url, '/api/rag/conversations/session-test/stream');
+assert.equal(sentRequest.body.ticketId, 2053);
+console.log('PASS scoped Q&A: ticket/document scope on both stream routes, CMDB progress, provenance and history normalization');

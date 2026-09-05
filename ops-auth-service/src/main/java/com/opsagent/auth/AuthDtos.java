@@ -20,7 +20,19 @@ final class AuthDtos {
      * @author heyu
      * @since 2026/8/1
      */
-    record LoginRequest(@NotBlank String username, @NotBlank String password) {}
+    record LoginRequest(
+            @NotBlank @Size(max = 64) String username,
+            @NotBlank String password,
+            @NotBlank @Pattern(regexp = "[a-f0-9]{32}") String captchaId,
+            @NotBlank @Size(max = 16) String captchaCode) {}
+
+    /**
+     * 图形验证码公开响应，不包含答案或校验摘要。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record CaptchaResponse(String captchaId, String imageDataUrl, long expiresInSeconds) {}
 
     /**
      * 公开注册只接受账号资料，不接受角色或权限字段。

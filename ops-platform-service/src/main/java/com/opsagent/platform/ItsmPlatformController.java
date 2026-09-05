@@ -1,6 +1,7 @@
 package com.opsagent.platform;
 
 import com.opsagent.common.core.ApiResponse;
+import com.opsagent.common.core.PageResult;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -10,6 +11,7 @@ import jakarta.validation.constraints.Size;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -109,6 +111,18 @@ public class ItsmPlatformController {
     ApiResponse<List<Map<String, Object>>> shifts(
             @RequestParam(required = false) Long scheduleId) {
         return ApiResponse.success(service.shifts(scheduleId));
+    }
+
+    @GetMapping("/oncall/shifts/page")
+    ApiResponse<PageResult<OnCallShiftDtos.Shift>> shiftPage(
+            @Valid @ModelAttribute OnCallShiftDtos.PageQuery query) {
+        return ApiResponse.success(service.shiftPage(query));
+    }
+
+    @GetMapping("/oncall/shifts/calendar")
+    ApiResponse<List<OnCallShiftDtos.Shift>> shiftCalendar(
+            @Valid @ModelAttribute OnCallShiftDtos.CalendarQuery query) {
+        return ApiResponse.success(service.shiftCalendar(query));
     }
 
     @PostMapping("/oncall/shifts")

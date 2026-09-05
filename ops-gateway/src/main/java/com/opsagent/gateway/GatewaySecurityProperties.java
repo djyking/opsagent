@@ -16,7 +16,8 @@ public class GatewaySecurityProperties {
     private String jwtSecret = "";
 
     private List<String> publicPaths =
-            List.of("/api/auth/login", "/api/auth/register", "/api/auth/refresh", "/actuator/health");
+            List.of("/api/auth/captcha", "/api/auth/login", "/api/auth/register",
+                    "/api/auth/refresh", "/actuator/health");
 
     public String getJwtSecret() {
         return jwtSecret;

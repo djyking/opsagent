@@ -8,7 +8,8 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc -b",
-    "test:answers": "node tests/answer-stream.test.mjs"
+    "test:answers": "node tests/answer-stream.test.mjs",
+    "test:workspace": "node tests/workspace-actions.test.mjs && node tests/rag-navigation.test.mjs && node tests/dashboard-data.test.mjs"
   },
   "dependencies": {
     "axios": "^1.11.0",

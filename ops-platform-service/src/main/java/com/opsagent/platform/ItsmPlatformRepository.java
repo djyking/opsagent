@@ -3,6 +3,7 @@ package com.opsagent.platform;
 import io.micrometer.core.instrument.MeterRegistry;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -17,6 +18,10 @@ import java.time.LocalDateTime;
  */
 @Repository
 public class ItsmPlatformRepository {
+    private static final RowMapper<OnCallShiftDtos.Shift> SHIFT_ROW = (row, index) -> new OnCallShiftDtos.Shift(
+            row.getLong("id"), row.getLong("scheduleId"), row.getString("scheduleName"),
+            row.getString("roleType"), row.getLong("userId"), row.getString("userName"),
+            row.getTimestamp("startTime").toLocalDateTime(), row.getTimestamp("endTime").toLocalDateTime());
     private final JdbcTemplate jdbc;
     private final MeterRegistry metrics;
 
@@ -253,6 +258,44 @@ public class ItsmPlatformRepository {
                 ORDER BY sh.start_time,sh.role_type LIMIT 100
                 """,
                 scheduleId);
+    }
+
+    LocalDateTime shiftQueryTime() {
+        return jdbc.queryForObject("SELECT CURRENT_TIMESTAMP", LocalDateTime.class);
+    }
+
+    long countShifts(Long scheduleId, LocalDateTime checkedAt) {
+        return jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM oncall_shift sh JOIN oncall_schedule s ON s.id=sh.schedule_id
+                WHERE sh.end_time>=? AND (? IS NULL OR sh.schedule_id=?)
+                """, Long.class, checkedAt, scheduleId, scheduleId);
+    }
+
+    List<OnCallShiftDtos.Shift> shiftPage(
+            Long scheduleId, LocalDateTime checkedAt, long offset, int pageSize) {
+        return jdbc.query(
+                """
+                SELECT sh.id,sh.schedule_id scheduleId,s.schedule_name scheduleName,
+                       sh.role_type roleType,sh.user_id userId,sh.user_name userName,
+                       sh.start_time startTime,sh.end_time endTime
+                FROM oncall_shift sh JOIN oncall_schedule s ON s.id=sh.schedule_id
+                WHERE sh.end_time>=? AND (? IS NULL OR sh.schedule_id=?)
+                ORDER BY sh.start_time,sh.role_type,sh.id LIMIT ? OFFSET ?
+                """, SHIFT_ROW, checkedAt, scheduleId, scheduleId, pageSize, offset);
+    }
+
+    List<OnCallShiftDtos.Shift> shiftCalendar(OnCallShiftDtos.CalendarQuery query) {
+        return jdbc.query(
+                """
+                SELECT sh.id,sh.schedule_id scheduleId,s.schedule_name scheduleName,
+                       sh.role_type roleType,sh.user_id userId,sh.user_name userName,
+                       sh.start_time startTime,sh.end_time endTime
+                FROM oncall_shift sh JOIN oncall_schedule s ON s.id=sh.schedule_id
+                WHERE s.enabled=1 AND sh.start_time<? AND sh.end_time>?
+                  AND (? IS NULL OR sh.schedule_id=?)
+                ORDER BY sh.start_time,sh.role_type,sh.id
+                """, SHIFT_ROW, query.endTime(), query.startTime(), query.scheduleId(), query.scheduleId());
     }
 
     Map<String, Object> shift(long id) {

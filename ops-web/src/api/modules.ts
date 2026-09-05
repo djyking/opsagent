@@ -21,7 +21,10 @@ import type {
 } from "@/types/api";
 
 export const authApi = {
-  login: (data: { username: string; password: string }) =>
+  captcha: () => request<{ captchaId: string; imageDataUrl: string; expiresInSeconds: number }>({
+    url: "/api/auth/captcha", timeout: 8000,
+  }),
+  login: (data: { username: string; password: string; captchaId: string; captchaCode: string }) =>
     request<LoginResponse>({ method: "POST", url: "/api/auth/login", data }),
   register: (data: {
     username: string;
@@ -168,6 +171,16 @@ export const itsmApi = {
       url: "/api/platform/oncall/shifts",
       params: { scheduleId },
     }),
+  shiftPage: (params: { pageNum: number; pageSize: number; scheduleId?: number }) =>
+    request<PageResponse<Record<string, unknown>>>({
+      url: "/api/platform/oncall/shifts/page",
+      params,
+    }),
+  shiftCalendar: (params: { startTime: string; endTime: string; scheduleId?: number }) =>
+    request<Record<string, unknown>[]>({
+      url: "/api/platform/oncall/shifts/calendar",
+      params,
+    }),
   currentOnCall: (serviceCiCode?: string) =>
     request<CurrentOnCall>({
       url: "/api/platform/oncall/current",
@@ -307,6 +320,7 @@ export const aiApi = {
       url: "/api/rag/ask",
       data: {
         question: data.question,
+        ticketId,
         topK: data.topK || 5,
         documentId: data.documentId,
       },

@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import os
 import pathlib
 import re
 import statistics
@@ -116,15 +117,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:18080")
     parser.add_argument("--username", default="admin")
-    parser.add_argument("--password", required=True)
+    parser.add_argument("--token", default=os.environ.get("OPSAGENT_TOKEN"),
+                        help="Existing access token (or OPSAGENT_TOKEN environment variable); preferred")
+    parser.add_argument("--password", default=os.environ.get("OPSAGENT_PASSWORD"))
+    parser.add_argument("--captcha-id", help="ID returned by GET /api/auth/captcha")
+    parser.add_argument("--captcha-code", help="Characters read from the same captcha image")
     parser.add_argument("--include-answers", action="store_true")
     args = parser.parse_args()
-    login = request_json(
-        f"{args.base_url}/api/auth/login",
-        "POST",
-        {"username": args.username, "password": args.password},
-    )
-    token = login["data"]["accessToken"]
+    token = args.token
+    if not token:
+        if not all((args.password, args.captcha_id, args.captcha_code)):
+            parser.error("Use --token / OPSAGENT_TOKEN, or provide password, --captcha-id and --captcha-code.")
+        login = request_json(
+            f"{args.base_url}/api/auth/login",
+            "POST",
+            {"username": args.username, "password": args.password,
+             "captchaId": args.captcha_id, "captchaCode": args.captcha_code},
+        )
+        if login.get("code") != 0 or not login.get("data", {}).get("accessToken"):
+            parser.error(login.get("message") or "Login failed; obtain a new captcha before retrying.")
+        token = login["data"]["accessToken"]
     cases = [json.loads(line) for line in CASES.read_text(encoding="utf-8").splitlines() if line]
     results = []
     latencies = {name: [] for name in ("BM25", "VECTOR", "HYBRID_RRF", "HYBRID_RERANK")}

@@ -28,20 +28,24 @@ public class AuthService {
     private final RefreshTokenMapper refreshTokens;
     private final PasswordEncoder encoder;
     private final JwtService jwt;
+    private final CaptchaService captcha;
 
     AuthService(
             UserMapper users,
             RefreshTokenMapper refreshTokens,
             PasswordEncoder encoder,
-            JwtService jwt) {
+            JwtService jwt,
+            CaptchaService captcha) {
         this.users = users;
         this.refreshTokens = refreshTokens;
         this.encoder = encoder;
         this.jwt = jwt;
+        this.captcha = captcha;
     }
 
     @Transactional
     TokenResponse login(LoginRequest req) {
+        captcha.verify(req.captchaId(), req.captchaCode());
         User u = find(req.username());
         if (u == null
                 || !"enable".equalsIgnoreCase(u.getStatus())

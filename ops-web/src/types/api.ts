@@ -92,6 +92,10 @@ export interface AiReference {
   relevanceScore: number;
   excerpt?: string;
   sourceId?: string;
+  sourceType?: string;
+  sourceUrl?: string;
+  sourceUpdatedAt?: string;
+  sourceRetrievedAt?: string;
   headingPath?: string;
   pageStart?: number;
   pageEnd?: number;

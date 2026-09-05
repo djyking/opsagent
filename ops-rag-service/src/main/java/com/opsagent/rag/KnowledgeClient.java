@@ -13,11 +13,21 @@ import java.util.*;
  */
 @FeignClient(name = "ops-knowledge-service", url = "${ops.rag.knowledge-url:}")
 interface KnowledgeClient {
+    @GetMapping("/api/knowledge/tickets/{ticketId}/documents")
+    Envelope<List<Map<String, Object>>> ticketDocuments(@PathVariable long ticketId);
+
     @GetMapping("/api/knowledge/internal/search")
     Envelope<List<Map<String, Object>>> search(
             @RequestParam String query,
             @RequestParam int topK,
             @RequestParam(required = false) Long documentId);
+
+    @GetMapping("/api/knowledge/internal/search")
+    Envelope<List<Map<String, Object>>> searchTicket(
+            @RequestParam String query,
+            @RequestParam int topK,
+            @RequestParam(required = false) Long documentId,
+            @RequestParam Long ticketId);
 
     @GetMapping("/api/knowledge/internal/debug/search")
     Envelope<Map<String, Object>> debugSearch(

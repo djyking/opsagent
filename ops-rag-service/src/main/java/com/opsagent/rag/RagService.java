@@ -39,6 +39,7 @@ public class RagService {
     private final RerankService rerankService;
     private final ContextAssembler contextAssembler;
     private final MeterRegistry metrics;
+    private final CmdbAnswerService cmdb;
 
     RagService(
             KnowledgeClient knowledge,
@@ -49,7 +50,8 @@ public class RagService {
             CitationValidator citationValidator,
             RerankService rerankService,
             ContextAssembler contextAssembler,
-            MeterRegistry metrics) {
+            MeterRegistry metrics,
+            CmdbAnswerService cmdb) {
         this.knowledge = knowledge;
         this.ragProperties = ragProperties;
         this.aiProperties = aiProperties;
@@ -59,6 +61,7 @@ public class RagService {
         this.rerankService = rerankService;
         this.contextAssembler = contextAssembler;
         this.metrics = metrics;
+        this.cmdb = cmdb;
     }
 
     Answer ask(String question, Integer requestedTopK) {
@@ -66,8 +69,12 @@ public class RagService {
     }
 
     Answer ask(String question, Integer requestedTopK, Long documentId) {
+        return ask(question, requestedTopK, documentId, null);
+    }
+
+    Answer ask(String question, Integer requestedTopK, Long documentId, Long ticketId) {
         long started = System.nanoTime();
-        StreamPlan plan = prepareStream(question, requestedTopK, documentId);
+        StreamPlan plan = prepareStream(question, requestedTopK, documentId, ticketId, null);
         Answer answer;
         if (plan.immediate() != null) {
             answer = plan.immediate();
@@ -90,25 +97,46 @@ public class RagService {
 
     StreamPlan prepareStream(
             String question, Integer requestedTopK, Long documentId, String conversationContext) {
+        return prepareStream(question, requestedTopK, documentId, null, conversationContext);
+    }
+
+    StreamPlan prepareStream(String question, Integer requestedTopK, Long documentId,
+                             Long ticketId, String conversationContext) {
         long started = System.nanoTime();
         if (credentialExtractionQuestion(question)) {
             return StreamPlan.completed(question, noEvidence(), started);
         }
+        if (ticketId != null && cmdb.supports(question, documentId)) {
+            try {
+                requireKnowledgeSuccess(knowledge.ticketDocuments(ticketId));
+            } catch (BusinessException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "工单权限暂时无法验证，请稍后重试");
+            }
+        }
+        Answer directoryAnswer = cmdb.answerIfApplicable(question, documentId);
+        if (directoryAnswer != null) return StreamPlan.completed(question, directoryAnswer, started);
         int topK = ragProperties.limit(requestedTopK);
         int retrievalCandidates = Math.max(topK, ragProperties.getRetrievalCandidates());
         String retrievalQuestion = followupRetrievalQuestion(question, conversationContext);
         List<RetrievedChunk> chunks;
         try {
-            var result = knowledge.search(retrievalQuestion, retrievalCandidates, documentId);
+            var result = ticketId == null
+                    ? knowledge.search(retrievalQuestion, retrievalCandidates, documentId)
+                    : knowledge.searchTicket(retrievalQuestion, retrievalCandidates, documentId, ticketId);
+            requireKnowledgeSuccess(result);
             List<Map<String, Object>> data = result.data() == null ? List.of() : result.data();
             chunks = data.stream()
                     .map(RetrievedChunk::from)
                     .filter(chunk -> chunk.chunkId() > 0)
                     .toList();
+        } catch (BusinessException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "知识检索暂时不可用");
         }
-        if (chunks.isEmpty() && internalFactQuestion(question)) {
+        if (chunks.isEmpty() && (documentId != null || ticketId != null || internalFactQuestion(question))) {
             return StreamPlan.completed(question, noEvidence(), started);
         }
         RerankService.Outcome reranked = rerankService.rerank(retrievalQuestion, chunks, topK);
@@ -125,6 +153,13 @@ public class RagService {
                     question, localFallback(context, sources, "LLM_NOT_CONFIGURED"), started);
         }
         LlmRequest request = promptBuilder.build(question, context);
+        if (documentId != null || ticketId != null) {
+            request = new LlmRequest(request.systemPrompt()
+                    + "\n本次仅检索用户明确选择且有权读取的文档/工单附件，其中可能包含未审核草稿。"
+                    + "回答必须以‘所选文档/附件记载’为依据，不能把文档内容称为平台实时服务目录或当前健康状态。"
+                    + "没有证据时说明范围内资料不足，不得引用范围外的知识或历史答案补全事实。",
+                    request.userPrompt(), request.maxOutputTokens());
+        }
         if (conversationContext != null && !conversationContext.isBlank()) {
             String history = conversationContext.substring(0, Math.min(conversationContext.length(), 12000));
             request = new LlmRequest(
@@ -170,6 +205,17 @@ public class RagService {
         // 与知识服务的 2000 字符检索上限对齐，同时保留前一主题和当前追问。
         return previous.substring(0, Math.min(previous.length(), 1000)) + "\n"
                 + current.substring(0, Math.min(current.length(), 999));
+    }
+
+    private void requireKnowledgeSuccess(KnowledgeClient.Envelope<?> result) {
+        if (result != null && result.code() == 0) return;
+        if (result != null && (result.code() == 40300 || result.code() == 40400)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "工单或文档不存在，或当前账号不可访问该附件范围");
+        }
+        if (result != null && result.code() == 40900) {
+            throw new BusinessException(ErrorCode.CONFLICT, "所选文档尚未完成解析或已归档，请先检查附件状态");
+        }
+        throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "知识检索暂时不可用");
     }
 
     Answer stream(
@@ -498,7 +544,11 @@ public class RagService {
             Double rerankScore,
             java.util.Set<String> retrievalChannels,
             boolean neighbor,
-            Long parentChunkId) {
+            Long parentChunkId,
+            String sourceType,
+            String sourceUrl,
+            String sourceUpdatedAt,
+            String sourceRetrievedAt) {
         static Source from(ContextAssembler.ContextSource contextSource) {
             RetrievedChunk chunk = contextSource.chunk();
             return new Source(
@@ -518,7 +568,8 @@ public class RagService {
                     chunk.rerankScore(),
                     chunk.channels(),
                     contextSource.neighbor(),
-                    contextSource.parentChunkId());
+                    contextSource.parentChunkId(),
+                    "KNOWLEDGE_DOCUMENT", null, chunk.updateTime(), java.time.Instant.now().toString());
         }
     }
 }

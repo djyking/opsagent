@@ -11,8 +11,8 @@ export const useAuthStore = defineStore("auth", () => {
   const isAdmin = computed(() => user.value?.roles.includes("ADMIN") ?? false);
   const isOps = computed(() => user.value?.roles.includes("OPS") ?? false);
 
-  async function login(username: string, password: string) {
-    const result = await authApi.login({ username, password });
+  async function login(username: string, password: string, captchaId: string, captchaCode: string) {
+    const result = await authApi.login({ username, password, captchaId, captchaCode });
     token.value = result.accessToken;
     localStorage.setItem("opsagent_token", result.accessToken);
     localStorage.setItem("opsagent_refresh_token", result.refreshToken);

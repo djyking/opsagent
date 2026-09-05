@@ -86,7 +86,8 @@ public class RagStreamingService {
         try {
             if (settled.get()) return;
             send(emitter, "status", Map.of(
-                    "phase", plan.immediate() == null ? "generating" : "retrieval-only"));
+                    "phase", "CMDB".equals(plan.metadata().retrievalMode()) ? "cmdb"
+                            : plan.immediate() == null ? "generating" : "retrieval-only"));
             RagService.Answer answer = ragService.stream(
                     plan,
                     delta -> {

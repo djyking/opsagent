@@ -65,7 +65,8 @@ public class RagConversationController {
     record QuestionRequest(
             @NotBlank @Size(max = 2000) String question,
             @Min(1) @Max(20) Integer topK,
-            @Min(1) Long documentId) {}
+            @Min(1) Long documentId,
+            @Min(1) Long ticketId) {}
 
     @GetMapping
     ApiResponse<RagConversationService.ConversationPage> list(
@@ -105,7 +106,8 @@ public class RagConversationController {
         long turnId = conversations.begin(id, userId, request.question().trim());
         try {
             String context = conversations.context(id, userId);
-            var plan = rag.prepareStream(request.question().trim(), request.topK(), request.documentId(), context);
+            var plan = rag.prepareStream(request.question().trim(), request.topK(), request.documentId(),
+                    request.ticketId(), context);
             return streaming.open(plan, rag.auditContext(),
                     answer -> conversations.complete(id, userId, turnId, answer),
                     message -> conversations.fail(id, userId, turnId, message));
