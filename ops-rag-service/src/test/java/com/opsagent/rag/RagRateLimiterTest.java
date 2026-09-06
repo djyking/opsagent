@@ -1,5 +1,7 @@
 package com.opsagent.rag;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import com.alibaba.csp.sentinel.slots.block.RuleConstant;
 import com.alibaba.csp.sentinel.slots.block.flow.FlowRule;
 import com.alibaba.csp.sentinel.slots.block.flow.FlowRuleManager;
@@ -9,8 +11,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 验证 RAG 入口由 Sentinel FlowRule 执行限流。
@@ -30,7 +30,10 @@ class RagRateLimiterTest {
         rule.setGrade(RuleConstant.FLOW_GRADE_QPS);
         rule.setCount(1.0D);
         FlowRuleManager.loadRules(List.of(rule));
-        RagRateLimiter limiter = new RagRateLimiter(org.mockito.Mockito.mock(AiBudgetGuard.class));
+        RagRateLimiter limiter =
+                new RagRateLimiter(
+                        org.mockito.Mockito.mock(AiBudgetGuard.class),
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
         limiter.check();
 

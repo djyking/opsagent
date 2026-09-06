@@ -66,24 +66,29 @@ public class RagConversationController {
             @NotBlank @Size(max = 2000) String question,
             @Min(1) @Max(20) Integer topK,
             @Min(1) Long documentId,
-            @Min(1) Long ticketId) {}
+            @Min(1) Long ticketId,
+            @Size(max = 20) String provider) {}
 
     @GetMapping
     ApiResponse<RagConversationService.ConversationPage> list(
             @RequestParam(defaultValue = "1") @Min(1) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int pageSize) {
-        return ApiResponse.success(conversations.list(SecurityUsers.current().userId(), page, pageSize));
+        return ApiResponse.success(
+                conversations.list(SecurityUsers.current().userId(), page, pageSize));
     }
 
     @PostMapping
-    ApiResponse<RagConversationService.Conversation> create(@Valid @RequestBody CreateRequest request) {
-        return ApiResponse.success(conversations.create(SecurityUsers.current().userId(), request.title()));
+    ApiResponse<RagConversationService.Conversation> create(
+            @Valid @RequestBody CreateRequest request) {
+        return ApiResponse.success(
+                conversations.create(SecurityUsers.current().userId(), request.title()));
     }
 
     @PatchMapping("/{id}")
     ApiResponse<RagConversationService.Conversation> rename(
             @PathVariable String id, @Valid @RequestBody RenameRequest request) {
-        return ApiResponse.success(conversations.rename(id, SecurityUsers.current().userId(), request.title()));
+        return ApiResponse.success(
+                conversations.rename(id, SecurityUsers.current().userId(), request.title()));
     }
 
     @DeleteMapping("/{id}")
@@ -95,7 +100,8 @@ public class RagConversationController {
     @GetMapping("/{id}/messages")
     ApiResponse<RagConversationService.TurnPage> messages(
             @PathVariable String id, @RequestParam(required = false) @Min(1) Long beforeId) {
-        return ApiResponse.success(conversations.turns(id, SecurityUsers.current().userId(), beforeId));
+        return ApiResponse.success(
+                conversations.turns(id, SecurityUsers.current().userId(), beforeId));
     }
 
     @PostMapping(value = "/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -106,9 +112,17 @@ public class RagConversationController {
         long turnId = conversations.begin(id, userId, request.question().trim());
         try {
             String context = conversations.context(id, userId);
-            var plan = rag.prepareStream(request.question().trim(), request.topK(), request.documentId(),
-                    request.ticketId(), context);
-            return streaming.open(plan, rag.auditContext(),
+            var plan =
+                    rag.prepareStream(
+                            request.question().trim(),
+                            request.topK(),
+                            request.documentId(),
+                            request.ticketId(),
+                            context,
+                            request.provider());
+            return streaming.open(
+                    plan,
+                    rag.auditContext(),
                     answer -> conversations.complete(id, userId, turnId, answer),
                     message -> conversations.fail(id, userId, turnId, message));
         } catch (RuntimeException exception) {

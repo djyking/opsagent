@@ -23,7 +23,7 @@ public interface AlertMapper {
                 labels_json,annotations_json)
             VALUES(#{fingerprint},#{alertName},#{severity},#{serviceCode},#{status},
                    1,#{seenTime},#{seenTime},
-                   IF(#{status}='resolved',#{seenTime},NULL),#{labels},#{annotations})
+                   CASE WHEN #{status}='resolved' THEN #{seenTime} ELSE NULL END,#{labels},#{annotations})
             """)
     int insert(
             String fingerprint,
@@ -48,19 +48,17 @@ public interface AlertMapper {
     @Update(
             """
             UPDATE monitor_alert SET ticket_id=#{ticketId},last_seen_time=#{seenTime},
+                current_status='firing',resolved_time=NULL,
                 labels_json=#{labels},annotations_json=#{annotations}
-            WHERE id=#{id} AND ticket_id IS NULL
+            WHERE id=#{id}
             """)
     int linkTicket(
-            long id,
-            long ticketId,
-            LocalDateTime seenTime,
-            String labels,
-            String annotations);
+            long id, long ticketId, LocalDateTime seenTime, String labels, String annotations);
 
     @Update(
             """
             UPDATE monitor_alert SET current_status='firing',
+                resolved_time=NULL,
                 occurrence_count=occurrence_count+1,last_seen_time=#{seenTime},
                 severity=#{severity},service_code=#{serviceCode},
                 labels_json=#{labels},annotations_json=#{annotations}
@@ -80,11 +78,7 @@ public interface AlertMapper {
                 resolved_time=#{seenTime},labels_json=#{labels},annotations_json=#{annotations}
             WHERE id=#{id}
             """)
-    int resolved(
-            long id,
-            LocalDateTime seenTime,
-            String labels,
-            String annotations);
+    int resolved(long id, LocalDateTime seenTime, String labels, String annotations);
 
     @Insert(
             """
@@ -100,11 +94,25 @@ public interface AlertMapper {
                    a.occurrence_count occurrenceCount,a.first_seen_time firstSeenTime,
                    a.last_seen_time lastSeenTime,a.resolved_time resolvedTime,
                    t.ticket_no ticketNo,t.status ticketStatus
-            FROM monitor_alert a LEFT JOIN ticket t ON t.id=a.ticket_id
+            FROM monitor_alert a LEFT JOIN ticket t ON t.id=a.ticket_id AND t.deleted=0
             WHERE (#{status}='' OR a.current_status=#{status})
             ORDER BY a.last_seen_time DESC LIMIT 200
             """)
     List<Map<String, Object>> list(String status);
+
+    @Select(
+            """
+            SELECT a.id,a.fingerprint,a.ticket_id ticketId,a.alert_name alertName,a.severity,
+                   a.service_code serviceCode,a.current_status currentStatus,
+                   a.occurrence_count occurrenceCount,a.first_seen_time firstSeenTime,
+                   a.last_seen_time lastSeenTime,a.resolved_time resolvedTime,
+                   t.ticket_no ticketNo,t.status ticketStatus
+            FROM monitor_alert a JOIN ticket t ON t.id=a.ticket_id AND t.deleted=0
+            WHERE (#{status}='' OR a.current_status=#{status})
+              AND (t.owner_actor_id=#{actorId} OR t.public_demo=1)
+            ORDER BY a.last_seen_time DESC LIMIT 200
+            """)
+    List<Map<String, Object>> listVisible(String status, long actorId);
 
     /**
      * 加锁后的告警聚合快照。

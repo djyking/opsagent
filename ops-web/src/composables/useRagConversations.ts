@@ -1,6 +1,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { conversationApi, type Conversation, type ConversationTurn } from '@/api/conversations';
+import { conversationApi, ragProviderApi, type AiProvider, type ProviderOption, type Conversation, type ConversationTurn } from '@/api/conversations';
 import { ragCompletionLabel, ragIncompleteMessage, streamRagAnswer } from '@/api/rag-stream';
 import { ragNavigation, type RagNavigation } from '@/utils/rag-navigation';
 
@@ -26,6 +26,11 @@ export function useRagConversations() {
   const chatScroll = ref<HTMLElement>();
   const questionInput = ref<HTMLTextAreaElement>();
   const draftImported = ref(false);
+  const providers = ref<ProviderOption[]>([]);
+  const selectedProvider = ref<AiProvider | ''>('');
+  const providersLoading = ref(false);
+  const providersReady = ref(false);
+  const providerError = ref('');
   const route = useRoute();
   const router = useRouter();
   let controller: AbortController | undefined;
@@ -37,6 +42,25 @@ export function useRagConversations() {
   const referenceTurn = computed(() => turns.value.find(turn => turn.id === selectedTurnId.value) || turns.value.at(-1));
   const references = computed(() => referenceTurn.value?.result?.references || []);
   const message = (cause: unknown) => cause instanceof Error ? cause.message : '请求失败，请重试';
+
+  async function loadProviders() {
+    if (providersLoading.value) return;
+    providersLoading.value = true;
+    providerError.value = '';
+    try {
+      const result = await ragProviderApi.list();
+      if (disposed) return;
+      providers.value = result.providers;
+      const available = result.providers.filter(item => item.available);
+      if (!available.some(item => item.provider === selectedProvider.value)) {
+        const previousProvider = [...turns.value].reverse().find(turn => available.some(item => item.provider === turn.result?.provider))?.result?.provider;
+        selectedProvider.value = available.find(item => item.provider === previousProvider)?.provider
+          || available.find(item => item.provider === result.defaultProvider)?.provider || available[0]?.provider || '';
+      }
+      providersReady.value = true;
+    } catch (cause) { providerError.value = message(cause); }
+    finally { providersLoading.value = false; }
+  }
 
   async function loadSessions(more = false) {
     const page = more ? listPage.value + 1 : 1;
@@ -73,6 +97,8 @@ export function useRagConversations() {
       turns.value = result.records;
       hasEarlier.value = result.hasMore;
       selectedTurnId.value = turns.value.at(-1)?.id;
+      const previousProvider = [...turns.value].reverse().find(turn => providers.value.some(item => item.available && item.provider === turn.result?.provider))?.result?.provider;
+      if (previousProvider) selectedProvider.value = previousProvider as AiProvider;
       question.value = '';
       draftImported.value = false;
       await router.replace({ query: { conversation: id } });
@@ -115,10 +141,10 @@ export function useRagConversations() {
   }
   async function ask(value = question.value) {
     const submitted = value.trim();
-    if (!submitted || busy.value || loading.value) return;
+    if (!submitted || busy.value || loading.value || !providersReady.value || providersLoading.value) return;
     busy.value = true;
     error.value = '';
-    progress.value = '正在检索知识库';
+    progress.value = '正在读取本次问题需要的数据';
     controller = new AbortController();
     let pending: ConversationTurn | undefined;
     try {
@@ -138,7 +164,7 @@ export function useRagConversations() {
       draftImported.value = false;
       await scrollBottom();
       const activeId = sessionId.value;
-      const result = await streamRagAnswer({ question: submitted, topK: 5, conversationId: activeId }, {
+      const result = await streamRagAnswer({ question: submitted, topK: 5, conversationId: activeId, provider: selectedProvider.value || undefined }, {
         onStatus: value => progress.value = value,
         onToken: delta => {
           const follow = chatScroll.value && chatScroll.value.scrollHeight - chatScroll.value.scrollTop - chatScroll.value.clientHeight < 100;
@@ -214,7 +240,7 @@ export function useRagConversations() {
     pendingNavigation = undefined;
     void applyNavigation(navigation);
   });
-  onMounted(() => { void refreshHistory(); });
+  onMounted(() => { void refreshHistory(); void loadProviders(); });
   onBeforeUnmount(() => { disposed = true; selectionVersion++; controller?.abort(); });
-  return { question, questionInput, draftImported, sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen, editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier, newSession, ask, turnLabel, manageSession, copyAnswer };
+  return { question, questionInput, draftImported, providers, selectedProvider, providersLoading, providersReady, providerError, loadProviders, sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen, editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier, newSession, ask, turnLabel, manageSession, copyAnswer };
 }

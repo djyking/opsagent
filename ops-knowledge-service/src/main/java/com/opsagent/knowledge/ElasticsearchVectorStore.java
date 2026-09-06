@@ -17,6 +17,8 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * 管理 Elasticsearch 中文文本索引、幂等写入和带权限过滤的 BM25 检索。
@@ -136,6 +138,37 @@ public class ElasticsearchVectorStore {
                 .retrieve()
                 .body(JsonNode.class);
         return response.path("aggregations").path("documents").path("value").asLong();
+    }
+
+    Set<Long> indexedDocumentIds(String physicalIndex) {
+        return indexedDocumentIds(physicalIndex, false);
+    }
+
+    Set<Long> indexedDocumentIds(String physicalIndex, boolean publishedOnly) {
+        Set<Long> ids = new LinkedHashSet<>();
+        Map<String, Object> after = null;
+        for (int page = 0; page < 200; page++) {
+            Map<String, Object> composite = new LinkedHashMap<>();
+            composite.put("size", 500);
+            composite.put("sources", List.of(Map.of("documentId", Map.of("terms", Map.of("field", "documentId")))));
+            if (after != null) composite.put("after", after);
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("size", 0);
+            body.put("aggs", Map.of("documents", Map.of("composite", composite)));
+            if (publishedOnly) body.put("query", Map.of("term", Map.of("reviewStatus", "PUBLISHED")));
+            JsonNode response = client.post().uri("/" + physicalIndex + "/_search")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve().body(JsonNode.class);
+            if (response == null || !response.path("aggregations").path("documents").path("buckets").isArray()) {
+                throw new IllegalStateException("Elasticsearch 未返回完整的文档 ID 核对结果");
+            }
+            JsonNode documents = response.path("aggregations").path("documents");
+            for (JsonNode bucket : documents.path("buckets")) ids.add(bucket.path("key").path("documentId").asLong());
+            if (documents.path("buckets").isEmpty() || !documents.hasNonNull("after_key")) return ids;
+            after = mapper.convertValue(documents.path("after_key"), SOURCE_MAP_TYPE);
+        }
+        throw new IllegalStateException("本次 ID 核对超过 100000 篇文档，请使用离线审计");
     }
 
     long documentCount(String indexName) {

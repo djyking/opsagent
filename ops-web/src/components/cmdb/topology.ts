@@ -24,7 +24,7 @@ export function ciType(value: unknown) {
   return ciTypes[key as keyof typeof ciTypes] || { label: key || "配置项", icon: Workflow, tone: "other" };
 }
 export const relationNames: Record<string, string> = { DEPENDS_ON: "依赖", CALLS: "调用", READS: "读取", WRITES: "写入", PUBLISHES_TO: "发布到", CONSUMES_FROM: "消费自", ROUTES_TO: "路由到", SENDS_TO: "发送至", REGISTERS_TO: "注册到" };
-export const environmentNames: Record<string, string> = { PROD: "生产", STAGING: "预发布", TEST: "测试", DEV: "开发" };
+export const environmentNames: Record<string, string> = { PROD: "生产", STAGING: "预发布", TEST: "测试", DEV: "开发", DEMO: "隔离演练" };
 
 export function normalizeNodes(nodes: CiRecord[], root?: CiRecord): CiNode[] {
   const result = new Map<string, CiNode>();

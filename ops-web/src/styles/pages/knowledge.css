@@ -1,4 +1,8 @@
 /* Knowledge library, review, and index maintenance share the same quiet surfaces. */
+.knowledge-section-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--oa-border-subtle); border-radius: 14px; background: var(--oa-bg-surface); }
+.knowledge-section-nav > a { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 9px 18px; border-radius: 10px; color: var(--oa-text-secondary); text-decoration: none; white-space: nowrap; }
+.knowledge-section-nav > a:hover { color: var(--oa-primary); background: var(--oa-bg-hover); }
+.knowledge-section-nav > a.active { color: var(--oa-primary); background: var(--oa-primary-soft); font-weight: 600; }
 .document-list article, .record-list article { display: flex; align-items: center; gap: 13px; padding: 16px 20px; border-top: 1px solid var(--oa-border-subtle); }
 .file-icon { width: 42px; height: 42px; border-radius: 12px; background: var(--oa-primary-soft); color: var(--oa-primary); font-size: var(--oa-font-size-xs); font-weight: 600; display: grid; place-items: center; }
 .file-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
@@ -95,6 +99,7 @@
   .knowledge-main > .panel-header { flex-wrap: wrap; }
 }
 @media (max-width: 760px) {
+  .knowledge-section-nav > a { padding: 8px 12px; font-size: var(--oa-font-size-xs); }
   .knowledge-create { grid-template-columns: 1fr; }
   .document-list article { flex-wrap: wrap; }
   .file-info { width: calc(100% - 60px); }

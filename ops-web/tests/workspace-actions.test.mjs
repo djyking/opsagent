@@ -19,6 +19,8 @@ for (const [query, expected] of [
   ['今天谁在值班', 'oncall'], ['查询 SLA', 'sla'], ['服务拓扑', 'cmdb'],
   ['知识库', 'knowledge'], ['上传文档', 'knowledge-upload'], ['系统监控', 'monitor'],
   ['知识审核', 'review'], ['索引管理', 'index'], ['操作审计', 'audit'],
+  ['事件处置', 'ticket-search'], ['查询事件', 'ticket-search'], ['AI诊断', 'event-diagnosis'],
+  ['AI助手', 'rag'], ['自动化中心', 'automation'], ['查看审批', 'automation'], ['持续巡检', 'workflow'],
 ]) assert.equal(searchWorkspaceActions(query, true)[0]?.id, expected, query);
 assert.deepEqual(searchWorkspaceActions('完全不相关的苹果派配方', true), []);
 assert.equal(searchWorkspaceActions('', false).length, 6);
@@ -27,7 +29,9 @@ assert.deepEqual(searchWorkspaceActions('知识', false), searchWorkspaceActions
 for (const query of ['', '审核', '索引', '告警', '审计', '知识']) {
   assert.ok(searchWorkspaceActions(query, false).every(item => !item.admin), query);
 }
-for (const id of ['alerts', 'review', 'index', 'audit']) {
+assert.ok(searchWorkspaceActions('活动告警', false).includes(action('alerts')));
+assert.equal(searchWorkspaceActions('工作流', false)[0]?.id, 'automation');
+for (const id of ['review', 'index', 'audit']) {
   assert.ok(searchWorkspaceActions(action(id).label, true).includes(action(id)));
   assert.ok(!searchWorkspaceActions(action(id).label, false).includes(action(id)));
 }
@@ -38,6 +42,10 @@ assert.deepEqual(actionDestination(action('knowledge-upload')), { path: '/knowle
 for (const query of ['查询工单', '工单', '工单中心', ' 搜索工单 ']) {
   assert.deepEqual(actionDestination(action('ticket-search'), query), { path: '/tickets' });
 }
+assert.deepEqual(actionDestination(action('event-diagnosis'), 'AI诊断'), { path: '/tickets' });
+assert.deepEqual(actionDestination(action('workflow'), '持续巡检'), { path: '/automation', query: { tab: 'inspection' } });
+assert.deepEqual(actionDestination(action('ticket-search'), '查询事件'), { path: '/tickets' });
+assert.deepEqual(actionDestination(action('ticket-search'), '搜索事件 Redis'), { path: '/tickets', query: { keyword: 'Redis' } });
 assert.deepEqual(actionDestination(action('ticket-search'), '搜索工单 Redis'), { path: '/tickets', query: { keyword: 'Redis' } });
 assert.deepEqual(actionDestination(action('ticket-search'), '查询工单：网关超时'), { path: '/tickets', query: { keyword: '网关超时' } });
 const original = '  网关 502 / 帮我看看  ';

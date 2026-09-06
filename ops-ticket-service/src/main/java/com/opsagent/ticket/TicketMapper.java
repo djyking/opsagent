@@ -11,6 +11,9 @@ import org.apache.ibatis.annotations.*;
  * @since 2026/8/11
  */
 public interface TicketMapper extends BaseMapper<Ticket> {
+    @Select("SELECT * FROM ticket WHERE id=#{id} AND deleted=0 FOR UPDATE")
+    Ticket lock(long id);
+
     @Update(
             "UPDATE ticket SET"
                     + " assignee_id=#{userId},status='ASSIGNED',version=version+1,update_time=NOW()"

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 
 import org.apache.ibatis.annotations.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -13,6 +14,21 @@ import java.util.List;
  * @since 2026/8/6
  */
 public interface UserMapper extends BaseMapper<User> {
+    @Insert(
+            "INSERT INTO visitor_lease(user_id,username,expires_at,revoked,create_time)"
+                    + " VALUES(#{userId},'访客',#{expiresAt},0,NOW())")
+    int createVisitor(long userId, LocalDateTime expiresAt);
+
+    @Select(
+            "SELECT user_id userId,username,expires_at expiresAt,revoked FROM visitor_lease WHERE"
+                    + " user_id=#{userId}")
+    VisitorLease visitor(long userId);
+
+    @Update("UPDATE visitor_lease SET revoked=1 WHERE user_id=#{userId}")
+    int revokeVisitor(long userId);
+
+    record VisitorLease(long userId, String username, LocalDateTime expiresAt, boolean revoked) {}
+
     @Select("SELECT id FROM sys_role WHERE code='USER' AND status='enable' AND deleted=0")
     Long registrationRoleId();
 

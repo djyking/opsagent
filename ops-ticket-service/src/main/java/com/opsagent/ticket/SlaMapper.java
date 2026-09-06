@@ -16,7 +16,8 @@ import java.util.Map;
  * @since 2026/9/3
  */
 public interface SlaMapper {
-    String PAGE_FILTER = """
+    String PAGE_FILTER =
+            """
             FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id
             WHERE t.deleted=0
             <if test="query.view == 'risk'">
@@ -77,6 +78,7 @@ public interface SlaMapper {
                    s.create_time createTime,p.warning_percent warningPercent,
                    p.response_minutes responseMinutes,p.resolution_minutes resolutionMinutes
             FROM ticket_sla s JOIN sla_policy p ON p.id=s.policy_id
+              JOIN ticket t ON t.id=s.ticket_id AND t.deleted=0
             WHERE s.next_check_time IS NOT NULL AND s.next_check_time<=NOW()
               AND s.resolution_status IN ('RUNNING','BREACHED')
             ORDER BY s.next_check_time LIMIT #{limit}
@@ -87,7 +89,8 @@ public interface SlaMapper {
             """
             INSERT IGNORE INTO ticket_sla_event(
                 sla_id,ticket_id,event_type,escalation_level,detail,create_time)
-            VALUES(#{slaId},#{ticketId},#{eventType},#{level},#{detail},NOW())
+            SELECT #{slaId},#{ticketId},#{eventType},#{level},#{detail},NOW()
+            FROM ticket t WHERE t.id=#{ticketId} AND t.deleted=0
             """)
     int addEvent(long slaId, long ticketId, String eventType, int level, String detail);
 
@@ -99,7 +102,8 @@ public interface SlaMapper {
                 escalation_level=GREATEST(escalation_level,#{level}),
                 next_check_time=DATE_ADD(NOW(),INTERVAL 10 SECOND),
                 version=version+1,update_time=NOW()
-            WHERE id=#{slaId}
+            WHERE id=#{slaId} AND next_check_time IS NOT NULL
+              AND EXISTS(SELECT 1 FROM ticket t WHERE t.id=ticket_sla.ticket_id AND t.deleted=0)
             """)
     int markEvent(long slaId, String eventType, int level);
 
@@ -169,7 +173,8 @@ public interface SlaMapper {
                    COALESCE(SUM(CASE WHEN s.resolution_status='COMPLETED' THEN 1 ELSE 0 END),0) completed
             FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id WHERE t.deleted=0
             """)
-    SlaDtos.Counts counts(@Param("now") LocalDateTime now, @Param("riskUntil") LocalDateTime riskUntil);
+    SlaDtos.Counts counts(
+            @Param("now") LocalDateTime now, @Param("riskUntil") LocalDateTime riskUntil);
 
     @Select(
             """

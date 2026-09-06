@@ -10,3 +10,33 @@ groups:
         annotations:
           summary: "OpsAgent 服务 {{ $labels.job }} 不可用"
           description: "Prometheus 连续 2 分钟无法抓取该服务，请检查进程、端口和日志。"
+
+  - name: opsagent-demo-business
+    interval: 5s
+    rules:
+      - alert: OpsAgentDemoBusinessUnavailable
+        expr: >-
+          (opsagent_demo_probe_success{service="ops-demo-order-service"} == 0)
+          and on(service)
+          (time() - opsagent_demo_probe_timestamp_seconds{service="ops-demo-order-service"} < 30)
+        for: 15s
+        labels:
+          severity: high
+          service: ops-demo-order-service
+          environment: ISOLATED_DEMO
+        annotations:
+          summary: "隔离订单服务真实业务请求失败"
+          description: "平台经HTTP执行真实订单预览请求，Redis连接失败或Sentinel拦截；请采集配置与运行时证据。"
+      - alert: OpsAgentDemoNotificationUnavailable
+        expr: >-
+          (opsagent_demo_probe_success{service="ops-demo-notification-service"} == 0)
+          and on(service)
+          (time() - opsagent_demo_probe_timestamp_seconds{service="ops-demo-notification-service"} < 30)
+        for: 15s
+        labels:
+          severity: high
+          service: ops-demo-notification-service
+          environment: ISOLATED_DEMO
+        annotations:
+          summary: "隔离通知服务真实消息投递未完成"
+          description: "通知探针经RabbitMQ发布确认后，未完成消费者处理、Redis回执读回或队列消退验证；请采集队列与消费者运行证据。"

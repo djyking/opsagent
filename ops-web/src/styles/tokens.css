@@ -1,6 +1,6 @@
 :root {
   --oa-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-  --oa-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --oa-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, "Microsoft YaHei UI", "PingFang SC", monospace;
 
   --oa-font-size-xs: 12px;
   --oa-line-height-xs: 18px;
@@ -107,6 +107,7 @@
 }
 /* Auth remains the approved baseline; the interior contract also reaches teleported dialogs. */
 body:has(.app-shell) {
+  --oa-font-sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", -apple-system, BlinkMacSystemFont, sans-serif;
   --oa-bg-shell: #f5f9ff;
   --oa-bg-canvas: #f0f6fe;
   --oa-bg-subtle: #f5f9fd;

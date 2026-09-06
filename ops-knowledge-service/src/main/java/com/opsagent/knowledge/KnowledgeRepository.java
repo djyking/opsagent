@@ -58,6 +58,14 @@ public class KnowledgeRepository {
                         + " knowledge_base WHERE deleted=0 ORDER BY id DESC");
     }
 
+    List<Map<String, Object>> publicBases() {
+        return jdbc.queryForList("SELECT b.id,b.name,b.description,b.status,b.create_time,b.update_time"
+                + " FROM knowledge_base b WHERE b.deleted=0 AND EXISTS (SELECT 1 FROM knowledge_document d"
+                + " WHERE d.knowledge_base_id=b.id AND d.deleted=0"
+                + " AND d.visibility='PUBLIC' AND d.review_status='PUBLISHED')"
+                + " ORDER BY b.id DESC");
+    }
+
     long addDocument(
             long base,
             Long ticketId,
@@ -94,13 +102,19 @@ public class KnowledgeRepository {
     }
 
     List<Map<String, Object>> documents(long base) {
+        return documents(base, false);
+    }
+
+    List<Map<String, Object>> documents(long base, boolean publicPublishedOnly) {
         return jdbc.queryForList(
-                "SELECT d.id,d.knowledge_base_id,d.original_name,d.file_type,d.file_size,"
+                "SELECT d.id,d.knowledge_base_id,d.ticket_id,d.original_name,d.file_type,d.file_size,"
                         + "d.status,d.review_status,d.index_status,d.visibility,d.version,"
                         + "d.content_hash,d.parse_error,d.create_by,d.create_time,d.update_time,"
                         + "COUNT(c.id) chunk_count,MAX(c.embedding_model) embedding_model"
                         + " FROM knowledge_document d LEFT JOIN knowledge_chunk c ON c.document_id=d.id"
-                        + " WHERE d.knowledge_base_id=? AND d.deleted=0 GROUP BY d.id ORDER BY d.id DESC",
+                        + " WHERE d.knowledge_base_id=? AND d.deleted=0"
+                        + (publicPublishedOnly ? " AND d.visibility='PUBLIC' AND d.review_status='PUBLISHED'" : "")
+                        + " GROUP BY d.id ORDER BY d.id DESC",
                 base);
     }
 
@@ -119,6 +133,20 @@ public class KnowledgeRepository {
         List<Map<String, Object>> rows =
                 jdbc.queryForList("SELECT * FROM knowledge_document WHERE id=? AND deleted=0", id);
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    List<Map<String, Object>> readableGlobalChunks(Set<Long> ids, long userId, boolean administrator) {
+        if (ids.isEmpty()) return List.of();
+        String placeholders = String.join(",", Collections.nCopies(ids.size(), "?"));
+        List<Object> arguments = new ArrayList<>(ids);
+        arguments.add(administrator ? 1 : 0);
+        arguments.add(userId);
+        return jdbc.queryForList("SELECT c.id chunkId,c.document_id documentId,c.chunk_index chunkIndex,"
+                + "c.content,c.page_number page,d.ticket_id,d.version,d.original_name documentName,"
+                + "d.update_time updateTime FROM knowledge_chunk c"
+                + " JOIN knowledge_document d ON d.id=c.document_id WHERE c.id IN (" + placeholders + ")"
+                + " AND d.deleted=0 AND d.review_status='PUBLISHED'"
+                + " AND (?=1 OR d.visibility='PUBLIC' OR d.create_by=?)", arguments.toArray());
     }
 
     void parsing(long id) {
@@ -258,6 +286,23 @@ public class KnowledgeRepository {
                     + " embedding_model,indexed_at,page_number,metadata_json,create_time"
                     + " FROM knowledge_chunk WHERE document_id=? ORDER BY chunk_index",
                 id);
+    }
+
+    long reviewChunkCount(long documentId) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM knowledge_chunk WHERE document_id=?", Long.class, documentId);
+    }
+
+    long reviewTextLength(long documentId) {
+        return jdbc.queryForObject("SELECT COALESCE(SUM(CHAR_LENGTH(content)),0)"
+                + " FROM knowledge_chunk WHERE document_id=?", Long.class, documentId);
+    }
+
+    List<KnowledgeReviewContentService.Chunk> reviewChunks(long documentId, int offset, int limit) {
+        return jdbc.query("SELECT id,chunk_index,content,token_count,page_number FROM knowledge_chunk"
+                + " WHERE document_id=? ORDER BY chunk_index,id LIMIT ? OFFSET ?", (row, index) ->
+                        new KnowledgeReviewContentService.Chunk(row.getLong("id"), row.getInt("chunk_index"),
+                                row.getString("content"), (Integer) row.getObject("token_count"),
+                                (Integer) row.getObject("page_number")), documentId, limit, offset);
     }
 
     List<Map<String, Object>> search(
@@ -619,6 +664,19 @@ public class KnowledgeRepository {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    Map<String, Object> latestReindexTask() {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM knowledge_reindex_task ORDER BY id DESC LIMIT 1");
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    Long activeReindexTaskId() {
+        List<Long> ids = jdbc.queryForList(
+                "SELECT id FROM knowledge_reindex_task WHERE status IN ('PENDING','RUNNING') ORDER BY id LIMIT 1",
+                Long.class);
+        return ids.isEmpty() ? null : ids.get(0);
+    }
+
     Map<String, Long> indexStatusCounts() {
         long published = count(
                 "SELECT COUNT(*) FROM knowledge_document WHERE deleted=0 AND review_status='PUBLISHED'");
@@ -643,13 +701,129 @@ public class KnowledgeRepository {
                 "publishedChunks", publishedChunks);
     }
 
-    List<Map<String, Object>> failedIndexTasks() {
-        return jdbc.queryForList(
-                "SELECT id,document_id documentId,document_version documentVersion,operation,"
-                        + "status,retry_count retryCount,error_message lastError,"
-                        + "create_time createTime,update_time updateTime"
-                        + " FROM knowledge_index_task WHERE status='FAILED'"
-                        + " ORDER BY update_time DESC LIMIT 200");
+    List<KnowledgeIndexTaskView> failedIndexTasks() {
+        return jdbc.query("""
+                SELECT t.*,d.id source_id,d.original_name,d.version current_version,d.deleted,
+                       d.status document_status,d.review_status,d.index_status,
+                       (SELECT COUNT(*) FROM knowledge_chunk c WHERE c.document_id=d.id) chunk_count
+                FROM knowledge_index_task t LEFT JOIN knowledge_document d ON d.id=t.document_id
+                WHERE t.status='FAILED' ORDER BY t.update_time DESC,t.id DESC
+                """, (row, index) -> {
+            boolean exists = row.getObject("source_id") != null;
+            boolean deleted = !exists || row.getBoolean("deleted");
+            int version = row.getInt("current_version");
+            String reason = KnowledgeIndexTaskView.blockedReason(row.getString("operation"),
+                    exists, deleted, row.getInt("document_version"), version,
+                    row.getString("document_status"), row.getString("review_status"),
+                    row.getString("index_status"), row.getLong("chunk_count"));
+            Timestamp updated = row.getTimestamp("update_time");
+            return new KnowledgeIndexTaskView(row.getLong("id"), row.getLong("document_id"),
+                    row.getInt("document_version"), exists ? version : null,
+                    row.getString("operation"), row.getString("status"), row.getInt("retry_count"),
+                    row.getString("error_message"), row.getString("original_name"),
+                    row.getString("document_status"), row.getString("review_status"), deleted,
+                    reason.isEmpty(), reason.isEmpty() ? "DELETE".equals(row.getString("operation"))
+                            ? "重试清理已下线文档的检索索引" : "可重新投递当前版本索引" : reason,
+                    updated == null ? null : updated.toLocalDateTime());
+        });
+    }
+
+    Set<Long> publishedDocumentIds() {
+        return new LinkedHashSet<>(jdbc.queryForList(
+                "SELECT id FROM knowledge_document WHERE deleted=0 AND review_status='PUBLISHED'", Long.class));
+    }
+
+    Set<String> publishedChunkIds() {
+        return new LinkedHashSet<>(jdbc.queryForList(
+                "SELECT c.id FROM knowledge_chunk c JOIN knowledge_document d ON d.id=c.document_id"
+                        + " WHERE d.deleted=0 AND d.review_status='PUBLISHED'", Long.class)
+                .stream().map(String::valueOf).toList());
+    }
+
+    Set<Long> liveDocumentIds() {
+        return new LinkedHashSet<>(jdbc.queryForList(
+                "SELECT id FROM knowledge_document WHERE deleted=0 AND review_status<>'ARCHIVED'", Long.class));
+    }
+
+    Set<String> liveChunkIds() {
+        return new LinkedHashSet<>(jdbc.queryForList(
+                "SELECT c.id FROM knowledge_chunk c JOIN knowledge_document d ON d.id=c.document_id"
+                        + " WHERE d.deleted=0 AND d.review_status<>'ARCHIVED'", Long.class)
+                .stream().map(String::valueOf).toList());
+    }
+
+    @Transactional
+    public long reserveIndexRepair(long documentId, String strategyVersion) {
+        Map<String, Object> document = lockedDocument(documentId);
+        validateRepairDocument(document);
+        int version = ((Number) document.get("version")).intValue();
+        Map<String, Object> existing = currentIndexTask(documentId, "INDEX");
+        if (existing != null && ((Number) existing.get("document_version")).intValue() == version
+                && activeIndexTask(existing)) return ((Number) existing.get("id")).longValue();
+        markIndexPending(documentId);
+        return createIndexTaskAndOutbox(documentId, version, strategyVersion);
+    }
+
+    @Transactional
+    public long retryFailedIndexTask(long taskId, int expectedVersion, String expectedOperation,
+            String strategyVersion) {
+        Map<String, Object> initial = indexTask(taskId);
+        if (initial == null) throw new BusinessException(ErrorCode.NOT_FOUND, "索引任务不存在，请刷新列表");
+        long documentId = ((Number) initial.get("document_id")).longValue();
+        Map<String, Object> document = lockedDocument(documentId);
+        Map<String, Object> task = currentIndexTask(documentId, expectedOperation);
+        if (task == null || ((Number) task.get("id")).longValue() != taskId
+                || versionOf(task.get("document_version")) != expectedVersion) {
+            throw new BusinessException(ErrorCode.CONFLICT, "任务版本或操作已变化，请刷新后重试");
+        }
+        if (activeIndexTask(task)) return taskId;
+        if (!"FAILED".equals(task.get("status"))) {
+            throw new BusinessException(ErrorCode.CONFLICT, "任务已处理完成，请刷新列表");
+        }
+        boolean exists = document != null;
+        String reason = KnowledgeIndexTaskView.blockedReason(expectedOperation, exists,
+                !exists || versionOf(document.get("deleted")) != 0, expectedVersion,
+                exists ? versionOf(document.get("version")) : 0,
+                exists ? String.valueOf(document.get("status")) : "",
+                exists ? String.valueOf(document.get("review_status")) : "",
+                exists ? String.valueOf(document.get("index_status")) : "",
+                exists ? ((Number) document.get("chunk_count")).longValue() : 0);
+        if (!reason.isEmpty()) throw new BusinessException(ErrorCode.CONFLICT, reason);
+        if ("DELETE".equals(expectedOperation)) return createDeleteIndexTask(documentId);
+        markIndexPending(documentId);
+        return createIndexTaskAndOutbox(documentId, expectedVersion, strategyVersion);
+    }
+
+    private Map<String, Object> lockedDocument(long documentId) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT d.*,(SELECT COUNT(*) FROM knowledge_chunk c WHERE c.document_id=d.id) chunk_count"
+                        + " FROM knowledge_document d WHERE d.id=? FOR UPDATE", documentId);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private void validateRepairDocument(Map<String, Object> document) {
+        if (document == null) throw new BusinessException(ErrorCode.NOT_FOUND, "未找到该文档，请在知识库确认文档编号");
+        String reason = KnowledgeIndexTaskView.blockedReason("INDEX", true,
+                versionOf(document.get("deleted")) != 0, versionOf(document.get("version")),
+                versionOf(document.get("version")), String.valueOf(document.get("status")),
+                String.valueOf(document.get("review_status")), "",
+                ((Number) document.get("chunk_count")).longValue());
+        if (!reason.isEmpty()) throw new BusinessException(ErrorCode.CONFLICT, reason);
+    }
+
+    private Map<String, Object> currentIndexTask(long documentId, String operation) {
+        List<Map<String, Object>> rows = jdbc.queryForList(
+                "SELECT * FROM knowledge_index_task WHERE document_id=? AND operation=? FOR UPDATE",
+                documentId, operation);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private boolean activeIndexTask(Map<String, Object> task) {
+        return Set.of("PENDING", "PROCESSING", "RETRYING").contains(task.get("status"));
+    }
+
+    private int versionOf(Object value) {
+        return value == null ? 0 : ((Number) value).intValue();
     }
 
     void markIndexPending(long documentId) {

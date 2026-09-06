@@ -24,6 +24,11 @@ public class Ticket {
     private Long assigneeId;
     private String affectedCiCode;
     private String sourceType;
+    private String environment;
+    private Long ownerActorId;
+    private String incidentId;
+    private String episodeId;
+    private Boolean publicDemo;
     @Version private Integer version;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
@@ -111,6 +116,46 @@ public class Ticket {
 
     public Integer getVersion() {
         return version;
+    }
+
+    public String getEnvironment() {
+        return environment;
+    }
+
+    public void setEnvironment(String value) {
+        environment = value;
+    }
+
+    public Long getOwnerActorId() {
+        return ownerActorId;
+    }
+
+    public void setOwnerActorId(Long value) {
+        ownerActorId = value;
+    }
+
+    public String getIncidentId() {
+        return incidentId;
+    }
+
+    public void setIncidentId(String value) {
+        incidentId = value;
+    }
+
+    public String getEpisodeId() {
+        return episodeId;
+    }
+
+    public void setEpisodeId(String value) {
+        episodeId = value;
+    }
+
+    public Boolean getPublicDemo() {
+        return publicDemo;
+    }
+
+    public void setPublicDemo(Boolean value) {
+        publicDemo = value;
     }
 
     public void setVersion(Integer v) {

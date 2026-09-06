@@ -1,6 +1,7 @@
 package com.opsagent.ticket;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -39,21 +40,29 @@ class SlaPaginationTest {
 
     @BeforeEach
     void setUp() {
-        DriverManagerDataSource datasource = new DriverManagerDataSource(
-                "jdbc:h2:mem:sla-" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE",
-                "sa", "");
+        DriverManagerDataSource datasource =
+                new DriverManagerDataSource(
+                        "jdbc:h2:mem:sla-"
+                                + UUID.randomUUID()
+                                + ";MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE",
+                        "sa",
+                        "");
         jdbc = new JdbcTemplate(datasource);
-        jdbc.execute("""
+        jdbc.execute(
+                """
                 CREATE TABLE ticket(id BIGINT PRIMARY KEY,ticket_no VARCHAR(64),title VARCHAR(128),
                     priority VARCHAR(16),status VARCHAR(32),affected_ci_code VARCHAR(64),deleted INT)
                 """);
-        jdbc.execute("""
+        jdbc.execute(
+                """
                 CREATE TABLE ticket_sla(id BIGINT PRIMARY KEY,ticket_id BIGINT,response_deadline TIMESTAMP,
                     resolution_deadline TIMESTAMP,response_status VARCHAR(32),resolution_status VARCHAR(32),
                     escalation_level INT)
                 """);
-        Configuration configuration = new Configuration(
-                new Environment("sla-pagination", new JdbcTransactionFactory(), datasource));
+        Configuration configuration =
+                new Configuration(
+                        new Environment(
+                                "sla-pagination", new JdbcTransactionFactory(), datasource));
         configuration.addMapper(SlaMapper.class);
         session = new SqlSessionFactoryBuilder().build(configuration).openSession(true);
         mapper = session.getMapper(SlaMapper.class);
@@ -69,19 +78,54 @@ class SlaPaginationTest {
     void pagesBeyondTheOldTwoHundredLimitAndKeepsGlobalSummary() {
         LocalDateTime deadline = LocalDateTime.now().plusHours(1);
         for (int id = 1; id <= 235; id++) {
-            insert(id, "工单 " + id, "HIGH", id % 2 == 0 ? "order" : "gateway", "RUNNING", deadline, 0);
+            insert(
+                    id,
+                    "工单 " + id,
+                    "HIGH",
+                    id % 2 == 0 ? "order" : "gateway",
+                    "RUNNING",
+                    deadline,
+                    0);
         }
         var page = service.page(query(23, 10, "all", "", "", ""));
         assertThat(page.total()).isEqualTo(235);
         assertThat(page.pageNum()).isEqualTo(23);
         assertThat(page.records()).hasSize(10);
-        assertThat(page.records()).extracting(SlaDtos.Row::id)
+        assertThat(page.records())
+                .extracting(SlaDtos.Row::id)
                 .containsExactly(221L, 222L, 223L, 224L, 225L, 226L, 227L, 228L, 229L, 230L);
         var lastPage = service.page(query(999, 10, "all", "", "", ""));
         assertThat(lastPage.pageNum()).isEqualTo(24);
         assertThat(lastPage.records()).hasSize(5);
-        assertThat(service.summary().counts()).isEqualTo(new SlaDtos.Counts(235, 235, 235, 235, 0, 0));
+        assertThat(service.summary().counts())
+                .isEqualTo(new SlaDtos.Counts(235, 235, 235, 235, 0, 0));
         assertThat(service.summary().services()).containsExactly("gateway", "order");
+    }
+
+    @Test
+    void archivedTicketCannotEnterDueScannerOrCreateANewSlaEvent() {
+        jdbc.execute(
+                "CREATE TABLE sla_policy(id BIGINT PRIMARY KEY,warning_percent INT,"
+                        + "response_minutes INT,resolution_minutes INT)");
+        jdbc.execute("ALTER TABLE ticket_sla ADD COLUMN policy_id BIGINT DEFAULT 1");
+        jdbc.execute(
+                "ALTER TABLE ticket_sla ADD COLUMN create_time TIMESTAMP DEFAULT"
+                    + " CURRENT_TIMESTAMP");
+        jdbc.execute("ALTER TABLE ticket_sla ADD COLUMN next_check_time TIMESTAMP");
+        jdbc.execute(
+                "CREATE TABLE ticket_sla_event(sla_id BIGINT,ticket_id BIGINT,event_type"
+                    + " VARCHAR(32),escalation_level INT,detail VARCHAR(255),create_time"
+                    + " TIMESTAMP)");
+        jdbc.update("INSERT INTO sla_policy VALUES(1,80,10,60)");
+        insert(1, "active", "HIGH", "order", "RUNNING", LocalDateTime.now().minusMinutes(1), 0);
+        insert(2, "archived", "HIGH", "order", "RUNNING", LocalDateTime.now().minusMinutes(1), 1);
+        jdbc.update("UPDATE ticket_sla SET next_check_time=CURRENT_TIMESTAMP");
+        assertThat(mapper.due(100))
+                .extracting(SlaMapper.SlaCandidate::ticketId)
+                .containsExactly(1L);
+        assertThat(mapper.addEvent(2, 2, "RESPONSE_WARNING", 0, "must not emit")).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ticket_sla_event", Integer.class))
+                .isZero();
     }
 
     @Test
@@ -98,9 +142,11 @@ class SlaPaginationTest {
         assertThat(page.total()).isOne();
         assertThat(page.records()).extracting(SlaDtos.Row::id).containsExactly(1L);
         assertThat(service.summary().counts().total()).isEqualTo(5);
-        assertThat(service.page(query(1, 10, "breached", "HIGH", "order", "OPS-5")).total()).isOne();
+        assertThat(service.page(query(1, 10, "breached", "HIGH", "order", "OPS-5")).total())
+                .isOne();
         assertThat(service.page(query(1, 10, "all", "", "", "gateway")).records())
-                .extracting(SlaDtos.Row::id).containsExactly(4L);
+                .extracting(SlaDtos.Row::id)
+                .containsExactly(4L);
     }
 
     @Test
@@ -114,11 +160,13 @@ class SlaPaginationTest {
         insert(6, "breached", "HIGH", "order", "BREACHED", now.minusHours(1), 0);
         insert(7, "completed", "HIGH", "order", "COMPLETED", now.minusHours(1), 0);
         insert(8, "deleted", "HIGH", "ignored-service", "RUNNING", now.plusMinutes(1), 1);
-        assertThat(mapper.counts(now, now.plusHours(2))).isEqualTo(new SlaDtos.Counts(7, 5, 2, 4, 1, 1));
+        assertThat(mapper.counts(now, now.plusHours(2)))
+                .isEqualTo(new SlaDtos.Counts(7, 5, 2, 4, 1, 1));
         var query = query(1, 10, "risk", "", "", "");
         assertThat(mapper.countPage(query, now, now.plusHours(2))).isEqualTo(2);
         assertThat(mapper.page(query, now, now.plusHours(2), 0))
-                .extracting(SlaDtos.Row::id).containsExactly(3L, 4L);
+                .extracting(SlaDtos.Row::id)
+                .containsExactly(3L, 4L);
         assertThat(mapper.services()).containsExactly("order");
     }
 
@@ -134,7 +182,10 @@ class SlaPaginationTest {
 
     @Test
     void bindsDefaultPaginationAndRejectsUnboundedOrInvalidRequests() throws Exception {
-        var mvc = MockMvcBuilders.standaloneSetup(new SlaController(service)).build();
+        var mvc =
+                MockMvcBuilders.standaloneSetup(
+                                new SlaController(service, mock(TicketService.class)))
+                        .build();
         mvc.perform(get("/api/tickets/sla/page"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.pageNum").value(1))
@@ -155,15 +206,37 @@ class SlaPaginationTest {
         }
     }
 
-    private SlaDtos.Query query(int pageNum, int pageSize, String view, String priority, String ci, String keyword) {
+    private SlaDtos.Query query(
+            int pageNum, int pageSize, String view, String priority, String ci, String keyword) {
         return new SlaDtos.Query(pageNum, pageSize, view, priority, ci, keyword);
     }
 
     private void insert(
-            long id, String title, String priority, String ci, String status, LocalDateTime deadline, int deleted) {
-        jdbc.update("INSERT INTO ticket VALUES(?,?,?,?,?,?,?)", id, "OPS-" + id, title,
-                priority, "PROCESSING", ci, deleted);
-        jdbc.update("INSERT INTO ticket_sla VALUES(?,?,?,?,?,?,?)", id, id, deadline, deadline,
-                "RUNNING", status, 0);
+            long id,
+            String title,
+            String priority,
+            String ci,
+            String status,
+            LocalDateTime deadline,
+            int deleted) {
+        jdbc.update(
+                "INSERT INTO ticket VALUES(?,?,?,?,?,?,?)",
+                id,
+                "OPS-" + id,
+                title,
+                priority,
+                "PROCESSING",
+                ci,
+                deleted);
+        jdbc.update(
+                "INSERT INTO ticket_sla(id,ticket_id,response_deadline,resolution_deadline,"
+                        + "response_status,resolution_status,escalation_level) VALUES(?,?,?,?,?,?,?)",
+                id,
+                id,
+                deadline,
+                deadline,
+                "RUNNING",
+                status,
+                0);
     }
 }

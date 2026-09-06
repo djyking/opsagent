@@ -1,6 +1,11 @@
 import { request } from "./http";
 import { normalizeReferences, type RagStreamResult } from "./rag-stream";
 
+export type AiProvider = "deepseek" | "openai" | "kimi";
+export interface ProviderOption { provider: AiProvider; model: string; available: boolean; status: string }
+export interface ProviderCatalog { defaultProvider: AiProvider | null; providers: ProviderOption[] }
+export const ragProviderApi = { list: () => request<ProviderCatalog>({ url: "/api/rag/providers" }) };
+
 export interface Conversation { id: string; title: string; createTime: string; updateTime: string }
 export interface ConversationTurn {
   id: number;

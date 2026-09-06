@@ -43,28 +43,37 @@ public class LlmInvocationService {
         return invoke(router.selected(), question, request, currentContext());
     }
 
+    Invocation invoke(String provider, String question, LlmRequest request) {
+        return invoke(router.selected(provider), question, request, currentContext());
+    }
+
     Invocation invoke(LlmClient client, String question, LlmRequest request) {
         return invoke(client, question, request, currentContext());
     }
 
     private Invocation invoke(
-            LlmClient client,
-            String question,
-            LlmRequest request,
-            AuditContext context) {
+            LlmClient client, String question, LlmRequest request, AuditContext context) {
         long started = System.nanoTime();
         try (AiBudgetGuard.Permit permit = budget.acquire()) {
             LlmResult result = client.generate(request);
             long latency = elapsedMillis(started);
-            record(client, question, result, latency, result.generationComplete(),
-                    result.generationComplete() ? null : "INCOMPLETE_" + result.finishReason(), context);
-            metric(client.provider(), result.generationComplete() ? "success" : "incomplete", latency);
+            record(
+                    client,
+                    question,
+                    result,
+                    latency,
+                    result.generationComplete(),
+                    result.generationComplete() ? null : "INCOMPLETE_" + result.finishReason(),
+                    context);
+            metric(
+                    client.provider(),
+                    result.generationComplete() ? "success" : "incomplete",
+                    latency);
             return new Invocation(result, latency);
         } catch (AiProviderException exception) {
             long latency = elapsedMillis(started);
-            String error = exception.statusCode() == 0
-                    ? "CONNECTION"
-                    : "HTTP_" + exception.statusCode();
+            String error =
+                    exception.statusCode() == 0 ? "CONNECTION" : "HTTP_" + exception.statusCode();
             record(client, question, null, latency, false, error, context);
             metric(client.provider(), "failure", latency);
             throw exception;
@@ -72,24 +81,38 @@ public class LlmInvocationService {
     }
 
     Invocation stream(
+            String question, LlmRequest request, Consumer<String> onDelta, AuditContext context) {
+        return stream(null, question, request, onDelta, context);
+    }
+
+    Invocation stream(
+            String provider,
             String question,
             LlmRequest request,
             Consumer<String> onDelta,
             AuditContext context) {
-        LlmClient client = router.selected();
+        LlmClient client = provider == null ? router.selected() : router.selected(provider);
         long started = System.nanoTime();
         try (AiBudgetGuard.Permit permit = budget.acquire()) {
             LlmResult result = client.stream(request, onDelta);
             long latency = elapsedMillis(started);
-            record(client, question, result, latency, result.generationComplete(),
-                    result.generationComplete() ? null : "INCOMPLETE_" + result.finishReason(), context);
-            metric(client.provider(), result.generationComplete() ? "success" : "incomplete", latency);
+            record(
+                    client,
+                    question,
+                    result,
+                    latency,
+                    result.generationComplete(),
+                    result.generationComplete() ? null : "INCOMPLETE_" + result.finishReason(),
+                    context);
+            metric(
+                    client.provider(),
+                    result.generationComplete() ? "success" : "incomplete",
+                    latency);
             return new Invocation(result, latency);
         } catch (AiProviderException exception) {
             long latency = elapsedMillis(started);
-            String error = exception.statusCode() == 0
-                    ? "CONNECTION"
-                    : "HTTP_" + exception.statusCode();
+            String error =
+                    exception.statusCode() == 0 ? "CONNECTION" : "HTTP_" + exception.statusCode();
             record(client, question, null, latency, false, error, context);
             metric(client.provider(), "failure", latency);
             throw exception;
@@ -110,17 +133,18 @@ public class LlmInvocationService {
             AuditContext context) {
         int input = result == null ? 0 : result.inputTokens();
         int output = result == null ? 0 : result.outputTokens();
-        usageRepository.save(new AiUsageRepository.AiUsage(
-                context.traceId(),
-                context.userId(),
-                client.provider(),
-                client.model(),
-                hash(question),
-                input,
-                output,
-                latency,
-                success,
-                error));
+        usageRepository.save(
+                new AiUsageRepository.AiUsage(
+                        context.traceId(),
+                        context.userId(),
+                        client.provider(),
+                        client.model(),
+                        hash(question),
+                        input,
+                        output,
+                        latency,
+                        success,
+                        error));
     }
 
     private void metric(String provider, String outcome, long latency) {
@@ -138,8 +162,9 @@ public class LlmInvocationService {
 
     private String hash(String value) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            byte[] digest =
+                    MessageDigest.getInstance("SHA-256")
+                            .digest(value.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 不可用", exception);

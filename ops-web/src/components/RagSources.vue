@@ -36,16 +36,16 @@ function sourceTime(value?: string) {
   <section v-if="rows.length" class="source-section" :class="{ compact }">
     <strong><Database :size="16" />参考来源</strong>
     <div class="rag-source-list">
-      <article v-for="item in rows" :key="`${item.sourceType || 'DOCUMENT'}-${item.sourceId || item.chunkId}`" :class="{ 'cmdb-source': item.sourceType === 'CMDB' }">
+      <article v-for="item in rows" :key="`${item.sourceType || 'DOCUMENT'}-${item.sourceId || item.chunkId}`" :class="{ 'cmdb-source': item.sourceType === 'CMDB' || item.sourceType === 'OPERATIONS' }">
         <span class="source-id">[{{ item.sourceId || `C${item.chunkIndex}` }}]</span>
         <div>
           <strong>{{ item.documentName || `文档 #${item.documentId}` }}</strong>
           <p v-if="item.headingPath">{{ item.headingPath }}</p>
-          <template v-if="item.sourceType === 'CMDB'">
-            <small>服务目录 · 实时读取</small>
+          <template v-if="item.sourceType === 'CMDB' || item.sourceType === 'OPERATIONS'">
+            <small>{{ item.sourceType === 'OPERATIONS' ? '运行数据 · 本次安全快照' : '服务目录 · 实时读取' }}</small>
             <small v-if="sourceTime(item.sourceRetrievedAt)">读取于 {{ sourceTime(item.sourceRetrievedAt) }}</small>
-            <small v-if="sourceTime(item.sourceUpdatedAt)">记录更新 {{ sourceTime(item.sourceUpdatedAt) }}</small>
-            <RouterLink v-if="item.sourceUrl === '/itsm/cmdb'" class="source-catalog-link" to="/itsm/cmdb">查看服务目录与关系 <ArrowUpRight :size="13" /></RouterLink>
+            <small v-if="sourceTime(item.sourceUpdatedAt)">{{ item.sourceType === 'OPERATIONS' ? '快照采集' : '记录更新' }} {{ sourceTime(item.sourceUpdatedAt) }}</small>
+            <RouterLink v-if="item.sourceUrl === '/operations'" class="source-catalog-link" to="/operations">查看运维中心 <ArrowUpRight :size="13" /></RouterLink><RouterLink v-else-if="item.sourceUrl === '/itsm/cmdb'" class="source-catalog-link" to="/itsm/cmdb">查看服务目录与关系 <ArrowUpRight :size="13" /></RouterLink>
           </template>
           <small v-else>
             <span v-if="pages(item)">{{ pages(item) }}</span>
@@ -53,7 +53,7 @@ function sourceTime(value?: string) {
             <span v-if="item.neighbor">邻近上下文</span>
             <span v-if="item.relevanceScore">相关度 {{ (item.relevanceScore * 100).toFixed(0) }}%</span>
           </small>
-          <small v-if="item.sourceType !== 'CMDB' && auth.isAdmin && (item.rrfScore != null || item.rerankScore != null)" class="source-debug">
+          <small v-if="item.sourceType !== 'CMDB' && item.sourceType !== 'OPERATIONS' && auth.isAdmin && (item.rrfScore != null || item.rerankScore != null)" class="source-debug">
             RRF {{ item.rrfScore?.toFixed(5) || "-" }} · Rerank {{ item.rerankScore?.toFixed(5) || "未启用" }}
           </small>
         </div>

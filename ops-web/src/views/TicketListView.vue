@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Search, Plus, RotateCw, ArrowUpRight, TicketCheck } from "@lucide/vue";
+import { Search, Plus, RotateCw, ArrowUpRight, TicketCheck, Eye, Siren, CalendarClock, TimerReset } from "@lucide/vue";
 import { itsmApi, ticketApi } from "@/api/modules";
 import type { PageResponse, Ticket } from "@/types/api";
 import BaseModal from "@/components/BaseModal.vue";
@@ -22,6 +22,8 @@ import { formatDateTime, formatRelativeTime } from "@/utils/datetime";
 import { parseTicketDescription } from "@/utils/ticket-description";
 import { usePageFeedback } from "@/composables/usePageFeedback";
 import ActionButton from "@/components/feedback/ActionButton.vue";
+import { useAuthStore } from "@/stores/auth";
+const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const page = ref<PageResponse<Ticket>>({
@@ -37,7 +39,7 @@ const showCreate = ref(false);
 const creating = ref(false);
 const preview = ref<Ticket>();
 const previewDescription = computed(() => parseTicketDescription(preview.value?.description));
-function sourceTypeLabel(value: string) { return value === "ALERTMANAGER" ? "告警自动建单" : value || "人工创建"; }
+function sourceTypeLabel(value: string) { return ({ ALERTMANAGER: "真实告警建单", ISOLATED_DRILL: "隔离演练 · 真实告警", MANUAL: "人工创建" } as Record<string, string>)[value] || value || "人工创建"; }
 const filters = reactive({
   keyword: "",
   status: "",
@@ -124,16 +126,17 @@ onMounted(async () => {
 </script>
 <template>
   <div class="stack-page ticket-list-page">
-    <PageHeader title="工单中心" description="创建、跟踪并完成每一个运维问题闭环">
-      <template #actions><button class="button primary" @click="showCreate = true"><Plus :size="18" />新建工单</button></template>
+    <PageHeader title="事件处置" description="围绕同一事件，连续查看证据、诊断、审批与业务恢复结果。">
+      <template #actions><button v-if="!auth.isDemo" class="button primary" @click="showCreate = true"><Plus :size="18" />报告问题</button></template>
+      <template #tabs><nav class="ticket-detail-tabs" aria-label="事件与协作"><RouterLink to="/tickets" class="active" aria-current="page">事件队列</RouterLink><RouterLink to="/itsm/alerts"><Siren :size="16" />原始告警</RouterLink><RouterLink to="/itsm/sla"><TimerReset :size="16" />SLA 与时效</RouterLink><RouterLink to="/itsm/oncall"><CalendarClock :size="16" />值班协作</RouterLink></nav></template>
     </PageHeader>
     <ListSurface class="ticket-list-surface">
-      <template #header><div><h3>工单队列</h3><p>筛选当前任务，查看详情并跟进处理</p></div><span class="panel-count">{{ page.total }} 张工单</span></template>
+      <template #header><div><h3>需要跟进的事件</h3><p>沿用工单编号与责任流程，打开事件进入完整处置工作区</p></div><span class="panel-count">{{ page.total }} 项</span></template>
       <template #toolbar><FilterBar>
       <div class="search-box">
         <Search :size="18" /><input
           v-model.trim="filters.keyword"
-          placeholder="搜索工单编号、标题或描述"
+          placeholder="搜索事件编号、标题或描述"
           @keyup.enter="
             filters.pageNum = 1;
             load();
@@ -173,13 +176,13 @@ onMounted(async () => {
       </FilterBar></template>
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
 
-      <LoadingState v-if="loading && !page.records.length" text="正在加载工单…" />
-      <EmptyState v-else-if="!page.records.length" title="没有符合条件的工单" description="调整筛选条件或创建一张新工单" :icon="TicketCheck" />
+      <LoadingState v-if="loading && !page.records.length" text="正在加载事件…" />
+      <EmptyState v-else-if="!page.records.length" title="没有符合条件的事件" description="调整筛选条件，或报告一个需要处理的问题。" :icon="TicketCheck" />
       <template v-else>
-        <div class="responsive-table" role="region" aria-label="工单列表" tabindex="0"><table class="ticket-table">
+        <div class="responsive-table" role="region" aria-label="事件列表" tabindex="0"><table class="ticket-table">
           <thead>
             <tr>
-              <th>工单</th>
+              <th>事件 / 受影响服务</th>
               <th>优先级</th>
               <th>状态</th>
               <th>创建人 / 处理人</th>
@@ -193,13 +196,13 @@ onMounted(async () => {
               :key="ticket.id"
               class="ticket-table-row"
               tabindex="0"
-              @click="preview = ticket"
-              @keydown.enter="preview = ticket"
+              @click="router.push(`/tickets/${ticket.id}`)"
+              @keydown.enter.self="router.push(`/tickets/${ticket.id}`)"
             >
               <td>
-                <button class="table-title table-title-button" @click.stop="preview = ticket"
+                <RouterLink class="table-title table-title-button" :to="`/tickets/${ticket.id}`" @click.stop
                   ><strong>{{ ticket.title }}</strong
-                  ><span>{{ ticket.ticketNo }}</span></button
+                  ><span>{{ ticket.ticketNo }} · {{ ticket.affectedCiCode || '待关联服务' }}</span></RouterLink
                 >
               </td>
               <td><PriorityIndicator :value="ticket.priority" /></td>
@@ -209,7 +212,8 @@ onMounted(async () => {
               </td>
               <td><time :title="formatDateTime(ticket.updateTime)">{{ formatRelativeTime(ticket.updateTime) }}</time></td>
               <td>
-                <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`" title="打开工单详情" @click.stop
+                <button class="icon-button" title="快速查看事件摘要" @click.stop="preview = ticket"><Eye :size="17" /></button>
+                <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`" title="进入事件处置工作区" @click.stop
                   ><ArrowUpRight :size="17"
                 /></RouterLink>
               </td>
@@ -239,11 +243,11 @@ onMounted(async () => {
         <h3>问题描述</h3><p>{{ previewDescription.text }}</p>
       </section>
       <TechnicalMetadata :metadata="previewDescription.metadata" :preview-count="3" />
-      <InlineNotice>完整页面包含 SLA、处理记录、关联告警、CMDB、附件与 AI 分析。</InlineNotice>
+      <InlineNotice>进入事件工作区可连续查看诊断证据、待审批动作、执行记录和业务恢复结果。</InlineNotice>
     </DetailPanel>
     <BaseModal
-      v-if="showCreate"
-      title="新建运维工单"
+      v-if="showCreate && !auth.isDemo"
+      title="报告运维问题"
       @close="showCreate = false"
       ><form class="form-grid" @submit.prevent="create">
         <label

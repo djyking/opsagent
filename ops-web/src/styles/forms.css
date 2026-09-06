@@ -1,8 +1,9 @@
-input, select, textarea { width: 100%; border: 1px solid var(--oa-border-default); border-radius: var(--oa-radius-control); color: var(--oa-text-primary); background: var(--oa-bg-surface); font-size: var(--oa-font-size-body); line-height: normal; outline: none; transition: border-color var(--oa-duration-fast) ease, box-shadow var(--oa-duration-fast) ease; }
+input, select, textarea { width: 100%; border: 1px solid var(--oa-border-default); border-radius: var(--oa-radius-control); color: var(--oa-text-primary); background: var(--oa-bg-surface); font-size: var(--oa-font-size-body); font-weight: 400; line-height: var(--oa-line-height-body); outline: none; transition: border-color var(--oa-duration-fast) ease, box-shadow var(--oa-duration-fast) ease; }
 input, select { height: var(--oa-control-default); padding: 0 10px; }
 textarea { min-height: 96px; padding: 8px 10px; line-height: var(--oa-line-height-body); resize: vertical; }
-input::placeholder, textarea::placeholder { color: var(--oa-text-tertiary); }
+input::placeholder, textarea::placeholder { color: var(--oa-text-tertiary); opacity: 1; font-weight: 400; }
 input:focus, select:focus, textarea:focus { border-color: var(--oa-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oa-primary) 12%, transparent); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
 .button { min-height: var(--oa-control-default); padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid transparent; border-radius: var(--oa-radius-control); font-size: var(--oa-font-size-sm); line-height: var(--oa-line-height-sm); font-weight: 500; white-space: nowrap; }
 .button.primary { box-shadow: 0 3px 8px #4b6fe714; color: var(--oa-bg-surface); background: var(--oa-primary); }
 .button.primary:hover { background: var(--oa-primary-hover); }

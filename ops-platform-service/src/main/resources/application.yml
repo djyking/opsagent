@@ -38,17 +38,37 @@ spring:
       transport:
         dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
 ops:
+  agent:
+    internal-secret: ${OPS_AGENT_INTERNAL_SECRET:}
+    auth-url: ${OPS_AUTH_INTERNAL_URL:http://localhost:8101}
   security:
     secret: ${OPS_JWT_SECRET:}
     permit-all:
       - /actuator/health
       - /actuator/info
       - /actuator/prometheus
+      - /internal/platform/demo-targets/order/**
   monitor:
     prometheus-url: ${OPS_PROMETHEUS_URL:http://localhost:9090}
     grafana-url: ${OPS_GRAFANA_URL:http://localhost:3000}
     prometheus-public-url: ${OPS_PROMETHEUS_PUBLIC_URL:http://localhost:9090}
     grafana-public-url: ${OPS_GRAFANA_PUBLIC_URL:http://localhost:3000}
+  operations:
+    demo-target-url: ${OPS_DEMO_TARGET_URL:}
+    demo-target-token: ${OPS_DEMO_CONTROL_TOKEN:}
+    initialize-schema: ${OPS_OPERATIONS_INITIALIZE_SCHEMA:true}
+    inspection-enabled: ${OPS_OPERATIONS_INSPECTION_ENABLED:false}
+    inspection-interval-ms: ${OPS_OPERATIONS_INSPECTION_INTERVAL_MS:900000}
+    inspection-initial-delay-ms: ${OPS_OPERATIONS_INSPECTION_INITIAL_DELAY_MS:120000}
+    nacos-url: ${OPS_OPERATIONS_NACOS_URL:http://${NACOS_SERVER_ADDR:localhost:8848}/nacos}
+    nacos-username: ${OPS_OPERATIONS_NACOS_USERNAME:}
+    nacos-password: ${OPS_OPERATIONS_NACOS_PASSWORD:}
+    nacos-identity-key: ${OPS_OPERATIONS_NACOS_IDENTITY_KEY:}
+    nacos-identity-value: ${OPS_OPERATIONS_NACOS_IDENTITY_VALUE:}
+    nacos-namespace: ${OPS_OPERATIONS_NACOS_NAMESPACE:}
+    rag-url: ${OPS_OPERATIONS_RAG_URL:http://localhost:8104}
+    lab-url: ${OPS_OPERATIONS_LAB_URL:}
+    lab-token: ${OPS_OPERATIONS_LAB_TOKEN:}
 management:
   endpoints:
     web:

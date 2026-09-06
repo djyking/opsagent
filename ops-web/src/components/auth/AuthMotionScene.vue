@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { Activity, ArrowUpRight, BookOpen, Check, FileCheck2, GitBranch, Pause, Play, Radio, ShieldCheck, Sparkles, TicketCheck } from "@lucide/vue";
+import { Activity, ArrowUpRight, BookOpen, Check, FileCheck2, GitBranch, Radio, ShieldCheck, Sparkles, TicketCheck } from "@lucide/vue";
 import { useReducedMotion } from "@/composables/useReducedMotion";
 
 const props = defineProps<{ formFocused: boolean }>();
@@ -8,9 +8,8 @@ const reduced = useReducedMotion();
 const compactQuery = window.matchMedia('(max-width: 900px)');
 const compact = ref(compactQuery.matches);
 const hidden = ref(document.hidden);
-const paused = ref(false);
 const activeStep = ref(0);
-const playing = computed(() => !paused.value && !props.formFocused && !reduced.value && !hidden.value && !compact.value);
+const playing = computed(() => !props.formFocused && !reduced.value && !hidden.value && !compact.value);
 const steps = [
   { label: '告警联动', detail: '让需要关注的信号，进入清晰的处理流程。', icon: Radio },
   { label: '工单协作', detail: '关联服务与责任人，让每个问题有人跟进。', icon: TicketCheck },
@@ -30,8 +29,7 @@ watch([playing, activeStep], ([isPlaying, step], previous) => {
     timer = setTimeout(() => { activeStep.value = (activeStep.value + 1) % steps.length; }, remaining);
   }
 }, { immediate: true });
-function selectStep(index: number) { activeStep.value = index; paused.value = true; }
-function toggle() { paused.value = !paused.value; }
+function selectStep(index: number) { activeStep.value = index; }
 function updateVisibility() { hidden.value = document.hidden; }
 function updateCompact() { compact.value = compactQuery.matches; }
 onMounted(() => { document.addEventListener('visibilitychange', updateVisibility); compactQuery.addEventListener('change', updateCompact); });
@@ -64,7 +62,6 @@ onBeforeUnmount(() => { clearTimeout(timer); document.removeEventListener('visib
         <div class="scene-node scene-node-ticket" :class="{ active: activeStep === 1 }"><div class="scene-node-heading"><span class="scene-node-icon"><TicketCheck :size="18" /></span><strong>工单协作</strong><GitBranch :size="15" /></div><p>让处理有方向</p><div class="scene-node-bottom"><span class="scene-avatars"><i>协</i><i>作</i></span>明确责任与进度</div></div>
         <div class="scene-node scene-node-knowledge" :class="{ active: activeStep === 2 }"><div class="scene-node-heading"><span class="scene-node-icon"><BookOpen :size="18" /></span><strong>知识依据</strong><Sparkles :size="15" /></div><p>让回答有来源</p><div class="scene-node-bottom"><span class="scene-source-mark">[1]</span>建议与引用，一起呈现</div></div>
         <div class="scene-node scene-node-trace" :class="{ active: activeStep === 3 }"><div class="scene-node-heading"><span class="scene-node-icon"><FileCheck2 :size="18" /></span><strong>处置留痕</strong><ShieldCheck :size="15" /></div><p>让经验被留下</p><div class="scene-node-bottom"><Check :size="14" />诊断 · 执行 · 验证</div></div>
-        <span class="scene-demo-label">产品流程示意</span>
       </div>
       <div class="login-scene-story">
         <div class="login-scene-steps" aria-label="选择流程示意"><button v-for="(step, index) in steps" :key="step.label" type="button" :aria-pressed="activeStep === index" :aria-label="`查看${step.label}示意`" @click="selectStep(index)"><span>{{ String(index + 1).padStart(2, '0') }}</span>{{ step.label }}<i :class="{ current: activeStep === index }" /></button></div>
@@ -72,7 +69,7 @@ onBeforeUnmount(() => { clearTimeout(timer); document.removeEventListener('visib
       </div>
       <div class="login-scene-mobile-flow">告警联动<span>→</span>工单协作<span>→</span>知识与处置</div>
     </div>
-    <footer class="login-scene-footer"><span><ShieldCheck :size="14" />连接运维现场，让处理过程清晰可见。</span><button v-if="!reduced" type="button" class="scene-playback" :aria-label="paused ? '播放流程演示' : '暂停流程演示'" @click="toggle"><Play v-if="paused" :size="14" /><Pause v-else :size="14" />{{ paused ? '播放演示' : formFocused ? '输入中 · 演示暂停' : '暂停演示' }}</button><span v-else class="scene-motion-note">已遵循减少动态效果设置</span></footer>
+    <footer class="login-scene-footer"><span><ShieldCheck :size="14" />连接运维现场，让处理过程清晰可见。</span><span v-if="reduced" class="scene-motion-note">已遵循减少动态效果设置</span></footer>
   </section>
 </template>
 

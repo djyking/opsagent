@@ -32,6 +32,11 @@ const oldSession = { id: 'old', title: '已保存的 Redis 问题', updateTime: 
 const oldTurn = { id: 1, question: '之前的问题', answer: '之前的回答', status: 'COMPLETE', createTime: '2026-09-05T10:00:00' };
 const historyPage = () => ({ records: [structuredClone(oldSession)], total: 1 });
 const answer = { answer: '排查步骤', references: [], metadata: { generationComplete: true } };
+const providerCatalog = () => ({ defaultProvider: 'deepseek', providers: [
+  { provider: 'deepseek', model: 'deepseek-v4-flash', available: true, status: '已配置' },
+  { provider: 'openai', model: 'configured-openai-model', available: true, status: '已配置' },
+  { provider: 'kimi', model: 'kimi-model', available: false, status: '尚未配置完成' },
+] });
 function setup(query = {}, overrides = {}) {
   const route = vue.reactive({ path: '/rag/chat', query });
   const mounted = [], unmounting = [], calls = { create: 0, stream: [], remove: 0, rename: 0, messages: [] };
@@ -51,7 +56,7 @@ function setup(query = {}, overrides = {}) {
   const { useRagConversations } = load('composables/useRagConversations.ts', {
     vue: { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounting.push(fn) },
     'vue-router': { useRoute: () => route, useRouter: () => router },
-    '@/api/conversations': { conversationApi: api },
+    '@/api/conversations': { conversationApi: api, ragProviderApi: { list: overrides.providers || (async () => providerCatalog()) } },
     '@/api/rag-stream': { streamRagAnswer: stream, ragCompletionLabel: () => '回答完成', ragIncompleteMessage: () => '' },
     '@/utils/rag-navigation': navigationModule,
   });
@@ -112,7 +117,7 @@ function setup(query = {}, overrides = {}) {
   await app.state.ask();
   await flush();
   assert.equal(app.calls.create, 1);
-  assert.deepEqual(app.calls.stream, [{ question: '排查 Redis', topK: 5, conversationId: 'created' }]);
+  assert.deepEqual(app.calls.stream, [{ question: '排查 Redis', topK: 5, conversationId: 'created', provider: 'deepseek' }]);
   assert.equal(app.state.sessionId.value, 'created');
   assert.deepEqual(app.route.query, { conversation: 'created' });
   app.stop();
@@ -186,3 +191,34 @@ function setup(query = {}, overrides = {}) {
   app.stop();
 }
 console.log('PASS RAG draft handoff: query consumption, limits, no automatic send, saved history, stale selection, active stream races and preserving destination queries on exit');
+
+// Model selection is explicit and stays attached to the request, including existing conversations.
+{
+  const app = setup({ conversation: 'old' });
+  await flush();
+  assert.equal(app.state.selectedProvider.value, 'deepseek');
+  assert.equal(app.state.providers.value.find(item => item.provider === 'kimi').available, false);
+  app.state.selectedProvider.value = 'openai';
+  await app.state.ask('当前内存趋势');
+  assert.equal(app.calls.stream[0].provider, 'openai');
+  assert.equal(app.calls.stream[0].conversationId, 'old');
+  app.stop();
+}
+
+// Discovery failure or pending discovery must never create a conversation with an unknown model.
+{
+  const discovery = deferred();
+  const app = setup({ new: '1', draft: '服务健康' }, { providers: () => discovery.promise });
+  await flush();
+  await app.state.ask();
+  assert.equal(app.calls.create, 0);
+  discovery.reject(new Error('模型目录不可用'));
+  await flush();
+  await app.state.ask();
+  assert.equal(app.state.providerError.value, '模型目录不可用');
+  assert.equal(app.calls.create, 0);
+  assert.equal(app.calls.stream.length, 0);
+  assert.equal(app.state.question.value, '服务健康');
+  app.stop();
+}
+console.log('PASS provider discovery: real choices, selected provider propagation and no writes on loading/failure');

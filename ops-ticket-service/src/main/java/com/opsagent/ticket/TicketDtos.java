@@ -21,7 +21,7 @@ final class TicketDtos {
      */
     record Create(
             @NotBlank @Size(max = 128) String title,
-            @NotBlank String description,
+            @NotBlank @Size(max = 20000) String description,
             @NotBlank @Pattern(regexp = "LOW|MEDIUM|HIGH|URGENT") String priority,
             @Size(max = 64) String affectedCiCode) {}
 
@@ -59,10 +59,7 @@ final class TicketDtos {
      * @since 2026/9/3
      */
     record AddWorkRecord(
-            @NotBlank
-                    @Pattern(
-                            regexp =
-                                    "DIAGNOSIS|ACTION|VERIFICATION|ROOT_CAUSE|BUSINESS_REPLY")
+            @NotBlank @Pattern(regexp = "DIAGNOSIS|ACTION|VERIFICATION|ROOT_CAUSE|BUSINESS_REPLY")
                     String recordType,
             @NotBlank @Size(max = 2000) String content,
             @Size(max = 1000) String evidence) {}
@@ -84,6 +81,11 @@ final class TicketDtos {
             Long assigneeId,
             String affectedCiCode,
             String sourceType,
+            String environment,
+            Long ownerActorId,
+            String incidentId,
+            String episodeId,
+            Boolean publicDemo,
             Integer version,
             LocalDateTime createTime,
             LocalDateTime updateTime) {}

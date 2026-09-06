@@ -1,0 +1,28 @@
+server:
+  port: 8110
+  tomcat:
+    threads: {min-spare: 1, max: 12}
+    max-connections: 64
+    accept-count: 32
+spring:
+  application:
+    name: ops-demo-order-service
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+ops:
+  demo:
+    control-token: ${OPS_DEMO_CONTROL_TOKEN:}
+    nacos-address: ${NACOS_SERVER_ADDR:localhost:8848}
+    nacos-namespace: ${OPS_DEMO_NACOS_NAMESPACE:}
+    nacos-enabled: ${OPS_DEMO_NACOS_ENABLED:true}
+    redis-host: ${OPS_DEMO_REDIS_HOST:demo-redis}
+    redis-password: ${OPS_DEMO_REDIS_PASSWORD:}
+    rabbitmq-host: ${OPS_DEMO_RABBITMQ_HOST:demo-rabbitmq}
+    rabbitmq-password: ${OPS_DEMO_RABBITMQ_PASSWORD:}

@@ -28,8 +28,12 @@ public class JwtService {
     }
 
     public IssuedToken issue(long userId, String username, List<String> roles) {
+        return issue(userId, username, roles, properties.getAccessTokenTtl());
+    }
+
+    public IssuedToken issue(long userId, String username, List<String> roles, java.time.Duration ttl) {
         Instant now = Instant.now();
-        Instant expires = now.plus(properties.getAccessTokenTtl());
+        Instant expires = now.plus(ttl);
         String id = UUID.randomUUID().toString();
         String token =
                 Jwts.builder()

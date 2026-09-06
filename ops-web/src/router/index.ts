@@ -21,11 +21,18 @@ const router = createRouter({
       component: () => import("@/layouts/AppLayout.vue"),
       children: [
         { path: "", redirect: "/dashboard" },
+        { path: "events", redirect: to => ({ path: "/tickets", query: to.query, hash: to.hash }) },
+        { path: "events/:id", redirect: to => ({ path: `/tickets/${to.params.id}`, query: to.query, hash: to.hash }) },
+        {
+          path: "automation",
+          name: "automation",
+          component: () => import("@/views/AutomationView.vue"),
+          meta: { layoutVariant: "data" },
+        },
         {
           path: "ai",
           name: "ai-center",
-          component: () => import("@/views/AiCapabilityCenterView.vue"),
-          meta: { layoutVariant: "standard" },
+          redirect: "/rag/chat",
         },
         {
           path: "dashboard",
@@ -58,16 +65,16 @@ const router = createRouter({
           meta: { layoutVariant: "focus" },
         },
         {
-          path: "system/monitor",
+          path: "operations",
           name: "monitor",
-          component: () => import("@/views/MonitorView.vue"),
+          component: () => import("@/views/OperationsView.vue"),
           meta: { layoutVariant: "data" },
         },
+        { path: "system/monitor", redirect: to => ({ path: "/operations", query: to.query }) },
         {
           path: "itsm/cmdb",
           name: "cmdb",
-          component: () => import("@/views/CmdbView.vue"),
-          meta: { layoutVariant: "focus" },
+          redirect: to => ({ path: "/operations", query: { ...to.query, tab: "topology" } }),
         },
         {
           path: "itsm/oncall",
@@ -85,7 +92,7 @@ const router = createRouter({
           path: "itsm/alerts",
           name: "alerts",
           component: () => import("@/views/AlertView.vue"),
-          meta: { admin: true, layoutVariant: "data" },
+          meta: { layoutVariant: "data" },
         },
         {
           path: "knowledge/review",
@@ -98,6 +105,12 @@ const router = createRouter({
           name: "knowledge-index-admin",
           component: () => import("@/views/KnowledgeIndexAdminView.vue"),
           meta: { admin: true, layoutVariant: "standard" },
+        },
+        {
+          path: "configuration",
+          name: "configuration",
+          component: () => import("@/views/ConfigurationView.vue"),
+          meta: { layoutVariant: "data" },
         },
         {
           path: "notifications",

@@ -11,6 +11,10 @@ rule_files:
   - /etc/prometheus/opsagent-alerts.yml
 
 scrape_configs:
+  - job_name: opsagent-agent
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ops-agent-app:8106"]
   - job_name: opsagent-gateway
     metrics_path: /actuator/prometheus
     static_configs:
@@ -40,3 +44,11 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-platform-app:8105"]
+
+  - job_name: opsagent-demo-order
+    scrape_interval: 5s
+    metrics_path: /actuator/prometheus
+    # The shared Demo JVM hosts both order and notification workloads. Keep each
+    # metric's own service label; the platform scrape above exports both probe series.
+    static_configs:
+      - targets: ["ops-demo-order-app:8110"]

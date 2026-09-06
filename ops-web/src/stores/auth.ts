@@ -10,6 +10,7 @@ export const useAuthStore = defineStore("auth", () => {
   const isAuthenticated = computed(() => Boolean(token.value));
   const isAdmin = computed(() => user.value?.roles.includes("ADMIN") ?? false);
   const isOps = computed(() => user.value?.roles.includes("OPS") ?? false);
+  const isDemo = computed(() => user.value?.roles.includes("DEMO") ?? false);
 
   async function login(username: string, password: string, captchaId: string, captchaCode: string) {
     const result = await authApi.login({ username, password, captchaId, captchaCode });
@@ -45,6 +46,7 @@ export const useAuthStore = defineStore("auth", () => {
     isAuthenticated,
     isAdmin,
     isOps,
+    isDemo,
     login,
     fetchMe,
     logout,

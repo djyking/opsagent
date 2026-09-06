@@ -37,9 +37,8 @@ public class AlertmanagerController {
     }
 
     @GetMapping("/api/tickets/alerts")
-    @PreAuthorize("hasAnyRole('OPS','ADMIN')")
-    ApiResponse<List<Map<String, Object>>> alerts(
-            @RequestParam(required = false) String status) {
+    @PreAuthorize("hasAnyRole('OPS','ADMIN','USER','DEMO')")
+    ApiResponse<List<Map<String, Object>>> alerts(@RequestParam(required = false) String status) {
         return ApiResponse.success(service.list(status));
     }
 }

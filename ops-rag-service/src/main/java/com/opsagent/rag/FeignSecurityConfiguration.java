@@ -24,7 +24,7 @@ public class FeignSecurityConfiguration {
                 HttpServletRequest r = a.getRequest();
                 String auth = r.getHeader("Authorization");
                 String trace = r.getHeader("X-Trace-Id");
-                if (auth != null) t.header("Authorization", auth);
+                if (auth != null && !t.headers().containsKey("Authorization")) t.header("Authorization", auth);
                 if (trace != null) t.header("X-Trace-Id", trace);
             }
         };

@@ -13,6 +13,7 @@ export function ragCompletionLabel(result: RagStreamResult): string {
   if (result.metadata?.generationComplete === false) return "回答未完成";
   if (result.provider === "cmdb" && result.metadata?.degradedReason === "CMDB_UNAVAILABLE") return "目录暂不可用";
   if (result.provider === "cmdb") return "查询完成";
+  if (result.provider === "operations") return result.metadata?.degradedReason === "OPERATIONS_UNAVAILABLE" ? "运行数据暂不可用" : "运行快照已读取";
   if (result.provider === "disabled") return "仅返回知识检索结果";
   if (result.provider === "none") return "知识依据不足";
   return "回答完成";
@@ -28,6 +29,7 @@ export function ragIncompleteMessage(result: RagStreamResult): string {
 export function ragAnswerLabel(result: RagStreamResult): string {
   if (result.provider === "cmdb" && result.metadata?.degradedReason === "CMDB_UNAVAILABLE") return "服务目录 · 读取失败";
   if (result.provider === "cmdb") return "服务目录 · 实时读取";
+  if (result.provider === "operations") return result.metadata?.degradedReason === "OPERATIONS_UNAVAILABLE" ? "实时运行数据 · 读取失败" : "实时运行数据 · 直接读取";
   if (result.provider === "disabled") {
     const reason = result.metadata?.degradedReason;
     if (reason === "LLM_DISABLED") return "仅知识检索 · AI 生成未启用";
@@ -60,7 +62,7 @@ const RETRIEVAL_TIMEOUT_MS = 90_000;
 const GENERATION_FIRST_TOKEN_TIMEOUT_MS = 90_000;
 
 export async function streamRagAnswer(
-  data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string },
+  data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string; provider?: string },
   handlers: RagStreamHandlers = {},
   signal?: AbortSignal,
 ): Promise<RagStreamResult> {
@@ -110,6 +112,7 @@ export async function streamRagAnswer(
         topK: data.topK || 5,
         documentId: data.documentId,
         ticketId: data.ticketId,
+        provider: data.provider,
       }),
       signal: controller.signal,
     });
@@ -143,7 +146,7 @@ export async function streamRagAnswer(
           }
           handlers.onStatus?.(
             payload.phase === "cmdb" ? "正在读取服务目录" : payload.phase === "generating"
-              ? "知识检索已完成，正在等待模型返回首段内容"
+              ? "本次资料读取已完成，正在等待所选模型返回首段内容"
               : retrievalOnly ? "正在返回参考资料" : "正在处理请求",
           );
         } else if (event.name === "token") {

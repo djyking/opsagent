@@ -70,18 +70,79 @@ public class KnowledgeService {
     }
 
     List<Map<String, Object>> bases() {
-        return repo.bases();
+        return demoUser() ? repo.publicBases() : repo.bases();
     }
 
     List<Map<String, Object>> documents(long base) {
-        return repo.documents(base);
+        return demoUser()
+                ? demoDocumentMetadata(filterLinkedTickets(repo.documents(base, true)))
+                : repo.documents(base);
+    }
+
+    private List<Map<String, Object>> filterLinkedTickets(List<Map<String, Object>> documents) {
+        if (documents.stream().noneMatch(row -> number(row, "ticket_id") > 0)) return documents;
+        Set<Long> visible = ticketAccess.visibleTicketIds();
+        return documents.stream().filter(row -> {
+            long ticketId = number(row, "ticket_id");
+            return ticketId < 1 || visible.contains(ticketId);
+        }).toList();
+    }
+
+    private List<Map<String, Object>> filterGlobalResults(List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) return rows;
+        Set<Long> ids = rows.stream().map(row -> number(row, "chunkId", "chunkid", "CHUNKID"))
+                .filter(id -> id > 0).collect(java.util.stream.Collectors.toSet());
+        var principal = SecurityUsers.current();
+        List<Map<String, Object>> current = filterLinkedTickets(
+                repo.readableGlobalChunks(ids, principal.userId(), administrator(principal.roles())));
+        Map<Long, Map<String, Object>> canonical = new LinkedHashMap<>();
+        current.forEach(row -> canonical.put(number(row, "chunkId", "chunkid", "CHUNKID"), row));
+        // Index metadata is not an authorization source. Recheck current database publication,
+        // ownership and linked-ticket access in bulk, then use current database text.
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> source = canonical.get(number(row, "chunkId", "chunkid", "CHUNKID"));
+            if (source == null || number(source, "documentId")
+                    != number(row, "documentId", "documentid", "DOCUMENTID")) continue;
+            Map<String, Object> safe = new LinkedHashMap<>(row);
+            safe.put("chunkId", number(source, "chunkId"));
+            safe.put("documentId", number(source, "documentId"));
+            safe.put("documentName", text(source, "documentName"));
+            safe.put("content", text(source, "content"));
+            safe.remove("headingPath");
+            safe.put("version", number(source, "version"));
+            safe.put("chunkIndex", number(source, "chunkIndex"));
+            safe.put("page", source.get("page"));
+            safe.put("pageStart", source.get("page"));
+            safe.put("pageEnd", source.get("page"));
+            safe.put("updateTime", source.get("updateTime"));
+            result.add(safe);
+        }
+        return result;
     }
 
     List<Map<String, Object>> ticketDocuments(long ticketId) {
         var principal = SecurityUsers.current();
         ticketAccess.requireVisible(ticketId);
-        return repo.ticketDocuments(
+        List<Map<String, Object>> documents = repo.ticketDocuments(
                 ticketId, principal.userId(), administrator(principal.roles()));
+        return demoUser() ? demoDocumentMetadata(documents.stream().filter(document ->
+                "PUBLIC".equals(text(document, "visibility"))
+                        && "PUBLISHED".equals(text(document, "review_status"))).toList()) : documents;
+    }
+
+    private boolean demoUser() {
+        return SecurityUsers.current().roles().stream()
+                .anyMatch(role -> "DEMO".equals(role) || "ROLE_DEMO".equals(role));
+    }
+
+    private List<Map<String, Object>> demoDocumentMetadata(List<Map<String, Object>> documents) {
+        return documents.stream().map(document -> {
+            Map<String, Object> result = new LinkedHashMap<>(document);
+            result.remove("parse_error");
+            result.remove("content_hash");
+            return result;
+        }).toList();
     }
 
     long upload(long base, Long ticketId, MultipartFile file, String requestedVisibility) {
@@ -220,7 +281,8 @@ public class KnowledgeService {
                         administrator,
                         limit));
                 if (!hybrid.candidates().isEmpty()) {
-                    return indexService.candidateRows(hybrid);
+                    List<Map<String, Object>> visible = filterGlobalResults(indexService.candidateRows(hybrid));
+                    if (!visible.isEmpty()) return visible;
                 }
             } catch (RuntimeException exception) {
                 LOG.warn("Elasticsearch 检索失败，已安全降级到权限过滤后的 MySQL 文本检索");
@@ -238,7 +300,7 @@ public class KnowledgeService {
                 }
             }
         }
-        return unique.values().stream().limit(limit).toList();
+        return filterGlobalResults(new ArrayList<>(unique.values())).stream().limit(limit).toList();
     }
 
     private List<Map<String, Object>> scopedSearch(String query, int limit, Long documentId,
@@ -316,9 +378,16 @@ public class KnowledgeService {
         return indexService.reindexAll();
     }
 
-    long requestReindex() {
+    synchronized long requestReindex() {
         var principal = requireAdministrator();
+        Long active = repo.activeReindexTaskId();
+        if (active != null) return active;
         return repo.createReindexTask(principal.userId());
+    }
+
+    Map<String, Object> latestReindexTask() {
+        requireAdministrator();
+        return repo.latestReindexTask();
     }
 
     Map<String, Object> reindexTask(long taskId) {
@@ -333,37 +402,36 @@ public class KnowledgeService {
     Map<String, Object> indexConsistency() {
         requireAdministrator();
         Map<String, Long> database = repo.indexStatusCounts();
-        Map<String, Object> index = indexService.indexMetadata();
-        long indexed = ((Number) index.get("indexedDocumentCount")).longValue();
-        long vectorPoints = ((Number) index.get("vectorPointCount")).longValue();
+        Map<String, Object> index = indexService.consistencySnapshot(
+                repo.publishedDocumentIds(), repo.publishedChunkIds(),
+                repo.liveDocumentIds(), repo.liveChunkIds());
         long published = database.get("published");
         long publishedChunks = database.get("publishedChunks");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("publishedDocumentCount", published);
         result.put("publishedChunkCount", publishedChunks);
-        result.put("indexedDocumentCount", database.get("indexed"));
+        result.put("databaseIndexedDocumentCount", database.get("indexed"));
         result.put("pendingDocumentCount", database.get("pending"));
         result.put("failedDocumentCount", database.get("failed"));
-        result.put("orphanEsDocumentCount", Math.max(0L, indexed - published));
-        result.put("missingQdrantPointCount", Math.max(0L, publishedChunks - vectorPoints));
-        result.put("orphanQdrantPointCount", Math.max(0L, vectorPoints - publishedChunks));
         result.putAll(index);
-        consistencyGap.set(Math.max(
-                Math.abs(published - indexed), Math.abs(publishedChunks - vectorPoints)));
+        consistencyGap.set(List.of("missingEsDocumentCount", "orphanEsDocumentCount",
+                "missingQdrantPointCount", "orphanQdrantPointCount").stream()
+                .mapToLong(key -> ((Number) index.get(key)).longValue()).sum());
         return result;
     }
 
     long repairIndex(long documentId) {
         requireAdministrator();
-        Map<String, Object> document = requireDocument(documentId);
-        repo.markIndexPending(documentId);
-        return repo.createIndexTaskAndOutbox(
-                documentId,
-                (int) number(document, "version"),
-                properties.getChunk().getStrategyVersion());
+        return repo.reserveIndexRepair(documentId, properties.getChunk().getStrategyVersion());
     }
 
-    List<Map<String, Object>> failedIndexTasks() {
+    long retryFailedIndexTask(long taskId, int documentVersion, String operation) {
+        requireAdministrator();
+        return repo.retryFailedIndexTask(
+                taskId, documentVersion, operation, properties.getChunk().getStrategyVersion());
+    }
+
+    List<KnowledgeIndexTaskView> failedIndexTasks() {
         requireAdministrator();
         return repo.failedIndexTasks();
     }
@@ -436,6 +504,11 @@ public class KnowledgeService {
         requireReviewer();
         requireDocument(documentId);
         return repo.reviewHistory(documentId);
+    }
+
+    Map<String, Object> reviewDocument(long documentId) {
+        requireReviewer();
+        return requireDocument(documentId);
     }
 
     private com.opsagent.common.security.OpsPrincipal requireReviewer() {

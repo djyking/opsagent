@@ -22,6 +22,10 @@ spring:
       server:
         webflux:
           routes:
+            - id: automation
+              uri: lb://ops-agent-service
+              predicates:
+                - Path=/api/automation/**
             - id: auth
               uri: lb://ops-auth-service
               predicates:

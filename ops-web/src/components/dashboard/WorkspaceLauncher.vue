@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { Activity, ArrowRight, BookCheck, BookOpen, CalendarClock, CheckCheck, DatabaseZap, Layers, MessageSquareText, Network, Search, ShieldCheck, Siren, Sparkles, Ticket, TicketCheck, TimerReset, X } from "@lucide/vue";
+import { Activity, ArrowRight, BookCheck, BookOpen, CalendarClock, DatabaseZap, MessageSquareText, Network, Search, ShieldCheck, Siren, Sparkles, TicketCheck, TimerReset, X } from "@lucide/vue";
 import { useAuthStore } from "@/stores/auth";
 import { workspaceActions, searchWorkspaceActions, actionDestination, type WorkspaceAction, type WorkspaceActionIcon } from "@/data/workspace-actions";
 
@@ -20,12 +20,12 @@ const greeting = computed(() => {
   return hour < 6 ? "夜深了" : hour < 12 ? "上午好" : hour < 18 ? "下午好" : "晚上好";
 });
 const name = computed(() => auth.user?.displayName || auth.user?.username || "运维伙伴");
-const matches = computed(() => searchWorkspaceActions(query.value, auth.isAdmin).slice(0, 6));
+const matches = computed(() => searchWorkspaceActions(query.value, auth.isAdmin && !auth.isDemo).filter(action => !auth.isDemo || !['ticket-create', 'knowledge-upload'].includes(action.id)).slice(0, 6));
 const fallbacks = computed(() => workspaceActions.filter(action => ["ticket-search", "rag"].includes(action.id)));
 const options = computed(() => matches.value.length ? matches.value : fallbacks.value);
 const selectedMatch = computed(() => query.value.trim() && matches.value.length ? matches.value[selected.value] || matches.value[0] : undefined);
 const actionLabel = computed(() => selectedMatch.value ? '打开入口' : query.value.trim() ? '查看候选' : '浏览入口');
-const quickGoals = ["创建工单", "排查 Redis", "查看值班", "服务拓扑"];
+const quickGoals = ["事件处置", "自动化中心", "服务拓扑", "AI 助手"];
 const icons: Record<WorkspaceActionIcon, typeof Search> = {
   TicketCheck, MessageSquareText, BookOpen, CalendarClock, TimerReset, Network,
   Activity, Siren, BookCheck, DatabaseZap, ShieldCheck,
@@ -90,17 +90,17 @@ onBeforeUnmount(() => {
     <div class="workspace-launcher-copy">
       <div class="workspace-eyebrow"><span><Sparkles :size="14" /> 从这里，开始今天的工作</span><time :datetime="now.toISOString()">{{ dateLabel }}</time></div>
       <h2 id="workspace-welcome">{{ greeting }}，{{ name }}<span class="welcome-dot" aria-hidden="true">✦</span></h2>
-      <p class="workspace-lead">今天想处理什么？找到入口，让下一步更清楚。</p>
+      <p class="workspace-lead">从需要处理的事件开始，核对证据、推进处置、验证恢复。</p>
       <div class="workspace-search-box">
         <form class="workspace-search-form" role="search" aria-label="操作与能力搜索" @submit.prevent>
           <span class="workspace-search-symbol"><Search :size="20" /></span>
-          <input id="workspace-goal" ref="input" v-model="query" type="text" maxlength="500" autocomplete="off" placeholder="例如：排查 Redis、创建工单、查看值班" aria-label="搜索操作与能力" role="combobox" aria-autocomplete="list" aria-controls="workspace-results" :aria-expanded="open" :aria-activedescendant="open && options.length ? `workspace-option-${selected}` : undefined" @focus="open = true" @keydown="onInputKeydown" />
+          <input id="workspace-goal" ref="input" v-model="query" type="text" maxlength="500" autocomplete="off" placeholder="例如：查询事件、查看审批、寻找处置知识" aria-label="搜索操作与能力" role="combobox" aria-autocomplete="list" aria-controls="workspace-results" :aria-expanded="open" :aria-activedescendant="open && options.length ? `workspace-option-${selected}` : undefined" @focus="open = true" @keydown="onInputKeydown" />
           <button v-if="query" type="button" class="workspace-clear" aria-label="清空能力搜索" @click="query = ''; input?.focus()"><X :size="15" /></button>
           <button type="button" class="button primary workspace-match" :title="selectedMatch ? `打开：${selectedMatch.label}` : '展开可用入口，选择后继续'" @click="submit">{{ actionLabel }} <ArrowRight :size="16" /></button>
         </form>
         <div class="workspace-quick-goals"><span>快捷开始</span><button v-for="goal in quickGoals" :key="goal" type="button" @click="matchGoal(goal)">{{ goal }}</button></div>
         <div v-if="open" class="workspace-results-panel">
-          <div class="workspace-results-heading" aria-live="polite"><strong>{{ query.trim() ? (matches.length ? '可用的操作与能力' : '暂未匹配到对应能力') : '常用入口' }}</strong><small>{{ matches.length ? '选择入口继续' : '可以继续查工单或向知识库提问' }}</small></div>
+          <div class="workspace-results-heading" aria-live="polite"><strong>{{ query.trim() ? (matches.length ? '可用的操作与能力' : '暂未匹配到对应能力') : '常用入口' }}</strong><small>{{ matches.length ? '选择入口继续' : '可以继续查事件或向知识库提问' }}</small></div>
           <div id="workspace-results" class="workspace-results" role="listbox" aria-label="匹配的功能入口">
             <button v-for="(action, index) in options" :id="`workspace-option-${index}`" :key="action.id" type="button" role="option" tabindex="-1" :aria-selected="selected === index" class="workspace-result" @pointermove="selected = index" @mousedown.prevent @click="choose(action)">
               <span class="workspace-result-icon"><component :is="icons[action.icon] || Search" :size="19" /></span>
@@ -112,25 +112,18 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-    <div class="workspace-visual" aria-hidden="true">
-      <div class="workspace-orbit orbit-outer" /><div class="workspace-orbit orbit-inner" />
-      <div class="workspace-core"><Layers :size="36" :stroke-width="1.4" /><span>OpsAgent</span></div>
-      <div class="workspace-node node-knowledge"><span><BookOpen :size="18" /></span><div><strong>知识有据</strong><small>检索 · 问答</small></div></div>
-      <div class="workspace-node node-collaboration"><span><Ticket :size="18" /></span><div><strong>协作有序</strong><small>工单 · 值班</small></div></div>
-      <div class="workspace-visual-caption"><CheckCheck :size="14" /> 连接知识、协作与运维现场</div>
-    </div>
   </section>
 </template>
 
 <style scoped>
-.workspace-launcher { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 290px; align-items: center; gap: 24px; padding: 28px 32px; border: 1px solid #d8e5f6; border-radius: var(--oa-radius-raised); background: radial-gradient(ellipse at 90% 10%, #d6e7ff99, transparent 48%), linear-gradient(115deg, #f8fbff 10%, #edf5ff 68%, #edf8f6); box-shadow: var(--oa-shadow-card); }
+.workspace-launcher { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 24px; padding: 20px 24px; border: 1px solid #d8e5f6; border-radius: var(--oa-radius-raised); background: radial-gradient(ellipse at 90% 10%, #d6e7ff99, transparent 48%), linear-gradient(115deg, #f8fbff 10%, #edf5ff 68%, #edf8f6); box-shadow: var(--oa-shadow-card); }
 .workspace-launcher-copy { min-width: 0; }
-.workspace-eyebrow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 12px; color: #6d86a1; font-size: 12px; line-height: 20px; }
+.workspace-eyebrow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 6px; color: #6d86a1; font-size: 12px; line-height: 20px; }
 .workspace-eyebrow > span { display: inline-flex; align-items: center; gap: 6px; }
 .workspace-eyebrow time { color: var(--oa-text-tertiary); }
 .workspace-launcher h2 { display: flex; align-items: center; gap: 14px; margin: 0; font-size: 28px; font-weight: 600; line-height: 40px; letter-spacing: -.03em; overflow-wrap: anywhere; }
 .welcome-dot { color: #6e94ef; font-size: 26px; }
-.workspace-lead { margin: 7px 0 21px; color: var(--oa-text-secondary); font-size: 13px; line-height: 22px; }
+.workspace-lead { margin: 5px 0 13px; color: var(--oa-text-secondary); font-size: 13px; line-height: 22px; }
 .workspace-search-box { position: relative; padding: 9px 12px; border: 1px solid #dbe6f5; border-radius: 15px; background: #fff; box-shadow: 0 8px 22px #6484ac0a; }
 .workspace-search-form { display: flex; align-items: center; gap: 9px; }
 .workspace-search-symbol { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 10px; color: var(--oa-primary); background: var(--oa-primary-soft); }
@@ -166,7 +159,7 @@ onBeforeUnmount(() => {
 .workspace-node > div { display: grid; gap: 3px; }.workspace-node strong { font-size: 12px; font-weight: 500; color: #526b85; }.workspace-node small { font-size: 10px; color: #8b9db0; }
 .node-knowledge { top: 2px; left: 4px; transform: rotate(-4deg); }.node-collaboration { bottom: 26px; right: -4px; transform: rotate(4deg); }.node-collaboration > span { color: #479689; background: #edf8f5; }
 .workspace-visual-caption { position: absolute; bottom: -8px; left: 6px; right: 0; display: flex; align-items: center; justify-content: center; gap: 7px; font-size: 10px; color: #7d95ab; }
-@media (max-width: 1350px) { .workspace-launcher { grid-template-columns: minmax(0, 1fr) 220px; padding: 25px; gap: 16px; }.workspace-visual { transform: scale(.82); width: 270px; }.workspace-launcher h2 { font-size: 25px; } }
+@media (max-width: 1350px) { .workspace-launcher { grid-template-columns: minmax(0, 1fr); padding: 25px; gap: 16px; }.workspace-visual { transform: scale(.82); width: 270px; }.workspace-launcher h2 { font-size: 25px; } }
 @media (max-width: 1120px) { .workspace-launcher { grid-template-columns: minmax(0, 1fr); }.workspace-visual { display: none; } }
 @media (max-width: 600px) { .workspace-launcher { padding: 20px 16px; }.workspace-launcher h2 { font-size: 23px; line-height: 34px; }.workspace-eyebrow { gap: 2px; flex-direction: column; align-items: flex-start; }.workspace-search-form { gap: 7px; flex-wrap: wrap; }.workspace-search-form input { font-size: 12px; width: calc(100% - 76px); }.workspace-match { width: 100%; justify-content: center; }.workspace-search-symbol { width: 28px; height: 32px; }.workspace-quick-goals { gap: 6px; }.workspace-quick-goals > span { width: 100%; }.workspace-results { max-height: 270px; }.workspace-results-footer > span:last-child { display: none; } }
 </style>

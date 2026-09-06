@@ -20,6 +20,8 @@
         <module>ops-knowledge-service</module>
         <module>ops-rag-service</module>
         <module>ops-platform-service</module>
+        <module>ops-agent-service</module>
+        <module>ops-demo-order-service</module>
     </modules>
     <properties>
         <java.version>17</java.version>

@@ -7,11 +7,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -105,6 +107,12 @@ public class MonitoringService {
             throw new IllegalStateException("HTTP " + response.statusCode());
         }
         return json.readTree(response.body());
+    }
+
+    JsonNode queryRange(String query, Instant start, Instant end, int stepSeconds) throws Exception {
+        return get(prometheusUrl + "/api/v1/query_range?query="
+                + URLEncoder.encode(query, StandardCharsets.UTF_8)
+                + "&start=" + start.getEpochSecond() + "&end=" + end.getEpochSecond() + "&step=" + stepSeconds);
     }
 
     static String publicLink(String baseUrl, String path) {

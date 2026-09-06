@@ -6,9 +6,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsagent.common.core.*;
 import com.opsagent.common.security.*;
 
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +34,9 @@ public class AuthService {
     @Value("${ops.auth.registration-enabled:true}")
     private boolean registrationEnabled = true;
 
+    @Value("${ops.auth.demo-enabled:false}")
+    private boolean demoEnabled;
+
     AuthService(
             UserMapper users,
             RefreshTokenMapper refreshTokens,
@@ -50,6 +53,16 @@ public class AuthService {
     @Transactional
     TokenResponse login(LoginRequest req) {
         captcha.verify(req.captchaId(), req.captchaCode());
+        if (demoEnabled && "user".equals(req.username()) && "user".equals(req.password())) {
+            // Each visitor gets a separate identity; a public credential must not share chat
+            // history.
+            long visitorId = -new java.security.SecureRandom().nextLong(1, 9_007_199_254_740_991L);
+            IssuedToken access =
+                    jwt.issue(visitorId, "访客", List.of("DEMO"), Duration.ofMinutes(30));
+            users.createVisitor(
+                    visitorId, LocalDateTime.ofInstant(access.expiresAt(), ZoneOffset.UTC));
+            return new TokenResponse(access.token(), "", "Bearer", access.expiresAt());
+        }
         User u = find(req.username());
         if (u == null
                 || !"enable".equalsIgnoreCase(u.getStatus())
@@ -74,8 +87,10 @@ public class AuthService {
         if (roleId == null) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "普通用户角色暂不可用，请联系管理员");
         }
-        String displayName = request.displayName() == null || request.displayName().isBlank()
-                ? username : request.displayName().trim();
+        String displayName =
+                request.displayName() == null || request.displayName().isBlank()
+                        ? username
+                        : request.displayName().trim();
         User user = User.registered(username, encoder.encode(request.password()), displayName);
         try {
             users.insert(user);
@@ -94,7 +109,9 @@ public class AuthService {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Refresh Token 无效或已过期");
         refreshTokens.revoke(hash);
         User u = users.selectById(userId);
-        if (u == null || !"enable".equalsIgnoreCase(u.getStatus()) || !Integer.valueOf(0).equals(u.getDeleted())) {
+        if (u == null
+                || !"enable".equalsIgnoreCase(u.getStatus())
+                || !Integer.valueOf(0).equals(u.getDeleted())) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "账号不可用，请重新登录或联系管理员");
         }
         return issue(u);
@@ -104,13 +121,32 @@ public class AuthService {
         return registrationEnabled;
     }
 
+    boolean demoEnabled() {
+        return demoEnabled;
+    }
+
     @Transactional
     void logout(String token) {
+        var authentication =
+                org.springframework.security.core.context.SecurityContextHolder.getContext()
+                        .getAuthentication();
+        if (authentication != null
+                && authentication.getPrincipal() instanceof OpsPrincipal actor
+                && actor.roles().contains("DEMO")) users.revokeVisitor(actor.userId());
         if (token != null && !token.isBlank()) refreshTokens.revoke(hash(token));
     }
 
     CurrentUser current() {
         OpsPrincipal p = SecurityUsers.current();
+        if (p.roles().contains("DEMO")) {
+            if (!actor(p.userId()).active())
+                throw new BusinessException(ErrorCode.UNAUTHENTICATED, "访客会话已过期，请重新登录");
+            return new CurrentUser(
+                    p.userId(),
+                    p.username(),
+                    p.roles(),
+                    List.of("demo:read", "rag:chat", "demo:run", "automation:run"));
+        }
         return new CurrentUser(p.userId(), p.username(), p.roles(), users.permissions(p.userId()));
     }
 
@@ -126,6 +162,35 @@ public class AuthService {
                 LocalDateTime.now().plusDays(7));
         return new TokenResponse(access.token(), raw, "Bearer", access.expiresAt());
     }
+
+    ActorView actor(long userId) {
+        if (userId < 0) {
+            UserMapper.VisitorLease visitor = users.visitor(userId);
+            Instant expiry =
+                    visitor == null ? Instant.EPOCH : visitor.expiresAt().toInstant(ZoneOffset.UTC);
+            boolean active =
+                    demoEnabled
+                            && visitor != null
+                            && !visitor.revoked()
+                            && expiry.isAfter(Instant.now());
+            return new ActorView(
+                    active, userId, "访客", active ? List.of("DEMO") : List.of(), expiry);
+        }
+        User user = users.selectById(userId);
+        boolean active =
+                user != null
+                        && "enable".equalsIgnoreCase(user.getStatus())
+                        && Integer.valueOf(0).equals(user.getDeleted());
+        return new ActorView(
+                active,
+                userId,
+                active ? user.getUsername() : "",
+                active ? users.roles(userId) : List.of(),
+                null);
+    }
+
+    record ActorView(
+            boolean active, long userId, String username, List<String> roles, Instant expiresAt) {}
 
     private User find(String username) {
         return users.selectOne(

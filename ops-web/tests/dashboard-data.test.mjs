@@ -44,7 +44,7 @@ const RouterLink = { props: ['to'], setup: (props, { slots }) => () => vue.h('a'
 const render = evaluate(template.code, { vue }).render;
 
 function ticket(id, overrides = {}) {
-  return { id, ticketNo: `TEST-${id}`, title: `工单 ${id}`, description: '自动化测试样本', priority: 'LOW', status: 'CREATED', creatorId: 1, sourceType: 'MANUAL', version: 0, createTime: '2026-09-01T08:00:00', updateTime: '2026-09-01T08:00:00', ...overrides };
+  return { id, ticketNo: `TEST-${id}`, title: `事件 ${id}`, description: '自动化测试样本', priority: 'LOW', status: 'CREATED', creatorId: 1, sourceType: 'MANUAL', version: 0, createTime: '2026-09-01T08:00:00', updateTime: '2026-09-01T08:00:00', ...overrides };
 }
 function sla(counts = {}) {
   return { counts: { total: 0, running: 0, risk: 0, dashboardRisk: 0, breached: 0, completed: 0, ...counts }, services: [], checkedAt: '2026-09-06T08:00:00' };
@@ -72,6 +72,7 @@ function setup(overrides = {}, isAdmin = true) {
   const read = (key, details) => { calls.push({ key, ...details }); return api[key](); };
   const imports = {
     vue: lifecycleVue,
+    '@/components/dashboard/OperationsDecision.vue': SlotSurface,
     '@/stores/auth': { useAuthStore: () => ({ isAdmin }) },
     '@/composables/usePageFeedback': { usePageFeedback: () => ({}) },
     '@/api/http': { request: ({ url }) => {
@@ -146,10 +147,10 @@ function setup(overrides = {}, isAdmin = true) {
     assert.equal(app.state.checkedAt.value, '', 'no successful synchronization may be reported');
     assert.equal(app.state.noPriorityRisk.value, false);
     const html = await app.html();
-    assert.match(html, /工单数据未获取/);
+    assert.match(html, /事件数据未获取/);
     assert.match(html, /服务监控未获取/);
     assert.match(html, /最近活动未获取/);
-    assert.doesNotMatch(html, /当前没有活跃工单|当前未发现以上风险事项|服务正常/);
+    assert.doesNotMatch(html, /当前没有活跃事件|当前未发现以上风险事项|服务正常/);
   } finally { app.stop(); }
 }
 

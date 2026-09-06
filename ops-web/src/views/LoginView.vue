@@ -22,6 +22,7 @@ const router = useRouter();
 const route = useRoute();
 const username = ref("");
 const password = ref("");
+const demoEnabled = ref(false);
 const captchaId = ref("");
 const captchaCode = ref("");
 const captchaImage = ref("");
@@ -83,7 +84,15 @@ async function submit() {
 }
 onMounted(refreshCaptcha);
 onMounted(async () => {
-  try { registrationEnabled.value = (await authApi.features()).registrationEnabled; }
+  try {
+    const features = await authApi.features();
+    registrationEnabled.value = features.registrationEnabled;
+    demoEnabled.value = features.demoEnabled;
+    if (features.demoEnabled && !username.value && !password.value) {
+      username.value = 'user';
+      password.value = 'user';
+    }
+  }
   catch { registrationEnabled.value = false; }
 });
 onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); });
@@ -143,6 +152,7 @@ onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); });
         <ActionButton class="primary auth-submit" :disabled="captchaLoading || !captchaId || captchaExpired" :loading="busy && !succeeded" :success="succeeded" loading-text="正在验证…" success-text="登录成功">进入工作台 <ArrowRight :size="18" /></ActionButton>
         <p class="auth-switch">
           <template v-if="registrationEnabled">还没有账号？<RouterLink to="/register">创建账号</RouterLink></template>
+          <template v-else-if="demoEnabled">user / user 可快速体验 · 管理操作请使用正式账号</template>
           <template v-else>请使用已分配的账号登录</template>
         </p>
       </form>

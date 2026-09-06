@@ -2,9 +2,9 @@ package com.opsagent.ticket;
 
 import static com.opsagent.ticket.TicketDtos.*;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.opsagent.common.core.*;
 import com.opsagent.common.security.*;
 
@@ -28,23 +28,27 @@ public class TicketService {
     private final OutboxMapper outbox;
     private final ObjectMapper json;
     private final SlaService sla;
+    private final DemoTicketActorVerifier demoActors;
 
     TicketService(
             TicketMapper t,
             TicketAuditMapper a,
             OutboxMapper o,
             ObjectMapper json,
-            SlaService sla) {
+            SlaService sla,
+            DemoTicketActorVerifier demoActors) {
         tickets = t;
         audit = a;
         outbox = o;
         this.json = json;
         this.sla = sla;
+        this.demoActors = demoActors;
     }
 
     @Transactional
     View create(Create r) {
         OpsPrincipal u = SecurityUsers.current();
+        if (u.roles().contains("DEMO")) forbidden();
         Ticket t = new Ticket();
         t.setTicketNo(
                 "OPS-"
@@ -58,6 +62,9 @@ public class TicketService {
         t.setCreatorId(u.userId());
         t.setAffectedCiCode(normalize(r.affectedCiCode()));
         t.setSourceType("MANUAL");
+        t.setEnvironment("CORE");
+        t.setOwnerActorId(u.userId());
+        t.setPublicDemo(false);
         t.setVersion(0);
         t.setDeleted(0);
         tickets.insert(t);
@@ -78,7 +85,13 @@ public class TicketService {
         OpsPrincipal u = SecurityUsers.current();
         var q = new LambdaQueryWrapper<Ticket>();
         if (!u.roles().contains("ADMIN")) {
-            if (u.roles().contains("OPS"))
+            if (u.roles().contains("DEMO"))
+                q.and(
+                        x ->
+                                x.eq(Ticket::getOwnerActorId, u.userId())
+                                        .or()
+                                        .eq(Ticket::getPublicDemo, true));
+            else if (u.roles().contains("OPS"))
                 q.and(
                         x ->
                                 x.eq(Ticket::getStatus, "CREATED")
@@ -94,7 +107,9 @@ public class TicketService {
     @Transactional
     View claim(long id, Claim r) {
         OpsPrincipal u = SecurityUsers.current();
-        requireRole(u, "OPS", "ADMIN");
+        Ticket current = require(id);
+        if (ownIsolatedDrill(current, u)) authorizeWrite(current);
+        else requireRole(u, "OPS", "ADMIN");
         // 单条条件 UPDATE 同时校验状态和版本，保证多实例并发接单只有一个请求成功。
         if (tickets.claim(id, u.userId(), r.version()) != 1)
             throw new BusinessException(ErrorCode.CONFLICT, "工单已被他人接单或版本已变化");
@@ -110,6 +125,7 @@ public class TicketService {
     View transition(long id, Action r) {
         OpsPrincipal u = SecurityUsers.current();
         Ticket t = require(id);
+        authorizeWrite(t);
         TicketStatus source = TicketStatus.valueOf(t.getStatus());
         if (!source.allows(r.target()))
             throw new BusinessException(
@@ -132,7 +148,13 @@ public class TicketService {
                 u.userId(),
                 r.target().name(),
                 null,
-                payload(id, u.userId(), "fromStatus", source.name(), "toStatus", r.target().name()));
+                payload(
+                        id,
+                        u.userId(),
+                        "fromStatus",
+                        source.name(),
+                        "toStatus",
+                        r.target().name()));
         addEvent(id, "ticket." + r.target().name().toLowerCase(), u.userId());
         return view(require(id));
     }
@@ -140,7 +162,7 @@ public class TicketService {
     @Transactional
     TicketAuditMapper.Comment comment(long id, AddComment r) {
         Ticket t = require(id);
-        authorizeRead(t);
+        authorizeWrite(t);
         long user = SecurityUsers.current().userId();
         audit.comment(id, user, r.content().trim());
         return audit.comments(id).get(audit.comments(id).size() - 1);
@@ -159,7 +181,7 @@ public class TicketService {
     @Transactional
     TicketAuditMapper.WorkRecord addWorkRecord(long id, AddWorkRecord request) {
         Ticket ticket = require(id);
-        authorizeRead(ticket);
+        authorizeWrite(ticket);
         OpsPrincipal user = SecurityUsers.current();
         audit.workRecord(
                 id,
@@ -192,18 +214,38 @@ public class TicketService {
                 outbox.traces(id));
     }
 
-    private Ticket require(long id) {
+    Ticket require(long id) {
         Ticket t = tickets.selectById(id);
         if (t == null) throw new BusinessException(ErrorCode.NOT_FOUND, "工单不存在");
         return t;
     }
 
-    private void authorizeRead(Ticket t) {
+    void authorizeRead(Ticket t) {
         OpsPrincipal u = SecurityUsers.current();
+        if (u.roles().contains("DEMO")) {
+            if (!Objects.equals(t.getOwnerActorId(), u.userId())
+                    && !Boolean.TRUE.equals(t.getPublicDemo())) forbidden();
+            return;
+        }
         if (!u.roles().contains("ADMIN")
                 && !Objects.equals(t.getCreatorId(), u.userId())
                 && !Objects.equals(t.getAssigneeId(), u.userId())
                 && !(u.roles().contains("OPS") && "CREATED".equals(t.getStatus()))) forbidden();
+    }
+
+    void authorizeWrite(Ticket ticket) {
+        authorizeRead(ticket);
+        OpsPrincipal user = SecurityUsers.current();
+        if (user.roles().contains("DEMO") && !ownIsolatedDrill(ticket, user)) forbidden();
+        if (user.roles().contains("DEMO")) demoActors.verify(user, ticket);
+    }
+
+    private boolean ownIsolatedDrill(Ticket ticket, OpsPrincipal user) {
+        return Objects.equals(ticket.getOwnerActorId(), user.userId())
+                && "ISOLATED_DRILL".equals(ticket.getSourceType())
+                && "ISOLATED".equals(ticket.getEnvironment())
+                && ("ops-demo-order-service".equals(ticket.getAffectedCiCode())
+                        || "ops-demo-notification-service".equals(ticket.getAffectedCiCode()));
     }
 
     private void requireRole(OpsPrincipal u, String... roles) {
@@ -230,56 +272,80 @@ public class TicketService {
                 t.getAssigneeId(),
                 t.getAffectedCiCode(),
                 t.getSourceType(),
+                t.getEnvironment(),
+                t.getOwnerActorId(),
+                t.getIncidentId(),
+                t.getEpisodeId(),
+                t.getPublicDemo(),
                 t.getVersion(),
                 t.getCreateTime(),
                 t.getUpdateTime());
     }
 
     private void addEvent(long ticketId, String eventType, long actorId) {
-        outbox.add(
-                UUID.randomUUID().toString(),
-                ticketId,
-                eventType,
-                payload(ticketId, actorId));
+        outbox.add(UUID.randomUUID().toString(), ticketId, eventType, payload(ticketId, actorId));
     }
 
     Ticket createFromAlert(
             String title,
             String description,
             String priority,
-            String affectedCiCode) {
+            String affectedCiCode,
+            String episodeId,
+            AlertProvenance provenance) {
         Ticket ticket = new Ticket();
         ticket.setTicketNo(
                 "ALT-"
                         + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)
                         + "-"
                         + UUID.randomUUID().toString().substring(0, 8).toUpperCase());
-        ticket.setTitle(title);
+        ticket.setTitle(title.length() > 128 ? title.substring(0, 128) : title);
         ticket.setDescription(description);
         ticket.setPriority(priority);
         ticket.setStatus(TicketStatus.CREATED.name());
-        ticket.setCreatorId(1L);
+        ticket.setCreatorId(provenance.ownerActorId());
         ticket.setAffectedCiCode(normalize(affectedCiCode));
-        ticket.setSourceType("ALERTMANAGER");
+        ticket.setSourceType(provenance.isolated() ? "ISOLATED_DRILL" : "ALERTMANAGER");
+        ticket.setEnvironment(provenance.isolated() ? "ISOLATED" : "CORE");
+        ticket.setOwnerActorId(provenance.ownerActorId());
+        ticket.setIncidentId(provenance.incidentId());
+        ticket.setEpisodeId(episodeId);
+        ticket.setPublicDemo(false);
         ticket.setVersion(0);
         ticket.setDeleted(0);
         tickets.insert(ticket);
         sla.start(ticket.getId(), priority);
         audit.history(
-                ticket.getId(),
-                1L,
-                "ALERT_CREATE",
-                null,
-                TicketStatus.CREATED.name(),
-                "监控告警自动建单");
+                ticket.getId(), 0L, "ALERT_CREATE", null, TicketStatus.CREATED.name(), "监控告警自动建单");
         audit.operation(
                 ticket.getId(),
-                1L,
+                0L,
                 "ALERT_CREATE",
                 null,
-                payload(ticket.getId(), 1L, "sourceType", "ALERTMANAGER"));
-        addEvent(ticket.getId(), "ticket.alert.created", 1L);
+                payload(ticket.getId(), 0L, "sourceType", ticket.getSourceType()));
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("ticketId", ticket.getId());
+        event.put("episodeId", episodeId);
+        event.put("incidentId", provenance.incidentId());
+        event.put("ownerActorId", provenance.ownerActorId());
+        event.put("targetCode", affectedCiCode);
+        event.put("environment", ticket.getEnvironment());
+        try {
+            outbox.add(
+                    UUID.randomUUID().toString(),
+                    ticket.getId(),
+                    "ticket.alert.created",
+                    json.writeValueAsString(event));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("无法序列化告警建单事件", exception);
+        }
         return ticket;
+    }
+
+    record AlertProvenance(String incidentId, long ownerActorId, boolean isolated) {
+        static AlertProvenance core() {
+            return new AlertProvenance(null, 0L, false);
+        }
     }
 
     private String payload(long ticketId, long actorId, String... entries) {

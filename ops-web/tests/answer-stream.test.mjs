@@ -68,3 +68,15 @@ await streamRagAnswer({ question: '服务依赖', ticketId: 2053, conversationId
 assert.equal(sentRequest.url, '/api/rag/conversations/session-test/stream');
 assert.equal(sentRequest.body.ticketId, 2053);
 console.log('PASS scoped Q&A: ticket/document scope on both stream routes, CMDB progress, provenance and history normalization');
+
+await streamRagAnswer({ question: '当前服务健康', provider: 'openai', conversationId: 'model-selection' });
+assert.equal(sentRequest.body.provider, 'openai', 'selected provider must reach conversation stream');
+assert.equal(sentRequest.url, '/api/rag/conversations/model-selection/stream');
+await streamRagAnswer({ question: '解释连接池', provider: 'kimi' });
+assert.equal(sentRequest.body.provider, 'kimi', 'selected provider must reach standalone stream without frontend fallback');
+const runtimeSource = { ...directorySource, sourceType: 'OPERATIONS', sourceUrl: '/operations', documentName: 'Prometheus 指标与趋势' };
+const normalizedRuntime = normalizeReferences([runtimeSource])[0];
+for (const key of ['sourceType', 'sourceUrl', 'sourceUpdatedAt', 'sourceRetrievedAt']) assert.equal(normalizedRuntime[key], runtimeSource[key]);
+assert.equal(ragCompletionLabel({ ...result, provider: 'operations', metadata: { degradedReason: 'OPERATIONS_UNAVAILABLE' } }), '运行数据暂不可用');
+assert.equal(ragAnswerLabel({ ...result, provider: 'operations' }), '实时运行数据 · 直接读取');
+console.log('PASS model selection payload and runtime source provenance survive both stream routes and history normalization');

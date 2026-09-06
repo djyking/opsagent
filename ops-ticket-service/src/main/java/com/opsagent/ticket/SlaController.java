@@ -24,13 +24,16 @@ import java.util.Map;
 @RequestMapping("/api/tickets")
 public class SlaController {
     private final SlaService service;
+    private final TicketService tickets;
 
-    SlaController(SlaService service) {
+    SlaController(SlaService service, TicketService tickets) {
         this.service = service;
+        this.tickets = tickets;
     }
 
     @GetMapping("/{id}/sla")
     ApiResponse<Map<String, Object>> detail(@PathVariable long id) {
+        tickets.detail(id);
         return ApiResponse.success(service.detail(id));
     }
 

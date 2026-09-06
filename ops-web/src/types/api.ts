@@ -45,6 +45,11 @@ export interface Ticket {
   assigneeId?: number;
   affectedCiCode?: string;
   sourceType: string;
+  environment?: string;
+  ownerActorId?: number;
+  incidentId?: string;
+  episodeId?: string;
+  publicDemo?: boolean;
   version: number;
   createTime: string;
   updateTime: string;
@@ -69,6 +74,7 @@ export interface DocumentRecord {
   fileHash: string;
   parseStatus: "PENDING" | "PARSING" | "SUCCESS" | "FAILED";
   parseError?: string;
+  reviewStatus?: string;
   createBy: number;
   createTime: string;
   updateTime: string;

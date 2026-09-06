@@ -37,7 +37,12 @@ public class AuthController {
     @GetMapping("/features")
     ApiResponse<java.util.Map<String, Boolean>> features(HttpServletResponse response) {
         response.setHeader("Cache-Control", "no-store");
-        return ApiResponse.success(java.util.Map.of("registrationEnabled", service.registrationEnabled()));
+        return ApiResponse.success(
+                java.util.Map.of(
+                        "registrationEnabled",
+                        service.registrationEnabled(),
+                        "demoEnabled",
+                        service.demoEnabled()));
     }
 
     @PostMapping("/login")

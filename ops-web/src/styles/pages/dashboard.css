@@ -104,6 +104,13 @@
 .oa-dashboard { gap: 20px; min-width: 0; }
 .oa-dashboard-metrics .metric-strip-item:last-child strong { font-size: 18px; line-height: 24px; }
 .dashboard-sync-error { margin: 0; }
+.dashboard-support { display: grid; gap: 20px; }
+.dashboard-support > summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; padding: 17px 20px; border: 1px solid var(--oa-border-subtle); border-radius: var(--oa-radius-panel); background: var(--oa-bg-surface); color: var(--oa-text-primary); font-size: var(--oa-font-size-sm); cursor: pointer; }
+.dashboard-support > summary::before { content: '+'; color: var(--oa-primary); font-size: 18px; }
+.dashboard-support[open] > summary::before { content: '−'; }
+.dashboard-support > summary > span { margin-left: auto; color: var(--oa-text-tertiary); font-size: var(--oa-font-size-xs); }
+.dashboard-support[open] > .oa-dashboard-metrics { margin-top: 18px; }
+.dashboard-support > .oa-dashboard-lower { margin-top: 20px; }
 .oa-dashboard-grid { display: grid; grid-template-columns: minmax(0, 1fr) 332px; align-items: start; gap: 20px; }
 .oa-active-work { min-width: 0; scroll-margin-top: 90px; }
 .oa-active-work .panel-header { min-height: 76px; }

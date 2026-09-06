@@ -1,9 +1,15 @@
 package com.opsagent.rag;
 
+import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.core.ErrorCode;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -15,6 +21,7 @@ import java.util.Map;
 @Component
 @ConfigurationProperties(prefix = "ops.ai")
 public class AiProperties {
+    static final List<String> SUPPORTED = List.of("deepseek", "openai", "kimi");
     private boolean enabled;
     private String provider = "deepseek";
     private int timeoutSeconds = 45;
@@ -90,6 +97,20 @@ public class AiProperties {
         return settings == null ? new ProviderSettings() : settings;
     }
 
+    String resolveProvider(String requested) {
+        String selected = requested == null || requested.isBlank() ? provider : requested;
+        selected = selected == null ? "" : selected.trim().toLowerCase(Locale.ROOT);
+        if (requested != null && !requested.isBlank()) {
+            if (!SUPPORTED.contains(selected)) {
+                throw new BusinessException(ErrorCode.VALIDATION, "不支持该模型供应商，请从模型列表选择");
+            }
+            if (!enabled || !settings(selected).selectable()) {
+                throw new BusinessException(ErrorCode.CONFLICT, "所选模型当前未启用或未配置完成，请重新选择可用模型");
+            }
+        }
+        return selected;
+    }
+
     /**
      * 描述单个模型供应商的地址、密钥、模型和协议风格。
      *
@@ -136,6 +157,19 @@ public class AiProperties {
 
         boolean configured() {
             return apiKey != null && !apiKey.isBlank() && model != null && !model.isBlank();
+        }
+
+        boolean selectable() {
+            if (!configured()) return false;
+            try {
+                URI uri = URI.create(baseUrl == null ? "" : baseUrl);
+                return uri.getHost() != null
+                        && uri.getUserInfo() == null
+                        && ("https".equalsIgnoreCase(uri.getScheme())
+                                || "http".equalsIgnoreCase(uri.getScheme()));
+            } catch (IllegalArgumentException exception) {
+                return false;
+            }
         }
     }
 }

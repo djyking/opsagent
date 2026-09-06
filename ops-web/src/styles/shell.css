@@ -43,9 +43,11 @@
 .topbar-search input { height: 36px; padding: 0 54px 0 36px; background: #ffffffa8; font-size: 12px; border-color: #dfe8f3; }
 .topbar-search kbd { position: absolute; top: 9px; right: 10px; color: var(--oa-text-tertiary); font-size: 10px; line-height: 18px; }
 .topbar-monitor { display: inline-flex; align-items: center; gap: 6px; color: var(--oa-text-secondary); font-size: 12px; white-space: nowrap; }
-.page-content { width: 100%; max-width: 1660px; margin: 0 auto; padding: 28px 30px 36px; }
+.page-content { min-width: 0; width: 100%; max-width: 1660px; margin: 0 auto; padding: 28px 30px 36px; }
 .page-content.content-notifications { max-width: 1240px; }
 .page-content.content-workspace { max-width: none; }
+.page-content > * { min-width: 0; max-width: 100%; }
+.visitor-notice { padding: 8px 30px; background: #edf5ff; border-bottom: 1px solid #dce7f4; color: var(--oa-text-secondary); font-size: 12px; }
 .navigation-mask { display: none; }
 @media (max-width: 1200px) { .global-topbar { padding-inline: 22px; }.page-content { padding: 22px; }.topbar-monitor { display: none; }.topbar-breadcrumb > span, .topbar-breadcrumb > svg { display: none; } }
 @media (max-width: 900px) {

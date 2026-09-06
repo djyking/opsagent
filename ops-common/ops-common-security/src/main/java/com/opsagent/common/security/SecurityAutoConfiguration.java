@@ -92,6 +92,8 @@ public class SecurityAutoConfiguration {
                         a ->
                                 a.dispatcherTypeMatchers(DispatcherType.ASYNC)
                                         .permitAll()
+                                        .requestMatchers("/internal/**")
+                                        .permitAll()
                                         .requestMatchers(p.getPermitAll().toArray(String[]::new))
                                         .permitAll()
                                         .anyRequest()

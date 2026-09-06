@@ -7,7 +7,7 @@ readonly COMPOSE_DIR=/opt/opsagent/deploy/public
 readonly BACKUP_ROOT=/opt/opsagent/backups
 readonly OWNER_MARKER=opsagent-logical-backup-v1
 readonly -a COMPOSE=(docker compose --project-directory "$COMPOSE_DIR" --env-file "$COMPOSE_DIR/secret.env" -f "$COMPOSE_DIR/compose.yaml")
-readonly -a SERVICES=(mysql redis rabbitmq nacos sentinel elasticsearch qdrant ops-auth-app ops-ticket-app ops-knowledge-app ops-rag-app ops-platform-app ops-gateway-app reranker prometheus alertmanager grafana ops-web-app)
+readonly -a SERVICES=(mysql redis rabbitmq nacos sentinel elasticsearch qdrant ops-auth-app ops-ticket-app ops-knowledge-app ops-rag-app ops-platform-app ops-gateway-app reranker prometheus alertmanager grafana ops-web-app operations-lab ops-agent-app ops-demo-order-app demo-redis demo-rabbitmq)
 CURRENT_BACKUP=
 BACKUP_COMPLETE=false
 
@@ -59,7 +59,7 @@ check_health() {
   local -a ids
   ids_text=$("${COMPOSE[@]}" ps --all --quiet "${SERVICES[@]}")
   mapfile -t ids <<< "$ids_text"
-  [[ ${#ids[@]} -eq ${#SERVICES[@]} && -n "${ids[0]}" ]] || { log 'Expected all 18 services to exist' >&2; return 1; }
+  [[ ${#ids[@]} -eq ${#SERVICES[@]} && -n "${ids[0]}" ]] || { log 'Expected all configured services to exist' >&2; return 1; }
   states=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${ids[@]}")
   while IFS='|' read -r service state health; do
     if [[ "$state" != running || ( "$health" != healthy && "$health" != none ) ]]; then
@@ -96,8 +96,8 @@ main() {
   CURRENT_BACKUP=$(mktemp -d "$BACKUP_ROOT/opsagent-backup-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX")
   printf '%s\n' "$OWNER_MARKER" > "$CURRENT_BACKUP/.owner"
   validate_owned_backup "$CURRENT_BACKUP"
-  log 'Creating an online single-transaction dump of five application databases'
-  "${COMPOSE[@]}" exec -T mysql sh -c 'exec env MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot --single-transaction --quick --routines --events --triggers --hex-blob --no-tablespaces --set-gtid-purged=OFF --column-statistics=0 --default-character-set=utf8mb4 --databases ops_auth ops_ticket ops_knowledge ops_rag ops_platform' \
+  log 'Creating an online single-transaction dump of six application databases'
+  "${COMPOSE[@]}" exec -T mysql sh -c 'exec env MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot --single-transaction --quick --routines --events --triggers --hex-blob --no-tablespaces --set-gtid-purged=OFF --column-statistics=0 --default-character-set=utf8mb4 --databases ops_auth ops_ticket ops_knowledge ops_rag ops_platform ops_ai' \
     | gzip -1 > "$CURRENT_BACKUP/mysql.sql.gz"
 
   log 'Archiving knowledge attachments without stopping the application'
@@ -110,7 +110,7 @@ main() {
     sha256sum mysql.sql.gz knowledge-uploads.tgz > SHA256SUMS
     sha256sum --check --status SHA256SUMS
   )
-  printf 'format=%s\ncreated_utc=%s\ndatabases=ops_auth,ops_ticket,ops_knowledge,ops_rag,ops_platform\n' \
+  printf 'format=%s\ncreated_utc=%s\ndatabases=ops_auth,ops_ticket,ops_knowledge,ops_rag,ops_platform,ops_ai\n' \
     "$OWNER_MARKER" "$(date -u +%FT%TZ)" > "$CURRENT_BACKUP/manifest.txt"
   check_health
   date -u +%FT%TZ > "$CURRENT_BACKUP/.complete"

@@ -1,3 +1,5 @@
+.cmdb-embedded-actions { justify-content: flex-end; }
+.cmdb-embedded-actions > span { margin-right: auto; color: var(--oa-text-secondary); font-size: 12px; }
 .itsm-split { display: grid; grid-template-columns: 264px minmax(0, 1fr) 278px; align-items: start; gap: 20px; min-width: 0; }
 .catalog-panel { min-width: 0; overflow: hidden; background: var(--oa-bg-subtle); }
 .catalog-panel .panel-header { background: var(--oa-bg-surface); }

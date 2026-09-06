@@ -1,11 +1,13 @@
 package com.opsagent.rag;
 
-import com.opsagent.common.core.BusinessException;
-import com.opsagent.common.core.ErrorCode;
-
 import com.alibaba.csp.sentinel.Entry;
 import com.alibaba.csp.sentinel.SphU;
 import com.alibaba.csp.sentinel.slots.block.BlockException;
+import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.core.ErrorCode;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import org.springframework.stereotype.Component;
 
@@ -19,9 +21,13 @@ import org.springframework.stereotype.Component;
 public class RagRateLimiter {
     static final String RESOURCE = "ops-rag-ask";
     private final AiBudgetGuard budget;
+    private final Counter passed;
+    private final Counter blocked;
 
-    RagRateLimiter(AiBudgetGuard budget) {
+    RagRateLimiter(AiBudgetGuard budget, MeterRegistry metrics) {
         this.budget = budget;
+        this.passed = metrics.counter("opsagent.rag.sentinel.passed");
+        this.blocked = metrics.counter("opsagent.rag.sentinel.blocked");
     }
 
     void check() {
@@ -29,7 +35,9 @@ public class RagRateLimiter {
         Entry entry = null;
         try {
             entry = SphU.entry(RESOURCE);
+            passed.increment();
         } catch (BlockException exception) {
+            blocked.increment();
             throw new BusinessException(ErrorCode.VALIDATION, "问答请求过于频繁，请稍后再试");
         } finally {
             if (entry != null) {

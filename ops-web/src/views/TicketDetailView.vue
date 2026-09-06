@@ -47,6 +47,7 @@ import { operationLabel, statusLabel } from "@/ui/status-map";
 import { parseTicketDescription } from "@/utils/ticket-description";
 import { usePageFeedback } from "@/composables/usePageFeedback";
 import ActionButton from "@/components/feedback/ActionButton.vue";
+import EventWorkspace from "@/components/events/EventWorkspace.vue";
 
 type TicketAction =
   | "accept"
@@ -71,7 +72,7 @@ const workRecords = ref<TicketWorkRecord[]>([]);
 const trace = ref<TicketTrace>();
 const sla = ref<Record<string, unknown>>();
 const traceOpen = ref(false);
-const activeTab = ref<"overview" | "documents" | "records" | "activity">("overview");
+const activeTab = ref<"workspace" | "overview" | "documents" | "records" | "activity">("workspace");
 const documents = ref<DocumentRecord[]>([]);
 const questions = ref<AiQuestion[]>([]);
 const loading = ref(true);
@@ -107,7 +108,8 @@ const affectedService = computed(() => descriptionParts.value.affectedService ||
 const availableActions = computed<TicketAction[]>(() => {
   if (!ticket.value) return [];
   const operator = isAssignee.value || auth.isAdmin;
-  if (ticket.value.status === "CREATED" && (auth.isOps || auth.isAdmin))
+  if (ticket.value.status === "CREATED" && (auth.isOps || auth.isAdmin
+      || (auth.isDemo && ticket.value.ownerActorId === auth.user?.userId && ticket.value.environment === "ISOLATED")))
     return ["accept"];
   if (ticket.value.status === "ASSIGNED" && operator) return ["start"];
   if (ticket.value.status === "PROCESSING" && operator)
@@ -133,6 +135,15 @@ const actionLabels = {
   reopen: "重新处理",
   close: "确认关闭",
 };
+async function refreshTicket() {
+  try { ticket.value = await ticketApi.detail(id); }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : '事件状态刷新失败'; }
+}
+async function openDocuments() {
+  activeTab.value = 'documents';
+  try { documents.value = await documentApi.list(id); }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : '关联文档刷新失败'; }
+}
 async function load() {
   loading.value = true;
   error.value = "";
@@ -151,7 +162,7 @@ async function load() {
       documentApi.list(id),
       ticketApi.comments(id),
       ticketApi.workRecords(id),
-      ticketApi.trace(id),
+      auth.isDemo ? Promise.resolve(undefined) : ticketApi.trace(id),
       itsmApi.ticketSla(id),
     ]);
     questions.value = (await aiApi.page(id)).records;
@@ -252,6 +263,16 @@ async function showChunks(doc: DocumentRecord) {
     busy.value = "";
   }
 }
+async function submitReview(doc: DocumentRecord) {
+  if (busy.value || doc.createBy !== auth.user?.userId || doc.parseStatus !== 'SUCCESS') return;
+  busy.value = `review-${doc.id}`;
+  try {
+    await documentApi.submitReview(doc.id);
+    documents.value = await documentApi.list(id);
+    toast.show('文档已提交知识审核，审核通过前不会作为已发布经验。');
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '提交审核失败'; }
+  finally { busy.value = ''; }
+}
 async function ask() {
   if (!question.value.trim()) return;
   busy.value = "ask";
@@ -344,10 +365,10 @@ const workRecordLabels: Record<WorkRecordType, string> = {
 onMounted(load);
 </script>
 <template>
-  <LoadingState v-if="loading && !ticket" class="page-loading" text="正在加载工单详情…" />
+  <LoadingState v-if="loading && !ticket" class="page-loading" text="正在加载事件详情…" />
   <div v-else-if="ticket" class="detail-page ticket-detail-page">
     <DetailHeader :identifier="ticket.ticketNo" :title="ticket.title">
-      <template #back><button class="text-button" @click="router.push('/tickets')"><ArrowLeft :size="16" />返回工单列表</button></template>
+      <template #back><button class="text-button" @click="router.push('/tickets')"><ArrowLeft :size="16" />返回事件队列</button></template>
       <template #badges><PriorityIndicator :value="ticket.priority" /><StatusBadge :value="ticket.status" /></template>
       <template #meta>
         <dl class="ticket-header-meta">
@@ -357,21 +378,25 @@ onMounted(load);
         </dl>
       </template>
       <template #actions>
+        <router-link v-if="ticket.incidentId" class="button secondary" :to="{ path: '/automation', query: { ticketId: ticket.id } }">完整运行记录</router-link>
         <button v-if="availableActions.length === 1" class="button" :class="availableActions[0] === 'suspend' || availableActions[0] === 'reopen' ? 'secondary' : 'primary'" @click="action = availableActions[0]"><Check :size="16" />{{ actionLabels[availableActions[0]] }}</button>
-        <details v-else-if="availableActions.length" class="ticket-action-menu"><summary class="button primary">处理工单</summary><div><button v-for="nextAction in availableActions" :key="nextAction" @click="action = nextAction">{{ actionLabels[nextAction] }}</button></div></details>
+        <details v-else-if="availableActions.length" class="ticket-action-menu"><summary class="button primary">人工处置</summary><div><button v-for="nextAction in availableActions" :key="nextAction" @click="action = nextAction">{{ actionLabels[nextAction] }}</button></div></details>
       </template>
-      <template #tabs><nav class="ticket-detail-tabs" aria-label="工单详情视图"><button :class="{ active: activeTab === 'overview' }" :aria-pressed="activeTab === 'overview'" @click="activeTab = 'overview'">概览</button><button :class="{ active: activeTab === 'documents' }" :aria-pressed="activeTab === 'documents'" @click="activeTab = 'documents'">文档与问答</button><button :class="{ active: activeTab === 'records' }" :aria-pressed="activeTab === 'records'" @click="activeTab = 'records'">处置记录</button><button :class="{ active: activeTab === 'activity' }" :aria-pressed="activeTab === 'activity'" @click="activeTab = 'activity'">活动</button></nav></template>
+      <template #tabs><nav class="ticket-detail-tabs" aria-label="事件详情视图"><button :class="{ active: activeTab === 'workspace' }" :aria-pressed="activeTab === 'workspace'" @click="activeTab = 'workspace'">处置工作区</button><button :class="{ active: activeTab === 'overview' }" :aria-pressed="activeTab === 'overview'" @click="activeTab = 'overview'">事件资料</button><button :class="{ active: activeTab === 'documents' }" :aria-pressed="activeTab === 'documents'" @click="openDocuments">文档与问答</button><button :class="{ active: activeTab === 'records' }" :aria-pressed="activeTab === 'records'" @click="activeTab = 'records'">人工记录与回复</button><button :class="{ active: activeTab === 'activity' }" :aria-pressed="activeTab === 'activity'" @click="activeTab = 'activity'">活动时间线</button></nav></template>
     </DetailHeader>
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
-    <div class="detail-grid" :class="{ 'detail-grid-full': activeTab === 'documents' || activeTab === 'records', 'detail-grid-activity': activeTab === 'activity' }">
+    <EventWorkspace v-if="activeTab === 'workspace'" :ticket="ticket" @refresh="refreshTicket" @question="openDocuments" @documents="openDocuments" @records="activeTab = 'records'" />
+    <div v-show="activeTab !== 'workspace'" class="detail-grid" :class="{ 'detail-grid-full': activeTab === 'documents' || activeTab === 'records', 'detail-grid-activity': activeTab === 'activity' }">
       <div class="detail-main">
         <section v-show="activeTab === 'overview'" class="panel ticket-overview-panel">
-          <header class="panel-header"><div><h3>工单概览</h3><p>问题、服务与责任信息</p></div></header>
+          <header class="panel-header"><div><h3>事件资料</h3><p>原始症状、关联服务与责任信息</p></div></header>
           <DescriptionList class="ticket-overview-list">
             <div><dt>告警名称</dt><dd><code>{{ alertName }}</code></dd></div>
             <div v-if="descriptionParts.summary"><dt>告警摘要</dt><dd>{{ descriptionParts.summary }}</dd></div>
             <div><dt>问题描述</dt><dd>{{ descriptionParts.text }}</dd></div>
             <div><dt>受影响服务</dt><dd><code>{{ affectedService }}</code></dd></div>
+            <div v-if="ticket.sourceType === 'ISOLATED_DRILL'"><dt>工单来源</dt><dd>隔离演练产生的真实监控告警</dd></div>
+            <div v-if="ticket.episodeId"><dt>告警事件</dt><dd><code>{{ ticket.episodeId.slice(0, 16) }}</code></dd></div>
             <div><dt>创建人</dt><dd>#{{ ticket.creatorId }}</dd></div>
             <div><dt>当前处理人</dt><dd>{{ ticket.assigneeId ? '#' + ticket.assigneeId : '待分配' }}</dd></div>
           </DescriptionList>
@@ -429,9 +454,11 @@ onMounted(load);
                 </p>
               </div>
               <StatusBadge :value="doc.parseStatus" />
+              <span v-if="doc.reviewStatus" class="muted">{{ ({ DRAFT: '待审核草稿', IN_REVIEW: '审核中', PUBLISHED: '已发布', REJECTED: '需修订', ARCHIVED: '已归档' } as Record<string, string>)[doc.reviewStatus] || doc.reviewStatus }}</span>
               <div class="row-actions">
+                <button v-if="!auth.isDemo && doc.createBy === auth.user?.userId && doc.parseStatus === 'SUCCESS' && ['DRAFT', 'REJECTED'].includes(doc.reviewStatus || '')" class="button secondary" :disabled="!!busy" @click="submitReview(doc)">提交知识审核</button>
                 <button
-                  v-if="doc.parseStatus !== 'PARSING'"
+                  v-if="!auth.isDemo && doc.parseStatus !== 'PARSING'"
                   class="icon-button"
                   title="解析或重新解析"
                   :disabled="busy === `parse-${doc.id}`"
@@ -464,7 +491,9 @@ onMounted(load);
             </div>
             <Bot :size="26" />
           </header>
-          <form class="question-form" @submit.prevent="ask">
+          <div class="ticket-form-body">
+          <form class="ticket-form-surface ticket-question-editor" @submit.prevent="ask">
+            <FormField label="问答范围" :help="selectedDocument ? '仅依据所选文档回答。' : '文档问题检索本工单附件；服务清单与依赖问题查询当前服务目录。'">
             <select v-model="selectedDocument" aria-label="问答文档范围">
               <option :value="undefined">本工单附件 · 服务目录自动识别</option>
               <option
@@ -477,22 +506,22 @@ onMounted(load);
                 {{ doc.originalName }}
               </option>
             </select>
-            <small class="question-scope-hint">{{ selectedDocument ? '仅依据所选文档回答。' : '文档问题检索本工单附件；服务清单与依赖问题查询当前服务目录。' }}</small>
-            <div>
+            </FormField>
+            <FormField label="你的问题">
               <textarea
                 v-model="question"
                 maxlength="2000"
-                rows="3"
+                rows="4"
                 aria-label="工单问答问题"
                 placeholder="例如：磁盘使用率超过 90% 时应该如何处理？"
-              /><button
-                class="button primary"
-                :disabled="busy === 'ask' || !question.trim()"
-              >
-                <Send :size="17" />{{ busy === "ask" ? "生成中…" : "提交问题" }}
-              </button>
+              />
+            </FormField>
+            <div class="ticket-form-actions">
+              <span>{{ question.length }} / 2000</span>
+              <ActionButton class="primary" :loading="busy === 'ask'" :disabled="!question.trim()" loading-text="生成中…"><Send :size="16" />提交问题</ActionButton>
             </div>
           </form>
+          </div>
           <div v-if="!questions.length" class="empty-state small-empty">
             <MessageSquareText :size="30" /><span
               >可以基于工单附件提问，也可以查询服务清单与依赖关系</span
@@ -525,12 +554,14 @@ onMounted(load);
             <div><h3>结构化处置记录</h3><p>把诊断依据、执行过程与验证结果留在一起</p></div>
             <Wrench :size="22" />
           </header>
-          <form class="record-editor" @submit.prevent="addWorkRecord">
+          <div v-if="!auth.isDemo" class="ticket-form-body">
+          <form class="ticket-form-surface record-editor" @submit.prevent="addWorkRecord">
             <FormField label="记录类型" class="record-editor__type"><select v-model="workRecordType"><option v-for="(label, value) in workRecordLabels" :key="value" :value="value">{{ label }}</option></select></FormField>
             <FormField label="处置内容" class="record-editor__content"><textarea v-model.trim="workRecordContent" maxlength="2000" rows="3" placeholder="记录诊断依据、执行动作、根因或验证结论…" /></FormField>
             <FormField label="证据、命令或监控链接（选填）" class="record-editor__evidence"><input v-model.trim="workRecordEvidence" maxlength="1000" placeholder="输入证据、命令或监控链接" /></FormField>
-            <div class="record-editor__actions"><span>{{ workRecordContent.length }} / 2000</span><ActionButton class="primary" :disabled="!workRecordContent.trim() || busy === 'work-record'" :loading="busy === 'work-record'" :success="recordSaved" loading-text="保存中…" success-text="已保存">保存处置记录</ActionButton></div>
+            <div class="ticket-form-actions record-editor__actions"><span>{{ workRecordContent.length }} / 2000</span><ActionButton class="primary" :disabled="!workRecordContent.trim() || busy === 'work-record'" :loading="busy === 'work-record'" :success="recordSaved" loading-text="保存中…" success-text="已保存">保存处置记录</ActionButton></div>
           </form>
+          </div>
           <div v-if="workRecords.length" class="work-record-list">
             <article v-for="record in workRecords" :key="record.id">
               <span>{{ workRecordLabels[record.recordType] }}</span>
@@ -556,17 +587,19 @@ onMounted(load);
             </article>
           </div>
           <div v-else class="empty-state small-empty">暂无处理回复</div>
-          <form class="comment-form" @submit.prevent="addComment">
+          <div v-if="!auth.isDemo" class="ticket-form-body">
+          <form class="ticket-form-surface ticket-comment-editor" @submit.prevent="addComment">
+            <FormField label="处理回复">
             <textarea
               v-model.trim="commentText"
               rows="3"
               maxlength="2000"
               placeholder="记录排查过程、处理结果或向相关人员回复…"
             />
-            <button class="button primary" :disabled="!commentText.trim() || busy === 'comment'">
-              <Send :size="16" />{{ busy === "comment" ? "发送中…" : "发送回复" }}
-            </button>
+            </FormField>
+            <div class="ticket-form-actions"><span>{{ commentText.length }} / 2000</span><ActionButton class="primary" :loading="busy === 'comment'" :disabled="!commentText.trim()" loading-text="发送中…"><Send :size="16" />发送回复</ActionButton></div>
           </form>
+          </div>
         </section>
         <section v-if="activeTab === 'activity'" class="panel timeline-panel">
           <header class="panel-header"><div><h3>状态时间线</h3><p>从创建到处理，核对每一次状态变化</p></div><span class="panel-count">{{ logs.length }} 条活动</span></header>
@@ -589,7 +622,7 @@ onMounted(load);
           <header class="panel-header"><div><h3>SLA 计时</h3></div><Clock3 :size="20" /></header>
           <DescriptionList><div><dt>响应状态</dt><dd>{{ statusLabel(sla.responseStatus) }}</dd></div><div><dt>解决状态</dt><dd>{{ statusLabel(sla.resolutionStatus) }}</dd></div><div><dt>响应截止</dt><dd>{{ formatDateTime(String(sla.responseDeadline)) }}</dd></div><div><dt>解决截止</dt><dd>{{ formatDateTime(String(sla.resolutionDeadline)) }}</dd></div><div><dt>升级级别</dt><dd><code>L{{ sla.escalationLevel }}</code></dd></div></DescriptionList>
         </section>
-        <section v-if="activeTab === 'activity'" class="panel trace-summary-panel">
+        <section v-if="activeTab === 'activity' && !auth.isDemo" class="panel trace-summary-panel">
           <header class="panel-header"><div><h3>关联记录</h3><p>分派、操作与事件投递</p></div><Database :size="20" /></header>
           <div class="trace-metrics"><span><strong>{{ trace?.assignments.length || 0 }}</strong>分派记录</span><span><strong>{{ trace?.operations.length || 0 }}</strong>操作记录</span><span><strong>{{ trace?.outboxEvents.length || 0 }}</strong>事件投递</span></div>
           <button class="button secondary trace-button" @click="traceOpen = true">查看链路详情</button>
@@ -599,14 +632,13 @@ onMounted(load);
     <BaseModal v-if="action" :title="actionLabels[action]" @close="action = ''"
       ><div class="action-confirm">
         <p>本操作会推进工单状态且不可回退，请确认业务处理已经完成。</p>
-        <label
-          >操作备注<textarea
+        <FormField label="操作备注"><textarea
             v-model.trim="remark"
             maxlength="512"
             rows="5"
             placeholder="选填：记录处理过程或结果"
           />
-        </label>
+        </FormField>
       </div>
       <template #footer
         ><button class="button secondary" @click="action = ''">取消</button

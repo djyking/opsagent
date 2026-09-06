@@ -2,13 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Activity, ChevronLeft, ChevronRight, LogOut, X } from '@lucide/vue';
-import { navigationGroups } from '@/data/navigation';
+import { navigationFor, navigationGroups } from '@/data/navigation';
 const props = defineProps<{ collapsed: boolean; mobileOpen: boolean; isAdmin: boolean; initials: string; username: string; roleLabel: string }>();
 const emit = defineEmits<{ toggle: []; close: []; logout: [] }>();
 const route = useRoute();
 const root = ref<HTMLElement>();
 const groups = computed(() => navigationGroups.map(group => ({ ...group, items: group.items.filter(item => !item.admin || props.isAdmin) })).filter(group => group.items.length));
-const active = (to: string) => route.path === to || (to === '/tickets' && route.name === 'ticket-detail');
+const active = (to: string) => navigationFor(route.path).primaryTo === to;
 let previousFocus: HTMLElement | null = null;
 watch(() => props.mobileOpen, async open => {
   if (open) {

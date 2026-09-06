@@ -1,6 +1,18 @@
 package com.opsagent.rag;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,17 +20,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.nullable;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * 验证会话指代追问使用正确主题检索，不让无关资料或错误概括改写原始对话。
@@ -49,27 +50,51 @@ class RagFollowupRetrievalTest {
                 .thenReturn(new RerankService.Outcome(List.of(), false, null));
         when(prompts.build(anyString(), any(ContextAssembler.AssembledContext.class)))
                 .thenAnswer(call -> new LlmRequest("system", "当前问题：" + call.getArgument(0), 4096));
-        service = new RagService(knowledge, properties, ai, prompts,
-                mock(LlmInvocationService.class), new CitationValidator(), rerank,
-                new ContextAssembler(properties, metrics), metrics, mock(CmdbAnswerService.class));
+        service =
+                new RagService(
+                        knowledge,
+                        properties,
+                        ai,
+                        prompts,
+                        mock(LlmInvocationService.class),
+                        new CitationValidator(),
+                        rerank,
+                        new ContextAssembler(properties, metrics),
+                        metrics,
+                        mock(CmdbAnswerService.class),
+                        mock(OperationsAnswerService.class));
     }
 
     @AfterEach
-    void close() { metrics.close(); }
+    void close() {
+        metrics.close();
+    }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-        "你刚才给出的是哪一种组件的连接超时排查方案？用一句话回答。",
-        "上述方案怎么验证？",
-        "上面的方法还有哪些注意事项？",
-        "继续补充排查方法。",
-        "第2步应该如何执行？",
-        "它为什么会发生连接超时？"
-    })
+    @ValueSource(
+            strings = {
+                "你刚才给出的是哪一种组件的连接超时排查方案？用一句话回答。",
+                "上述方案怎么验证？",
+                "上面的方法还有哪些注意事项？",
+                "继续补充排查方法。",
+                "第2步应该如何执行？",
+                "它为什么会发生连接超时？"
+            })
     void shouldAnchorReferencesInTheLastIndependentQuestion(String question) {
         when(knowledge.search(anyString(), anyInt(), eq(9L)))
-                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(java.util.Map.of(
-                        "chunkId", 1L, "documentId", 9L, "content", "Redis 连接超时排查")), "test"));
+                .thenReturn(
+                        new KnowledgeClient.Envelope<>(
+                                0,
+                                "ok",
+                                List.of(
+                                        java.util.Map.of(
+                                                "chunkId",
+                                                1L,
+                                                "documentId",
+                                                9L,
+                                                "content",
+                                                "Redis 连接超时排查")),
+                                "test"));
         RagService.StreamPlan plan = service.prepareStream(question, 5, 9L, history());
 
         String expected = REDIS_QUESTION + "\n" + question;
@@ -117,7 +142,8 @@ class RagFollowupRetrievalTest {
 
     private String history() {
         return "用户：MySQL 主从延迟怎么排查？\n助手：先检查复制状态。\n\n"
-                + "用户：" + REDIS_QUESTION + "\n助手：这是 Redis 连接超时的完整排查方案。\n\n";
+                + "用户："
+                + REDIS_QUESTION
+                + "\n助手：这是 Redis 连接超时的完整排查方案。\n\n";
     }
 }
-

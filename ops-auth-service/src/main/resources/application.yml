@@ -45,6 +45,7 @@ ops:
       - /actuator/prometheus
   auth:
     registration-enabled: ${OPS_AUTH_REGISTRATION_ENABLED:true}
+    demo-enabled: ${OPS_AUTH_DEMO_ENABLED:false}
     captcha:
       peer-limit-per-minute: ${OPS_CAPTCHA_PEER_LIMIT:60}
       global-limit-per-minute: ${OPS_CAPTCHA_GLOBAL_LIMIT:1000}

@@ -292,6 +292,39 @@ public class KnowledgeIndexService {
                 "vectorPointCount", qdrantStore.pointCount());
     }
 
+    Map<String, Object> consistencySnapshot(Set<Long> expectedDocuments, Set<String> expectedChunks,
+            Set<Long> liveDocuments, Set<String> liveChunks) {
+        String physicalIndex = vectorStore.physicalIndex();
+        qdrantStore.ensureCollection();
+        String physicalCollection = qdrantStore.physicalCollection();
+        Set<Long> indexed = vectorStore.indexedDocumentIds(physicalIndex);
+        Set<String> points = qdrantStore.pointIds(physicalCollection);
+        Set<Long> publishedIndexed = vectorStore.indexedDocumentIds(physicalIndex, true);
+        Set<String> publishedPoints = qdrantStore.pointIds(physicalCollection, true);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("embeddingModel", embeddingClient.model());
+        result.put("indexAlias", properties.getReadAlias());
+        result.put("writeAlias", properties.getWriteAlias());
+        result.put("physicalIndex", physicalIndex);
+        result.put("vectorAlias", properties.getQdrantAlias());
+        result.put("physicalCollection", physicalCollection);
+        result.put("indexedDocumentCount", publishedIndexed.size());
+        result.put("totalIndexedDocumentCount", indexed.size());
+        result.put("publishedIndexedDocumentCount", publishedIndexed.size());
+        result.put("vectorPointCount", points.size());
+        result.put("publishedVectorPointCount", publishedPoints.size());
+        result.put("missingEsDocumentCount",
+                expectedDocuments.stream().filter(id -> !publishedIndexed.contains(id)).count());
+        result.put("orphanEsDocumentCount", indexed.stream().filter(id -> !liveDocuments.contains(id)).count());
+        result.put("missingQdrantPointCount",
+                expectedChunks.stream().filter(id -> !publishedPoints.contains(id)).count());
+        result.put("orphanQdrantPointCount", points.stream().filter(id -> !liveChunks.contains(id)).count());
+        result.put("checkMode", "DOCUMENT_AND_POINT_IDS");
+        result.put("checkedAt", java.time.Instant.now().toString());
+        result.put("checkNote", "缺失按已发布知识及索引发布标记核对；孤儿指已无有效源记录的 ID。合法草稿预索引不算孤儿，也不进入全局问答。此检查不评估向量质量，发布或重建完成后可复查。");
+        return result;
+    }
+
     List<RetrievedChunk> fuse(
             List<RetrievalHit> bm25,
             List<RetrievalHit> vector,

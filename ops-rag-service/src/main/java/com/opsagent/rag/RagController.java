@@ -9,10 +9,10 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-import org.springframework.web.bind.annotation.*;
 import org.springframework.http.MediaType;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
 
@@ -30,9 +30,7 @@ public class RagController {
     private final RagStreamingService streamingService;
 
     RagController(
-            RagService service,
-            RagRateLimiter rateLimiter,
-            RagStreamingService streamingService) {
+            RagService service, RagRateLimiter rateLimiter, RagStreamingService streamingService) {
         this.service = service;
         this.rateLimiter = rateLimiter;
         this.streamingService = streamingService;
@@ -48,20 +46,28 @@ public class RagController {
             @NotBlank @Size(max = 2000) String question,
             @Min(1) @Max(20) Integer topK,
             @Min(1) Long documentId,
-            @Min(1) Long ticketId) {}
+            @Min(1) Long ticketId,
+            @Size(max = 20) String provider) {}
 
     @PostMapping({"/ask", "/chat"})
     ApiResponse<RagService.Answer> chat(@Valid @RequestBody ChatRequest r) {
         rateLimiter.check();
-        return ApiResponse.success(service.ask(r.question(), r.topK(), r.documentId(), r.ticketId()));
+        return ApiResponse.success(
+                service.ask(r.question(), r.topK(), r.documentId(), r.ticketId(), r.provider()));
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     SseEmitter stream(@Valid @RequestBody ChatRequest request) {
         try {
             rateLimiter.check();
-            RagService.StreamPlan plan = service.prepareStream(
-                    request.question(), request.topK(), request.documentId(), request.ticketId(), null);
+            RagService.StreamPlan plan =
+                    service.prepareStream(
+                            request.question(),
+                            request.topK(),
+                            request.documentId(),
+                            request.ticketId(),
+                            null,
+                            request.provider());
             return streamingService.open(plan, service.auditContext());
         } catch (BusinessException exception) {
             return streamingService.error(exception.getMessage());

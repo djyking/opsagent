@@ -36,6 +36,11 @@ x-app-env: &app-env
   MALLOC_ARENA_MAX: "2"
   JAVA_TOOL_OPTIONS: *java-options
   OPS_JWT_SECRET: ${OPS_JWT_SECRET:?Set an independent public JWT secret}
+  OPS_AGENT_INTERNAL_SECRET: ${OPS_AGENT_INTERNAL_SECRET:?Set an independent internal actor signing secret}
+  OPS_AUTH_INTERNAL_URL: http://ops-auth-app:8101
+  OPS_TICKET_INTERNAL_URL: http://ops-ticket-app:8102
+  OPS_RAG_INTERNAL_URL: http://ops-rag-app:8104
+  OPS_PLATFORM_INTERNAL_URL: http://ops-platform-app:8105
   NACOS_ENABLED: "true"
   NACOS_CONFIG_ENABLED: "true"
   NACOS_SERVER_ADDR: nacos:8848
@@ -220,6 +225,7 @@ services:
       OPS_AUTH_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
       OPS_REDIS_ENABLED: "true"
       OPS_AUTH_REGISTRATION_ENABLED: "false"
+      OPS_AUTH_DEMO_ENABLED: "true"
     healthcheck:
       <<: *java-health
       test: [CMD, curl, -fsS, 'http://localhost:8101/actuator/health']
@@ -312,6 +318,15 @@ services:
       OPS_GRAFANA_URL: http://grafana:3000
       OPS_PROMETHEUS_PUBLIC_URL: ""
       OPS_GRAFANA_PUBLIC_URL: ""
+      OPS_OPERATIONS_RAG_URL: http://ops-rag-app:8104
+      OPS_DEMO_TARGET_URL: http://ops-demo-order-app:8110
+      OPS_DEMO_CONTROL_TOKEN: ${OPS_DEMO_CONTROL_TOKEN:?Set isolated target control token}
+      OPS_OPERATIONS_NACOS_URL: http://nacos:8848/nacos
+      OPS_OPERATIONS_NACOS_IDENTITY_KEY: ${NACOS_AUTH_IDENTITY_KEY}
+      OPS_OPERATIONS_NACOS_IDENTITY_VALUE: ${NACOS_AUTH_IDENTITY_VALUE}
+      OPS_OPERATIONS_LAB_URL: http://operations-lab:8080
+      OPS_OPERATIONS_LAB_TOKEN: ${OPS_OPERATIONS_LAB_TOKEN:?Set the isolated lab token}
+      OPS_OPERATIONS_INSPECTION_ENABLED: "true"
     healthcheck:
       <<: *java-health
       test: [CMD, curl, -fsS, 'http://localhost:8105/actuator/health']
@@ -331,6 +346,109 @@ services:
     healthcheck:
       <<: *java-health
       test: [CMD, curl, -fsS, 'http://localhost:18080/actuator/health']
+
+  ops-agent-app:
+    <<: *java
+    image: opsagent/agent-service:1.0.0
+    mem_limit: 768m
+    environment:
+      <<: *app-env
+      OPS_AGENT_DB_URL: jdbc:mysql://mysql:3306/ops_ai?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_AGENT_DB_USERNAME: opsagent_app
+      OPS_AGENT_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:8106/actuator/health']
+
+  demo-redis:
+    <<: *common
+    networks: [demo-data]
+    image: redis:7.4-alpine
+    mem_limit: 64m
+    cpus: 0.5
+    cap_drop: [ALL]
+    user: redis
+    read_only: true
+    tmpfs: [/data:size=20m, /tmp:size=8m]
+    environment:
+      REDIS_PASSWORD: ${OPS_DEMO_REDIS_PASSWORD:?Set independent demo Redis password}
+    command: [sh, -c, 'exec redis-server --save "" --appendonly no --maxmemory 16mb --maxmemory-policy allkeys-lru --requirepass "$$REDIS_PASSWORD"']
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  demo-rabbitmq:
+    <<: *common
+    image: rabbitmq:3.13-alpine
+    hostname: opsagent-demo-notification-broker
+    networks: [demo-data]
+    mem_limit: 256m
+    mem_reservation: 96m
+    cpus: 0.5
+    environment:
+      RABBITMQ_DEFAULT_USER: opsagent_notification
+      RABBITMQ_DEFAULT_PASS: ${OPS_DEMO_RABBITMQ_PASSWORD:?Set an independent notification broker password}
+      RABBITMQ_DEFAULT_VHOST: notifications
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 1:1 +A 2"
+      RABBITMQ_CTL_ERL_ARGS: "+S 1:1 +A 1"
+    volumes:
+      - demo-rabbitmq-data:/var/lib/rabbitmq
+      - ./config/demo-rabbitmq.conf:/etc/rabbitmq/conf.d/20-demo.conf:ro
+      - ./config/demo-rabbitmq-plugins:/etc/rabbitmq/enabled_plugins:ro
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 10s
+      timeout: 10s
+      start_period: 45s
+      retries: 20
+
+  ops-demo-order-app:
+    <<: *common
+    image: opsagent/demo-order-service:1.0.0
+    networks: [backplane, demo-data]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs: [/tmp:size=32m, /home/opsagent:size=32m, /app/logs:size=16m]
+    environment:
+      JAVA_TOOL_OPTIONS: >-
+        -Xms32m -Xmx192m -XX:+UseSerialGC -XX:ActiveProcessorCount=2
+        -XX:MaxDirectMemorySize=48m -XX:ReservedCodeCacheSize=48m
+        -Duser.home=/tmp
+      NACOS_SERVER_ADDR: nacos:8848
+      OPS_DEMO_CONTROL_TOKEN: ${OPS_DEMO_CONTROL_TOKEN:?Set isolated target control token}
+      OPS_DEMO_REDIS_HOST: demo-redis
+      OPS_DEMO_REDIS_PASSWORD: ${OPS_DEMO_REDIS_PASSWORD:?Set independent demo Redis password}
+      OPS_DEMO_RABBITMQ_HOST: demo-rabbitmq
+      OPS_DEMO_RABBITMQ_PASSWORD: ${OPS_DEMO_RABBITMQ_PASSWORD:?Set an independent notification broker password}
+    depends_on:
+      demo-redis: {condition: service_healthy}
+      demo-rabbitmq: {condition: service_healthy}
+      nacos: {condition: service_healthy}
+    healthcheck:
+      <<: *java-health
+      test: [CMD, curl, -fsS, 'http://localhost:8110/actuator/health/liveness']
+
+  operations-lab:
+    <<: *common
+    image: opsagent/operations-lab:1.0.0
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 48m
+    cpus: 0.25
+    pids_limit: 16
+    environment:
+      OPS_OPERATIONS_LAB_TOKEN: ${OPS_OPERATIONS_LAB_TOKEN:?Set the isolated lab token}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   reranker:
     <<: *common
@@ -445,6 +563,8 @@ services:
     command: ['--help']
 
 networks:
+  demo-data:
+    internal: true
   # A private Docker bridge with outbound access for AI APIs. No middleware host ports.
   backplane:
     driver: bridge
@@ -453,6 +573,7 @@ volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
+  demo-rabbitmq-data:
   nacos-data:
   elasticsearch-data:
   qdrant-data:

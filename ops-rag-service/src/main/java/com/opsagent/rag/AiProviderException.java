@@ -9,11 +9,17 @@ package com.opsagent.rag;
 public class AiProviderException extends RuntimeException {
     private final String provider;
     private final int statusCode;
+    private final FailureKind kind;
 
     AiProviderException(String provider, int statusCode, String message, Throwable cause) {
+        this(provider, statusCode, message, cause, FailureKind.UNKNOWN);
+    }
+
+    AiProviderException(String provider, int statusCode, String message, Throwable cause, FailureKind kind) {
         super(message, cause);
         this.provider = provider;
         this.statusCode = statusCode;
+        this.kind = kind;
     }
 
     String provider() {
@@ -23,4 +29,9 @@ public class AiProviderException extends RuntimeException {
     int statusCode() {
         return statusCode;
     }
+
+    FailureKind kind() { return kind; }
+
+    /** @author heyu */
+    enum FailureKind { HTTP, NETWORK, TIMEOUT, PROTOCOL, CANCELLED, UNKNOWN }
 }

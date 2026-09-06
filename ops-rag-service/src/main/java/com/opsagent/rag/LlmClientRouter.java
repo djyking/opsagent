@@ -27,8 +27,13 @@ public class LlmClientRouter {
         return byName(properties.getProvider());
     }
 
+    LlmClient selected(String provider) {
+        return byName(properties.resolveProvider(provider));
+    }
+
     LlmClient byName(String provider) {
-        LlmClient client = clients.get(provider == null ? "" : provider.toLowerCase());
+        LlmClient client =
+                clients.get(provider == null ? "" : provider.toLowerCase(java.util.Locale.ROOT));
         if (client == null) {
             throw new IllegalArgumentException("不支持的 AI Provider：" + provider);
         }

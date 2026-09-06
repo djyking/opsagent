@@ -21,7 +21,7 @@ import type {
 } from "@/types/api";
 
 export const authApi = {
-  features: () => request<{ registrationEnabled: boolean }>({ url: "/api/auth/features", timeout: 8000 }),
+  features: () => request<{ registrationEnabled: boolean; demoEnabled: boolean }>({ url: "/api/auth/features", timeout: 8000 }),
   captcha: () => request<{ captchaId: string; imageDataUrl: string; expiresInSeconds: number }>({
     url: "/api/auth/captcha", timeout: 8000,
   }),
@@ -273,6 +273,7 @@ export const documentApi = {
           ? "SUCCESS"
           : (String(row.status) as DocumentRecord["parseStatus"]),
       parseError: row.parse_error ? String(row.parse_error) : undefined,
+      reviewStatus: String(row.review_status || 'DRAFT'),
       createBy: Number(row.create_by),
       createTime: String(row.create_time),
       updateTime: String(row.update_time),
@@ -298,6 +299,9 @@ export const documentApi = {
   },
   chunks: (id: number) =>
     request<DocumentChunk[]>({ url: `/api/knowledge/documents/${id}/chunks` }),
+  submitReview: (id: number) => request<Record<string, unknown>>({
+    method: 'POST', url: `/api/knowledge/documents/${id}/submit-review`,
+  }),
   remove: (id: number) =>
     request<{ documentId: number; taskId: number; indexStatus: string }>({
       method: "DELETE",

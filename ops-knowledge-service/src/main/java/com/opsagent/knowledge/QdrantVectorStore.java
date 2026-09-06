@@ -14,6 +14,8 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * 管理 Qdrant Collection、向量幂等写入、权限过滤和相似度检索。
@@ -199,6 +201,35 @@ public class QdrantVectorStore {
                 .retrieve()
                 .body(JsonNode.class);
         return response.path("result").path("count").asLong();
+    }
+
+    Set<String> pointIds(String physicalCollection) {
+        return pointIds(physicalCollection, false);
+    }
+
+    Set<String> pointIds(String physicalCollection, boolean publishedOnly) {
+        Set<String> ids = new LinkedHashSet<>();
+        Object offset = null;
+        for (int page = 0; page < 200; page++) {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("limit", 500);
+            body.put("with_payload", false);
+            body.put("with_vector", false);
+            if (publishedOnly) body.put("filter", Map.of("must", List.of(
+                    Map.of("key", "reviewStatus", "match", Map.of("value", "PUBLISHED")))));
+            if (offset != null) body.put("offset", offset);
+            JsonNode response = client.post().uri("/collections/" + physicalCollection + "/points/scroll")
+                    .contentType(MediaType.APPLICATION_JSON).body(body).retrieve().body(JsonNode.class);
+            if (response == null || !response.path("result").path("points").isArray()) {
+                throw new IllegalStateException("Qdrant 未返回完整的向量 ID 核对结果");
+            }
+            JsonNode result = response.path("result");
+            for (JsonNode point : result.path("points")) ids.add(point.path("id").asText());
+            if (!result.hasNonNull("next_page_offset")) return ids;
+            JsonNode next = result.path("next_page_offset");
+            offset = next.isNumber() ? next.longValue() : next.asText();
+        }
+        throw new IllegalStateException("本次 ID 核对超过 100000 个向量，请使用离线审计");
     }
 
     private long deleteByFilter(Map<String, Object> filter) {

@@ -126,6 +126,12 @@ public class KnowledgeController {
         return ApiResponse.success(service.reindexTask(taskId));
     }
 
+    @GetMapping("/admin/reindex/latest")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Map<String, Object>> latestReindexTask() {
+        return ApiResponse.success(service.latestReindexTask());
+    }
+
     @GetMapping("/admin/index/consistency")
     @PreAuthorize("hasRole('ADMIN')")
     ApiResponse<Map<String, Object>> indexConsistency() {
@@ -140,8 +146,25 @@ public class KnowledgeController {
 
     @GetMapping("/admin/index/failed-tasks")
     @PreAuthorize("hasRole('ADMIN')")
-    ApiResponse<List<Map<String, Object>>> failedIndexTasks() {
+    ApiResponse<List<KnowledgeIndexTaskView>> failedIndexTasks() {
         return ApiResponse.success(service.failedIndexTasks());
+    }
+
+    /**
+     * 带版本约束的失败任务重试请求，避免重放旧的索引或删除操作。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record RetryIndexRequest(@NotNull @Min(0) Integer documentVersion,
+                             @NotBlank @Pattern(regexp = "INDEX|DELETE") String operation) {}
+
+    @PostMapping("/admin/index/tasks/{taskId}/retry")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Long> retryIndexTask(
+            @PathVariable long taskId, @Valid @RequestBody RetryIndexRequest request) {
+        return ApiResponse.success(service.retryFailedIndexTask(
+                taskId, request.documentVersion(), request.operation()));
     }
 
     @GetMapping("/internal/debug/search")

@@ -1,0 +1,57 @@
+server:
+  port: 8106
+  tomcat:
+    threads:
+      min-spare: 1
+      max: 16
+spring:
+  task:
+    scheduling:
+      pool:
+        size: 4
+  application:
+    name: ops-agent-service
+  datasource:
+    url: ${OPS_AGENT_DB_URL:jdbc:mysql://localhost:3306/ops_ai?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${OPS_AGENT_DB_USERNAME:root}
+    password: ${OPS_AGENT_DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: 4
+      minimum-idle: 1
+  rabbitmq:
+    host: ${OPS_RABBITMQ_HOST:localhost}
+    port: ${OPS_RABBITMQ_PORT:5672}
+    username: ${OPS_RABBITMQ_USERNAME:opsagent}
+    password: ${OPS_RABBITMQ_PASSWORD:opsagent_local}
+    publisher-confirm-type: correlated
+    connection-timeout: 3s
+    listener:
+      simple:
+        concurrency: 1
+        max-concurrency: 1
+        prefetch: 4
+        default-requeue-rejected: false
+  cloud:
+    nacos:
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+ops:
+  security:
+    secret: ${OPS_JWT_SECRET:}
+    permit-all:
+      - /actuator/health
+      - /actuator/info
+      - /actuator/prometheus
+  agent:
+    internal-secret: ${OPS_AGENT_INTERNAL_SECRET:}
+    auth-url: ${OPS_AUTH_INTERNAL_URL:http://localhost:8101}
+    ticket-url: ${OPS_TICKET_INTERNAL_URL:http://localhost:8102}
+    rag-url: ${OPS_RAG_INTERNAL_URL:http://localhost:8104}
+    platform-url: ${OPS_PLATFORM_INTERNAL_URL:http://localhost:8105}
+    worker-enabled: ${OPS_AGENT_WORKER_ENABLED:true}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
