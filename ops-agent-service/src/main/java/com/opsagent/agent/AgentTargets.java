@@ -43,7 +43,8 @@ final class AgentTargets {
         if (!supported(target)) return false;
         return switch (tool) {
             case "demo_queue_restore" -> NOTIFICATION.equals(target);
-            case "demo_config_restore", "demo_flow_restore" -> ORDER.equals(target);
+            case "demo_config_restore", "demo_flow_restore", "config_change_apply" ->
+                    ORDER.equals(target);
             default -> true;
         };
     }

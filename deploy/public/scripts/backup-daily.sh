@@ -3,11 +3,15 @@
 set -Eeuo pipefail
 umask 077
 
-readonly COMPOSE_DIR=/opt/opsagent/deploy/public
+source "$(dirname -- "${BASH_SOURCE[0]}")/compose-command.sh"
+opsagent_compose_init /opt/opsagent/deploy/public
+readonly COMPOSE_DIR
 readonly BACKUP_ROOT=/opt/opsagent/backups
 readonly OWNER_MARKER=opsagent-logical-backup-v1
-readonly -a COMPOSE=(docker compose --project-directory "$COMPOSE_DIR" --env-file "$COMPOSE_DIR/secret.env" -f "$COMPOSE_DIR/compose.yaml")
-readonly -a SERVICES=(mysql redis rabbitmq nacos sentinel elasticsearch qdrant ops-auth-app ops-ticket-app ops-knowledge-app ops-rag-app ops-platform-app ops-gateway-app reranker prometheus alertmanager grafana ops-web-app operations-lab ops-agent-app ops-demo-order-app demo-redis demo-rabbitmq)
+readonly -a COMPOSE
+SERVICES=(mysql redis rabbitmq nacos sentinel elasticsearch qdrant ops-auth-app ops-ticket-app ops-knowledge-app ops-rag-app ops-platform-app ops-gateway-app reranker prometheus alertmanager grafana ops-web-app operations-lab ops-agent-app ops-demo-order-app demo-redis demo-rabbitmq)
+if [[ "$OPSAGENT_TRACE_ACTIVE" == true ]]; then SERVICES+=(otel-collector tempo); fi
+readonly -a SERVICES
 CURRENT_BACKUP=
 BACKUP_COMPLETE=false
 
@@ -67,6 +71,10 @@ check_health() {
       return 1
     fi
   done <<< "$states"
+  if [[ "$OPSAGENT_TRACE_ACTIVE" == true ]]; then
+    "${COMPOSE[@]}" exec -T ops-demo-order-app curl -fsS --connect-timeout 3 --max-time 5 -o /dev/null http://otel-collector:13133/ || return 1
+    "${COMPOSE[@]}" exec -T ops-demo-order-app curl -fsS --connect-timeout 3 --max-time 5 -o /dev/null http://tempo:3200/ready || return 1
+  fi
 }
 
 finish() {
@@ -84,6 +92,7 @@ main() {
   [[ $# -eq 0 ]] || { printf 'Usage: %s\n' "$0" >&2; return 2; }
   for command in docker gzip tar sha256sum flock realpath find mktemp; do command -v "$command" >/dev/null; done
   [[ -r "$COMPOSE_DIR/secret.env" && -f "$COMPOSE_DIR/compose.yaml" ]]
+  opsagent_trace_artifacts
   [[ "$(realpath -m -- "$BACKUP_ROOT")" == "$BACKUP_ROOT" ]] || { log 'Unexpected backup-root symlink' >&2; return 1; }
   install -d -m 0700 -- "$BACKUP_ROOT"
   validate_backup_root

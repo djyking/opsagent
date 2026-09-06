@@ -119,7 +119,9 @@ services:
       RABBITMQ_DEFAULT_USER: ${OPS_RABBITMQ_USERNAME:?Set the RabbitMQ application user}
       RABBITMQ_DEFAULT_PASS: ${OPS_RABBITMQ_PASSWORD:?Set the RabbitMQ application password}
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2 +A 4"
-    volumes: [rabbitmq-data:/var/lib/rabbitmq]
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./config/rabbitmq-plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: [CMD, rabbitmq-diagnostics, -q, ping]
       interval: 10s
@@ -315,6 +317,7 @@ services:
       OPS_PLATFORM_DB_USERNAME: opsagent_app
       OPS_PLATFORM_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
       OPS_PROMETHEUS_URL: http://prometheus:9090
+      OPS_ALERTMANAGER_URL: http://alertmanager:9093
       OPS_GRAFANA_URL: http://grafana:3000
       OPS_PROMETHEUS_PUBLIC_URL: ""
       OPS_GRAFANA_PUBLIC_URL: ""
@@ -383,7 +386,7 @@ services:
     <<: *common
     image: rabbitmq:3.13-alpine
     hostname: opsagent-demo-notification-broker
-    networks: [demo-data]
+    networks: [demo-data, demo-metrics]
     mem_limit: 256m
     mem_reservation: 96m
     cpus: 0.5
@@ -480,6 +483,7 @@ services:
 
   prometheus:
     <<: *common
+    networks: [backplane, demo-metrics]
     image: prom/prometheus:v3.14.0
     mem_limit: 256m
     mem_reservation: 64m
@@ -563,6 +567,8 @@ services:
     command: ['--help']
 
 networks:
+  demo-metrics:
+    internal: true
   demo-data:
     internal: true
   # A private Docker bridge with outbound access for AI APIs. No middleware host ports.

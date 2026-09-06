@@ -80,3 +80,12 @@ for (const key of ['sourceType', 'sourceUrl', 'sourceUpdatedAt', 'sourceRetrieve
 assert.equal(ragCompletionLabel({ ...result, provider: 'operations', metadata: { degradedReason: 'OPERATIONS_UNAVAILABLE' } }), '运行数据暂不可用');
 assert.equal(ragAnswerLabel({ ...result, provider: 'operations' }), '实时运行数据 · 直接读取');
 console.log('PASS model selection payload and runtime source provenance survive both stream routes and history normalization');
+const objectReference = { service: 'ops-demo-order-service', environment: 'DEMO', timeRange: '15m', evidenceBundleId: 'evidence-owned-7' };
+for (const conversationId of [undefined, 'reference-session']) {
+  await streamRagAnswer({ question: '检查业务恢复证据', ticketId: 2053, conversationId, observabilityContext: objectReference });
+  assert.deepEqual(sentRequest.body.observabilityContext, objectReference);
+  assert.equal(sentRequest.body.question, '检查业务恢复证据');
+  assert.equal(sentRequest.body.ticketId, 2053);
+  assert.doesNotMatch(JSON.stringify(sentRequest.body), /statusReason|snapshot|rps|blockQps/);
+}
+console.log('PASS P3 object references survive both SSE routes without browser-authored observation facts');

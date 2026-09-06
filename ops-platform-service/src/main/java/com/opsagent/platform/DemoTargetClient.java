@@ -23,6 +23,24 @@ import java.util.Map;
  */
 @Component
 public class DemoTargetClient {
+    /**
+     * Safe upstream configuration outcome, distinct from uncertain transport failure.
+     *
+     * @author heyu
+     */
+    static final class ConfigurationRejected extends BusinessException {
+        private final String reason;
+
+        ConfigurationRejected(String reason, String message) {
+            super(ErrorCode.CONFLICT, message);
+            this.reason = reason;
+        }
+
+        String reason() {
+            return reason;
+        }
+    }
+
     private final ObjectMapper json;
     private final String base;
     private final String token;
@@ -178,8 +196,8 @@ public class DemoTargetClient {
             if (control && response.statusCode() != 200) {
                 if (path.startsWith("/internal/demo/configuration/")) {
                     String reason = result.path("reasonCode").asText();
-                    throw new BusinessException(
-                            ErrorCode.CONFLICT,
+                    throw new ConfigurationRejected(
+                            reason,
                             switch (reason) {
                                 case "REVISION_CONFLICT", "NACOS_CAS_CONFLICT" ->
                                         "配置版本已变化，请刷新后重新核对";

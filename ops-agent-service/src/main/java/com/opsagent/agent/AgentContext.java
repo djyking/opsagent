@@ -23,6 +23,34 @@ final class AgentContext {
     static String project(JsonNode call, JsonNode result) {
         Summary summary = new Summary(call.path("id").asText(), call.path("name").asText());
         switch (call.path("name").asText()) {
+            case "observability_evidence" -> {
+                summary.fields(
+                        "",
+                        result,
+                        100,
+                        "evidenceBundleId",
+                        "service",
+                        "environment",
+                        "timeRange",
+                        "collectedAt",
+                        "quality");
+                summary.line("证据缺口=" + clip(result.path("gaps").toString(), 180));
+                int index = 0;
+                for (JsonNode entry : result.path("entries")) {
+                    if (index++ >= 8) break;
+                    summary.line(
+                            "["
+                                    + clip(entry.path("id").asText(), 80)
+                                    + "] "
+                                    + clip(entry.path("source").asText(), 40)
+                                    + " @"
+                                    + clip(entry.path("observedAt").asText(), 40)
+                                    + " "
+                                    + clip(entry.path("quality").asText(), 24)
+                                    + " "
+                                    + clip(entry.path("summary").asText(), 180));
+                }
+            }
             case "ticket_get" -> {
                 summary.fields(
                         "",

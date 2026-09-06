@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(new URL('../package.json', import.meta.url)); const ts = require('typescript');
+function load(path, imports = {}) { const source = readFileSync(new URL('../src/' + path, import.meta.url), 'utf8'); const module = { exports: {} }; new Function('require', 'module', 'exports', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(id => imports[id] ?? require(id), module, module.exports); return module.exports; }
+const context = load('utils/ai-context.ts'); const requests = [];
+let service = { node: { ciCode: 'order', environment: 'DEMO', metrics: { rps: 18 }, statusReason: 'web-authored-unsafe-text', description: 'private-data', endpoint: 'http://private' } };
+const api = load('api/ai-observability-context.ts', { '@/utils/ai-context': context, './http': { request: async config => { requests.push(config); return service; } } });
+assert.equal(await api.resolveAiObservabilityContext({}), undefined);
+assert.deepEqual(await api.resolveAiObservabilityContext({ service: 'order', environment: 'DEMO', timeRange: '15m' }), { service: 'order', environment: 'DEMO', timeRange: '15m' });
+assert.equal(requests.length, 0, 'concrete object references need no browser evidence fetch');
+const resolved = await api.resolveAiObservabilityContext({ service: 'order', environment: 'ALL', timeRange: '1h' });
+assert.deepEqual(resolved, { service: 'order', environment: 'DEMO', timeRange: '1h' }); assert.equal(requests.length, 1);
+assert.equal(requests[0].url, '/api/platform/observability/services/order');
+assert.doesNotMatch(JSON.stringify(resolved), /rps|unsafe|private|description|endpoint/);
+assert.deepEqual(await api.resolveAiObservabilityContext({ service: 'order', environment: 'demo', evidenceBundleId: 'bundle-7' }), { service: 'order', environment: 'DEMO', timeRange: '15m', evidenceBundleId: 'bundle-7' });
+service = { node: { ciCode: 'another', environment: 'DEMO' } }; await assert.rejects(api.resolveAiObservabilityContext({ service: 'order', environment: 'ALL' }), /无法确认当前服务身份/);
+service = { node: { ciCode: 'order', environment: 'DEV' } }; await assert.rejects(api.resolveAiObservabilityContext({ service: 'order' }), /未提供受支持/);
+await assert.rejects(api.resolveAiObservabilityContext({ service: 'order', environment: 'DEMO', timeRange: '999m' }), /时间范围无效/);
+const count = requests.length; const abort = new AbortController(); abort.abort();
+assert.equal(await api.resolveAiObservabilityContext({ service: 'order' }, abort.signal), undefined); assert.equal(requests.length, count);
+assert.equal(await api.resolveAiObservabilityContext({ service: 'order/../../token' }), undefined);
+const legacy = context.contextualQuestion('原有问题', { service: 'order' }, '旧版本保存的现场快照');
+assert.equal(context.assistantQuestionBody(legacy), '原有问题', 'old conversation questions remain readable and can be resubmitted without the appended facts');
+console.log('PASS P3 AI reference transport: service identity resolves ALL, explicit environment makes zero evidence calls, no browser facts/secret fields, invalid identity/window rejected and legacy question body preserved');

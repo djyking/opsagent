@@ -12,6 +12,7 @@ public final class DemoAccessPolicy {
     public static boolean allows(String method, String path) {
         if ("GET".equals(method)) {
             return path.equals("/api/auth/me")
+                    || observabilityRead(path)
                     || path.equals("/api/platform/configuration/managed")
                     || path.matches(
                             "/api/platform/configuration/managed/order-(?:business|runtime)(?:/history)?")
@@ -45,6 +46,10 @@ public final class DemoAccessPolicy {
         }
         if ("POST".equals(method)) {
             return path.equals("/api/auth/logout")
+                    || path.equals("/api/platform/observability/evidence")
+                    || path.equals("/api/platform/observability/evidence/resolve")
+                    || path.matches(
+                            "/api/platform/observability/inspections/[A-Za-z0-9_-]+/run")
                     || path.equals("/api/automation/runs")
                     || path.matches(
                             "/api/automation/runs/[A-Za-z0-9_-]+/(?:cancel|pause|resume|input)")
@@ -59,5 +64,20 @@ public final class DemoAccessPolicy {
         }
         return ("PATCH".equals(method) || "PUT".equals(method) || "DELETE".equals(method))
                 && path.matches("/api/rag/conversations/[a-f0-9-]+");
+    }
+
+    private static boolean observabilityRead(String path) {
+        return path.matches("/api/platform/observability/v3/(?:topology|traces|history|differences)")
+                || path.matches("/api/platform/observability/v3/services/[A-Za-z0-9_-]+/instances")
+                || path.matches("/api/platform/observability/v3/traces/[a-f0-9]{32}")
+                || path.matches("/api/platform/observability/v3/history/[a-f0-9-]{36}")
+                || path.matches("/api/platform/observability/(?:topology|wallboard|inspections)")
+                || path.matches("/api/platform/observability/services/[A-Za-z0-9_-]+")
+                || path.matches("/api/platform/observability/inspections/[A-Za-z0-9_-]+/history")
+                || path.equals("/api/platform/config-center")
+                || path.matches("/api/platform/config-center/[A-Za-z0-9_-]+(?:/(?:history|diff))?")
+                || path.matches("/api/platform/traffic(?:/(?:summary|history))?")
+                || path.matches("/api/platform/traffic/rules/[A-Za-z_]+")
+                || path.equals("/api/rag/runtime/traffic");
     }
 }

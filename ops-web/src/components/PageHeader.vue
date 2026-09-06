@@ -9,7 +9,7 @@ defineProps<{
   eyebrow?: string;
 }>();
 const route = useRoute();
-const page = computed(() => navigationFor(route.path));
+const page = computed(() => navigationFor(route));
 </script>
 
 <template>

@@ -1,5 +1,7 @@
 # opsagent
 
+本轮服务与观测改造见 [服务拓扑与可观测工作台实施记录](docs/observability-workspace-implementation.md)。
+
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
 当前已形成“Prometheus / Alertmanager → CMDB Lite → 自动建单 → 值班 → SLA → Outbox / RabbitMQ → 人工处置 → 知识审核 → RAG”的企业 ITSM 闭环，并保留文档软删除及 Elasticsearch、Qdrant 双索引持久化补偿。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Qdrant、Prometheus、Alertmanager、Grafana、六个 Java 服务和 Nginx 前端均可由 Docker Compose 统一运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于容器启动时注入。

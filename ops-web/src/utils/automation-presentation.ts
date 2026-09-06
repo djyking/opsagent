@@ -6,6 +6,8 @@ export const automationToolLabels: Record<string, string> = {
   knowledge_search: '检索知识证据', ticket_add_analysis: '记录诊断分析', ticket_resolve: '验证并解决工单',
   official_docs_search: '检索官方文档',
   recent_changes: '核对近期变更', demo_queue_restore: '恢复通知队列消费者',
+  config_change_apply: '审批发布业务配置',
+  observability_evidence: '采集可观测证据包',
 };
 export const automationEventLabels: Record<string, string> = {
   RUN_CREATED: '运行已创建', NODE_COMPLETED: '节点完成', MODEL_INTENT: '请求模型决策',
@@ -41,6 +43,14 @@ export function approvalForRun(approval: Approval, run: RunDetail): PendingAppro
 export function approvalDescription(approval: PendingApproval) {
   const name = String(approval.payload.name || '');
   const input = name === 'HUMAN_INPUT';
+  const summary = approval.payload.approvalSummary && typeof approval.payload.approvalSummary === 'object'
+    ? approval.payload.approvalSummary as Record<string, unknown> : {};
+  const configChanges = name === 'config_change_apply' && Array.isArray(summary.changes) ? summary.changes.slice(0, 3).filter(change => change && typeof change === 'object').map(change => {
+    const row = change as Record<string, unknown>;
+    const labels: Record<string, string> = {catalogTitle: '目录标题', notice: '业务提示', discountPercent: '演示折扣（%）'};
+    const field = String(row.field || '');
+    return {field: labels[field] || '白名单字段', before: String(row.before ?? '（空）').slice(0, 160), after: String(row.after ?? '（空）').slice(0, 160)};
+  }) : [];
   const descriptions: Record<string, { title: string; change: string; scope: string }> = {
     demo_config_restore: { title: '恢复订单服务连接配置', change: '将隔离订单服务的 Redis 连接端口恢复为 6379，随后重新验证订单请求和告警。',
       scope: '修改隔离订单目标的连接配置，会影响该目标后续真实请求。授权仅适用于本次事件和已观测的配置版本。' },
@@ -48,13 +58,14 @@ export function approvalDescription(approval: PendingApproval) {
       scope: '修改隔离订单目标的限流阈值，会改变该目标请求的放行情况。授权仅适用于本次事件和已观测的规则版本。' },
     demo_queue_restore: { title: '恢复通知队列消费者', change: '重新订阅隔离通知队列并处理积压消息，随后核对真实消费回执、队列排空和告警恢复。',
       scope: '只恢复本次事件绑定的隔离通知消费者；平台自身的消息队列不在动作范围内。审批绑定已观测版本和当前事件。' },
+    config_change_apply: {title: summary.action === 'ROLLBACK' ? '审批回退订单业务配置' : '审批发布订单业务配置', change: '仅修改下列已冻结的业务字段，经 Nacos CAS 发布并回读，再验证目标实例应用和真实订单请求。', scope: '只影响已批准的隔离订单目标与实例。基础版本、目标或字段变化均须重新申请；源发布成功不代表业务已恢复。'},
     APPROVAL: { title: '确认继续工作流', change: '批准后继续当前工作流的后续节点。', scope: '本次授权仅通过当前审批节点，后续需审批的动作仍会单独请求。' },
     HUMAN_INPUT: { title: '补充处理信息', change: '将您填写的信息保存为当前节点结果，供后续工作流使用。', scope: '输入会记录在本次运行的轨迹中，请只填写当前处置所需的信息。' },
   };
   const description = descriptions[name] || { title: automationToolLabels[name] || '确认受控动作',
     change: '执行下方技术详情中登记的当前动作；请核对参数后决定。', scope: '动作影响范围需根据当前工具和参数核对，未提供的效果不能视为保证。' };
-  return { ...description, input, prompt: typeof approval.payload.prompt === 'string' ? approval.payload.prompt : '',
-    target: name === 'demo_queue_restore' ? '隔离通知服务' : name.startsWith('demo_') ? '隔离订单服务' : approval.nodeLabel || '当前工作流节点' };
+  return { ...description, input, configChanges, configuration: name === 'config_change_apply', baseRevision: name === 'config_change_apply' ? String(summary.expectedRevision || '').slice(0, 64) : '', prompt: typeof approval.payload.prompt === 'string' ? approval.payload.prompt : '',
+    target: name === 'demo_queue_restore' ? '隔离通知服务' : name.startsWith('demo_') || name === 'config_change_apply' ? '隔离订单服务' : approval.nodeLabel || '当前工作流节点' };
 }
 
 type EventPhase = { key: string; label: string; events: RunEvent[] };

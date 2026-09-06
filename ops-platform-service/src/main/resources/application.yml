@@ -53,6 +53,11 @@ ops:
     grafana-url: ${OPS_GRAFANA_URL:http://localhost:3000}
     prometheus-public-url: ${OPS_PROMETHEUS_PUBLIC_URL:http://localhost:9090}
     grafana-public-url: ${OPS_GRAFANA_PUBLIC_URL:http://localhost:3000}
+  observability:
+    alertmanager-url: ${OPS_ALERTMANAGER_URL:http://localhost:9093}
+    error-rate-threshold: ${OPS_OBSERVABILITY_ERROR_RATE_THRESHOLD:5}
+    p95-threshold-ms: ${OPS_OBSERVABILITY_P95_THRESHOLD_MS:1000}
+    sample-max-age-seconds: ${OPS_OBSERVABILITY_SAMPLE_MAX_AGE_SECONDS:90}
   operations:
     demo-target-url: ${OPS_DEMO_TARGET_URL:}
     demo-target-token: ${OPS_DEMO_CONTROL_TOKEN:}

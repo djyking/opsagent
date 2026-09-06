@@ -23,19 +23,26 @@ class CmdbAnswerService {
                     + "|(?:哪些|清单|列表|列出|有什么|有多少|依赖|拓扑).*(?:服务|中间件|组件)"
                     + "|服务目录|依赖关系|依赖拓扑", Pattern.CASE_INSENSITIVE);
     private static final Pattern EXPLANATION = Pattern.compile(
-            "排查|排障|常见故障|原理|什么是|如何设计|怎么设计|教程|学习|最佳实践|举例|示例|如何实现");
+            "排查|排障|诊断|异常|分析|证据|健康|故障|原因|核对|原理|什么是|如何设计|怎么设计|教程|学习|最佳实践|举例|示例|如何实现");
     private final PlatformClient platform;
 
     CmdbAnswerService(PlatformClient platform) { this.platform = platform; }
 
     boolean supports(String question, Long documentId) {
-        return documentId == null && DIRECTORY.matcher(question).find() && !EXPLANATION.matcher(question).find();
+        String intent = intentQuestion(question);
+        return documentId == null && DIRECTORY.matcher(intent).find() && !EXPLANATION.matcher(intent).find();
+    }
+
+    private String intentQuestion(String question) {
+        int context = question.indexOf("\n\n当前页面上下文：");
+        return context < 0 ? question : question.substring(0, context);
     }
 
     RagService.Answer answerIfApplicable(String question, Long documentId) {
         if (!supports(question, documentId)) return null;
         long started = System.nanoTime();
-        boolean dependencies = question.contains("依赖") || question.contains("拓扑") || question.contains("关系");
+        String intent = intentQuestion(question);
+        boolean dependencies = intent.contains("依赖") || intent.contains("拓扑") || intent.contains("关系");
         try {
             List<PlatformClient.Ci> all = data(platform.cis());
             List<PlatformClient.Ci> services = all.stream()
@@ -45,7 +52,7 @@ class CmdbAnswerService {
             List<PlatformClient.Relation> relations = dependencies ? data(platform.relations()) : List.of();
             if (dependencies) appendRelations(text, question, all, relations);
             else {
-                boolean middleware = question.contains("中间件") || question.contains("组件");
+                boolean middleware = intent.contains("中间件") || intent.contains("组件");
                 List<PlatformClient.Ci> rows = middleware ? all.stream()
                         .filter(ci -> !"SERVICE".equals(ci.ciType()))
                         .sorted(Comparator.comparing(ci -> value(ci.ciCode()))).toList() : services;

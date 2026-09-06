@@ -87,6 +87,9 @@ class ManagedConfigurationTest {
                                 json.createObjectNode()
                                         .put("httpStatus", 200)
                                         .put(
+                                                "businessConfigurationRevision",
+                                                remote.get().path("revision").asText())
+                                        .put(
                                                 "catalogTitle",
                                                 remote.get()
                                                         .path("content")
@@ -120,6 +123,37 @@ class ManagedConfigurationTest {
     @AfterEach
     void clearIdentity() {
         SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void sourcePublicationIsNotAppliedWhenBusinessEvidenceDoesNotMatch() {
+        when(target.preview())
+                .thenAnswer(
+                        call ->
+                                json.createObjectNode()
+                                        .put("httpStatus", publications.get() == 0 ? 200 : 503)
+                                        .put(
+                                                "businessConfigurationRevision",
+                                                remote.get().path("revision").asText()));
+        var result =
+                service.publish(
+                        "order-business", request(content("Source accepted", 10), "a".repeat(64)));
+        assertThat(result.operation().status()).isEqualTo("PUBLISHED");
+        assertThat(result.configuration().business().path("httpStatus").asInt()).isEqualTo(503);
+        assertThat(publications).hasValue(1);
+    }
+
+    @Test
+    void explicitUpstreamCasRejectionIsRecordedAsConflict() {
+        doThrow(new DemoTargetClient.ConfigurationRejected("NACOS_CAS_CONFLICT", "changed"))
+                .when(target)
+                .publishBusinessConfiguration(any(), anyString(), anyString());
+        var result =
+                service.publish("order-business", request(content("Rejected", 10), "a".repeat(64)));
+        assertThat(result.operation().status()).isEqualTo("CONFLICT");
+        assertThat(result.configuration().content().path("catalogTitle").asText())
+                .isEqualTo("初始标题");
+        assertThat(publications).hasValue(0);
     }
 
     @Test

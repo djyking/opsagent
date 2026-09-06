@@ -40,6 +40,7 @@ class DemoBusinessSettingsTest {
     private final AtomicInteger writes = new AtomicInteger();
     private boolean rejectCas;
     private boolean delayVisibility;
+    private boolean readUnavailable;
 
     @AfterEach
     void cleanup() throws Exception {
@@ -187,6 +188,162 @@ class DemoBusinessSettingsTest {
                                 value("初始订单", 0))));
         settings().initialize(service());
         runtime.accept(json.writeValueAsString(DemoConfiguration.baseline("", "BASELINE")));
+        // This suite verifies configuration application; shared Sentinel QPS counters belong to
+        // separate flow tests and must not turn a burst of local assertions into HTTP 429.
+        FlowRuleManager.loadRules(List.of());
+    }
+
+    @Test
+    void whitelistPublicationPreservesUnmodifiedSecretsAndReportsRealInstance() throws Exception {
+        initialize();
+        var source = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(remote.get());
+        source.put("operatorSecret", "never-return-this-secret");
+        source.withObject("configuration").put("integrationPassword", "retained-secret");
+        remote.set(json.writeValueAsString(source));
+        settings().accept(remote.get());
+        var result =
+                runtime.publishBusinessConfiguration(
+                        value("Safe title", 5),
+                        settings().appliedRevision(),
+                        UUID.randomUUID().toString());
+        assertThat(remote.get()).contains("never-return-this-secret", "retained-secret");
+        assertThat(json.writeValueAsString(result))
+                .doesNotContain("never-return-this-secret", "retained-secret");
+        assertThat(result.get("instanceId").toString()).matches("[a-f0-9-]{36}");
+        assertThat(result.get("appliedAt")).isNotNull();
+        assertThat(result.get("revision")).isEqualTo(result.get("appliedRevision"));
+    }
+
+    @Test
+    void applicationPauseKeepsOldBusinessWhileNacosPublishesAndManualResumeReadsRealSource()
+            throws Exception {
+        initialize();
+        when(redis.catalog(6379)).thenReturn("actual dependency");
+        String original = settings().appliedRevision();
+        String instance = settings().view().get("instanceId").toString();
+        String pauseId = UUID.randomUUID().toString();
+        Instant until = Instant.now().plusSeconds(90);
+        var pause = runtime.pauseBusinessApplication(pauseId, instance, original, until);
+        assertThat(pause).containsEntry("active", true);
+        String request = UUID.randomUUID().toString();
+        var published =
+                runtime.publishBusinessConfiguration(value("Deferred title", 1), original, request);
+        assertThat(published).containsEntry("applicationStatus", "DEFERRED_APPLICATION_PAUSE");
+        assertThat(published.get("revision")).isNotEqualTo(original);
+        assertThat(published.get("appliedRevision")).isEqualTo(original);
+        assertThat(runtime.preview().discountPercent()).isZero();
+        settings().accept(remote.get());
+        assertThat(settings().appliedRevision()).isEqualTo(original);
+        runtime.publishBusinessConfiguration(value("Deferred title", 1), original, request);
+        assertThat(writes).hasValue(1);
+        assertThatThrownBy(
+                        () ->
+                                runtime.resumeBusinessApplication(
+                                        UUID.randomUUID().toString(), instance))
+                .hasMessage("PAUSE_ID_MISMATCH");
+        var resumed = runtime.resumeBusinessApplication(pauseId, instance);
+        assertThat(resumed.get("revision")).isEqualTo(published.get("revision"));
+        assertThat(resumed.get("appliedRevision")).isEqualTo(published.get("revision"));
+        assertThat(resumed).containsEntry("applicationStatus", "APPLIED");
+        assertThat(
+                        json.valueToTree(resumed)
+                                .path("applicationPause")
+                                .path("recoverySource")
+                                .asText())
+                .isEqualTo("MANUAL");
+        assertThat(runtime.preview().discountPercent()).isEqualTo(1);
+        runtime.resumeBusinessApplication(pauseId, instance);
+        assertThat(writes).hasValue(1);
+    }
+
+    @Test
+    void expiredPauseRequiresActualSourceBeforeTtlRecoveryCanClaimApplied() throws Exception {
+        initialize();
+        when(redis.catalog(6379)).thenReturn("actual dependency");
+        String original = settings().appliedRevision();
+        String instance = settings().view().get("instanceId").toString();
+        runtime.pauseBusinessApplication(
+                UUID.randomUUID().toString(), instance, original, Instant.now().plusSeconds(90));
+        var result =
+                runtime.publishBusinessConfiguration(
+                        value("TTL source", 2), original, UUID.randomUUID().toString());
+        ReflectionTestUtils.setField(settings(), "pauseExpiresAt", Instant.now().minusSeconds(1));
+        readUnavailable = true;
+        runtime.guard();
+        assertThat(settings().applicationPaused()).isTrue();
+        assertThat(settings().appliedRevision()).isEqualTo(original);
+        readUnavailable = false;
+        runtime.guard();
+        assertThat(settings().applicationPaused()).isFalse();
+        assertThat(settings().appliedRevision()).isEqualTo(result.get("revision"));
+        assertThat(runtime.preview().discountPercent()).isEqualTo(2);
+        assertThat(
+                        json.valueToTree(settings().view())
+                                .path("applicationPause")
+                                .path("recoverySource")
+                                .asText())
+                .isEqualTo("TTL_GUARD");
+        assertThat(writes).hasValue(1);
+    }
+
+    @Test
+    void pauseRejectsOverlongTtlStaleInstanceAndFaultOverlapAndReplayDoesNotExtendIt()
+            throws Exception {
+        initialize();
+        when(redis.catalog(6379)).thenReturn("actual dependency");
+        String original = settings().appliedRevision();
+        String instance = settings().view().get("instanceId").toString();
+        String id = UUID.randomUUID().toString();
+        assertThatThrownBy(
+                        () ->
+                                runtime.pauseBusinessApplication(
+                                        id, instance, original, Instant.now().plusSeconds(121)))
+                .hasMessage("INVALID_PAUSE_TTL");
+        assertThatThrownBy(
+                        () ->
+                                runtime.pauseBusinessApplication(
+                                        id,
+                                        UUID.randomUUID().toString(),
+                                        original,
+                                        Instant.now().plusSeconds(90)))
+                .hasMessage("INSTANCE_MISMATCH");
+        assertThatThrownBy(
+                        () ->
+                                runtime.pauseBusinessApplication(
+                                        id,
+                                        instance,
+                                        "0".repeat(64),
+                                        Instant.now().plusSeconds(90)))
+                .hasMessage("REVISION_CONFLICT");
+        Instant until = Instant.now().plusSeconds(90);
+        var first = runtime.pauseBusinessApplication(id, instance, original, until);
+        assertThat(runtime.pauseBusinessApplication(id, instance, original, until))
+                .isEqualTo(first);
+        assertThatThrownBy(
+                        () ->
+                                runtime.pauseBusinessApplication(
+                                        id, instance, original, until.plusSeconds(1)))
+                .hasMessage("IDEMPOTENCY_CONFLICT");
+        assertThatThrownBy(
+                        () ->
+                                runtime.inject(
+                                        UUID.randomUUID().toString(),
+                                        "NACOS_REDIS_CONFIG_DRIFT",
+                                        Instant.now().plusSeconds(60)))
+                .hasMessage("TARGET_BUSY");
+        runtime.resumeBusinessApplication(id, instance);
+        runtime.accept(
+                json.writeValueAsString(
+                        DemoConfiguration.fault(
+                                UUID.randomUUID().toString(),
+                                "NACOS_REDIS_CONFIG_DRIFT",
+                                Instant.now().plusSeconds(60))));
+        assertThatThrownBy(
+                        () ->
+                                runtime.pauseBusinessApplication(
+                                        UUID.randomUUID().toString(), instance, original, until))
+                .hasMessage("TARGET_BUSY");
+        assertThat(writes).hasValue(0);
     }
 
     private DemoBusinessSettings settings() {
@@ -207,6 +364,8 @@ class DemoBusinessSettingsTest {
                         new Class<?>[] {ConfigService.class},
                         (proxy, method, arguments) -> {
                             if (method.getName().equals("getConfig")) {
+                                if (readUnavailable)
+                                    throw new IllegalStateException("NACOS_UNAVAILABLE");
                                 assertThat(arguments[0]).isEqualTo(DemoBusinessSettings.DATA_ID);
                                 assertThat(arguments[1]).isEqualTo("OPSAGENT_DEMO");
                                 return remote.get();

@@ -35,12 +35,15 @@ public class ItsmPlatformRepository {
         String ciType = type == null ? "" : type.trim();
         return jdbc.queryForList(
                 """
-                SELECT id,ci_code ciCode,ci_name ciName,ci_type ciType,environment,
-                       owner_name ownerName,endpoint,status,description,update_time updateTime
+                SELECT id,cmdb_ci.ci_code ciCode,ci_name ciName,ci_type ciType,environment,
+                       owner_name ownerName,endpoint,status,description,update_time updateTime,
+                       m.metadata_json metadataJson
                 FROM cmdb_ci
-                WHERE (?='' OR ci_code LIKE CONCAT('%',?,'%') OR ci_name LIKE CONCAT('%',?,'%'))
+                LEFT JOIN observability_ci_metadata m ON m.ci_code=cmdb_ci.ci_code
+                WHERE COALESCE(m.deleted,0)=0
+                  AND (?='' OR cmdb_ci.ci_code LIKE CONCAT('%',?,'%') OR ci_name LIKE CONCAT('%',?,'%'))
                   AND (?='' OR ci_type=?)
-                ORDER BY ci_type,ci_code
+                ORDER BY ci_type,cmdb_ci.ci_code
                 """,
                 query,
                 query,
@@ -52,9 +55,11 @@ public class ItsmPlatformRepository {
     Map<String, Object> ci(String ciCode) {
         List<Map<String, Object>> rows = jdbc.queryForList(
                 """
-                SELECT id,ci_code ciCode,ci_name ciName,ci_type ciType,environment,
-                       owner_name ownerName,endpoint,status,description,update_time updateTime
-                FROM cmdb_ci WHERE ci_code=?
+                SELECT id,cmdb_ci.ci_code ciCode,ci_name ciName,ci_type ciType,environment,
+                       owner_name ownerName,endpoint,status,description,update_time updateTime,
+                       m.metadata_json metadataJson
+                FROM cmdb_ci LEFT JOIN observability_ci_metadata m ON m.ci_code=cmdb_ci.ci_code
+                WHERE cmdb_ci.ci_code=? AND COALESCE(m.deleted,0)=0
                 """,
                 ciCode);
         return rows.isEmpty() ? null : rows.get(0);
@@ -63,9 +68,11 @@ public class ItsmPlatformRepository {
     Map<String, Object> ci(long id) {
         List<Map<String, Object>> rows = jdbc.queryForList(
                 """
-                SELECT id,ci_code ciCode,ci_name ciName,ci_type ciType,environment,
-                       owner_name ownerName,endpoint,status,description,update_time updateTime
-                FROM cmdb_ci WHERE id=?
+                SELECT id,cmdb_ci.ci_code ciCode,ci_name ciName,ci_type ciType,environment,
+                       owner_name ownerName,endpoint,status,description,update_time updateTime,
+                       m.metadata_json metadataJson
+                FROM cmdb_ci LEFT JOIN observability_ci_metadata m ON m.ci_code=cmdb_ci.ci_code
+                WHERE id=? AND COALESCE(m.deleted,0)=0
                 """,
                 id);
         return rows.isEmpty() ? null : rows.get(0);
@@ -126,9 +133,14 @@ public class ItsmPlatformRepository {
     List<Map<String, Object>> relations() {
         return jdbc.queryForList(
                 """
-                SELECT id,source_ci_code sourceCiCode,target_ci_code targetCiCode,
+                SELECT r.id,source_ci_code sourceCiCode,target_ci_code targetCiCode,
                        relation_type relationType,description,create_time createTime
-                FROM cmdb_relation ORDER BY source_ci_code,target_ci_code
+                FROM cmdb_relation r
+                LEFT JOIN observability_relation_archive a ON a.relation_id=r.id
+                LEFT JOIN observability_ci_metadata s ON s.ci_code=r.source_ci_code
+                LEFT JOIN observability_ci_metadata t ON t.ci_code=r.target_ci_code
+                WHERE COALESCE(a.deleted,0)=0 AND COALESCE(s.deleted,0)=0 AND COALESCE(t.deleted,0)=0
+                ORDER BY source_ci_code,target_ci_code
                 """);
     }
 
@@ -137,6 +149,16 @@ public class ItsmPlatformRepository {
             String targetCiCode,
             String relationType,
             String description) {
+        var archived = jdbc.queryForList("SELECT r.id FROM cmdb_relation r"
+                + " JOIN observability_relation_archive a ON a.relation_id=r.id AND a.deleted=1"
+                + " WHERE source_ci_code=? AND target_ci_code=? AND relation_type=?", Long.class,
+                sourceCiCode, targetCiCode, relationType);
+        if (!archived.isEmpty()) {
+            long id = archived.get(0);
+            jdbc.update("UPDATE cmdb_relation SET description=? WHERE id=?", description, id);
+            jdbc.update("UPDATE observability_relation_archive SET deleted=0 WHERE relation_id=?", id);
+            return id;
+        }
         jdbc.update(
                 """
                 INSERT INTO cmdb_relation(source_ci_code,target_ci_code,relation_type,
@@ -150,7 +172,28 @@ public class ItsmPlatformRepository {
     }
 
     int deleteRelation(long id) {
-        return jdbc.update("DELETE FROM cmdb_relation WHERE id=?", id);
+        return jdbc.update("INSERT INTO observability_relation_archive(relation_id,deleted)"
+                + " SELECT id,1 FROM cmdb_relation WHERE id=?"
+                + " AND id NOT IN (SELECT relation_id FROM observability_relation_archive WHERE deleted=1)"
+                + " ON DUPLICATE KEY UPDATE deleted=1", id);
+    }
+
+    int updateRelation(long id, ItsmPlatformController.RelationRequest request) {
+        return jdbc.update("UPDATE cmdb_relation SET source_ci_code=?,target_ci_code=?,relation_type=?,"
+                + "description=? WHERE id=? AND id NOT IN"
+                + " (SELECT relation_id FROM observability_relation_archive WHERE deleted=1)",
+                request.sourceCiCode(), request.targetCiCode(), request.relationType(), request.description(), id);
+    }
+
+    void archiveCi(String ciCode) {
+        jdbc.update("INSERT INTO observability_ci_metadata(ci_code,deleted) VALUES(?,1)"
+                + " ON DUPLICATE KEY UPDATE deleted=1,updated_at=CURRENT_TIMESTAMP(3)", ciCode);
+    }
+
+    void saveMetadata(String ciCode, String metadata) {
+        jdbc.update("INSERT INTO observability_ci_metadata(ci_code,metadata_json) VALUES(?,?)"
+                + " ON DUPLICATE KEY UPDATE metadata_json=VALUES(metadata_json),updated_at=CURRENT_TIMESTAMP(3)",
+                ciCode, metadata);
     }
 
     Map<String, Object> topology(String ciCode) {

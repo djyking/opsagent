@@ -11,39 +11,51 @@ rule_files:
   - /etc/prometheus/opsagent-alerts.yml
 
 scrape_configs:
+  - job_name: opsagent-servicegraph
+    static_configs:
+      - targets: ["otel-collector:9464"]
+        labels: {environment: PROD}
+
   - job_name: opsagent-agent
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-agent-app:8106"]
+        labels: {environment: PROD, ci_code: ops-agent-service}
   - job_name: opsagent-gateway
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-gateway-app:18080"]
+        labels: {environment: PROD, ci_code: ops-gateway}
 
   - job_name: opsagent-auth
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-auth-app:8101"]
+        labels: {environment: PROD, ci_code: ops-auth-service}
 
   - job_name: opsagent-ticket
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-ticket-app:8102"]
+        labels: {environment: PROD, ci_code: ops-ticket-service}
 
   - job_name: opsagent-knowledge
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-knowledge-app:8103"]
+        labels: {environment: PROD, ci_code: ops-knowledge-service}
 
   - job_name: opsagent-rag
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-rag-app:8104"]
+        labels: {environment: PROD, ci_code: ops-rag-service}
 
   - job_name: opsagent-platform
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["ops-platform-app:8105"]
+        labels: {environment: PROD, ci_code: ops-platform-service}
 
   - job_name: opsagent-demo-order
     scrape_interval: 5s
@@ -52,3 +64,40 @@ scrape_configs:
     # metric's own service label; the platform scrape above exports both probe series.
     static_configs:
       - targets: ["ops-demo-order-app:8110"]
+        labels: {environment: DEMO, ci_code: ops-demo-order-service}
+
+  # Native endpoints are private; each environment is a distinct monitored identity.
+  - job_name: opsagent-rabbitmq
+    sample_limit: 5000
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+        labels: {environment: PROD, ci_code: rabbitmq}
+
+  - job_name: opsagent-demo-rabbitmq
+    sample_limit: 5000
+    static_configs:
+      - targets: ["demo-rabbitmq:15692"]
+        labels: {environment: DEMO, ci_code: ops-demo-rabbitmq}
+
+  - job_name: opsagent-nacos
+    metrics_path: /nacos/actuator/prometheus
+    sample_limit: 5000
+    static_configs:
+      - targets: ["nacos:8848"]
+        labels: {environment: PROD, ci_code: nacos}
+
+  - job_name: opsagent-qdrant
+    sample_limit: 10000
+    static_configs:
+      - targets: ["qdrant:6333"]
+        labels: {environment: PROD, ci_code: qdrant}
+
+  - job_name: opsagent-prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+        labels: {environment: PROD, ci_code: prometheus}
+
+  - job_name: opsagent-alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+        labels: {environment: PROD, ci_code: alertmanager}

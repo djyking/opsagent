@@ -6,6 +6,9 @@ import AnswerContent from '@/components/AnswerContent.vue';
 import RagSources from '@/components/RagSources.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import BaseModal from '@/components/BaseModal.vue';
+import { useAiAssistantStore } from '@/stores/ai-assistant';
+import { assistantQuestionBody, assistantQuestionEvidence } from '@/utils/ai-context';
+const assistant = useAiAssistantStore();
 const { question, questionInput, draftImported, providers, selectedProvider, providersLoading, providersReady, providerError, loadProviders, sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen, editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier, newSession, ask, turnLabel, manageSession, copyAnswer } = useRagConversations();
 const suggestions = ['检查当前服务健康与内存趋势', 'Nacos 当前注册与配置状态如何？', 'Sentinel 当前生效了哪些限流规则？', '排查 Redis 连接超时'];
 </script>
@@ -13,6 +16,7 @@ const suggestions = ['检查当前服务健康与内存趋势', 'Nacos 当前注
 <template>
   <div class="stack-page rag-page">
     <PageHeader title="智能问答" description="结合实时运行数据与运维知识，分析问题并核对依据" />
+    <p v-if="assistant.contextSummary" class="rag-shared-context">当前分析上下文：{{ assistant.contextSummary }} <button type="button" class="button text" :disabled="assistant.busy" @click="assistant.setContext({ page: '/rag/chat' })">清除上下文</button></p>
     <section class="rag-three-pane" :class="{ 'context-closed': !contextOpen, 'history-open': historyOpen }">
       <aside class="rag-conversations" aria-label="我的会话">
         <header class="panel-header"><div><h3>我的会话</h3><span class="panel-count">{{ total }} 个 · 仅当前账号可见</span></div><button class="icon-button" aria-label="新会话" :disabled="busy" @click="newSession"><Plus :size="15" /></button></header>
@@ -39,7 +43,8 @@ const suggestions = ['检查当前服务健康与内存趋势', 'Nacos 当前注
           <button v-if="hasEarlier" class="button secondary" :disabled="loading || busy" @click="earlier">加载更早的消息</button>
           <p v-if="loading" class="rag-context-note">正在读取会话…</p>
           <article v-for="turn in turns" :key="turn.id" class="rag-turn">
-            <div class="rag-user-message"><strong>你</strong><p>{{ turn.question }}</p></div>
+            <div class="rag-user-message"><strong>你</strong><p>{{ assistantQuestionBody(turn.question) }}</p></div>
+            <details v-if="assistantQuestionEvidence(turn.question)" class="rag-question-evidence"><summary>提问时的上下文与现场快照</summary><pre>{{ assistantQuestionEvidence(turn.question) }}</pre></details>
             <div class="stream-answer">
               <div class="answer-status"><span :class="{ pulse: busy && turn.status === 'PROCESSING' }"><Bot :size="18" /></span><div><strong>{{ turnLabel(turn) }}</strong><small v-if="turn.result"><Clock3 :size="13" />{{ ragAnswerLabel(turn.result) }} · {{ turn.result.latencyMs }} ms</small></div><div v-if="turn.answer && turn.status !== 'PROCESSING'" class="rag-answer-actions"><button class="icon-button" aria-label="复制回答" @click="copyAnswer(turn)"><Copy :size="15" /></button><button class="icon-button" aria-label="重新提问" :disabled="busy" @click="ask(turn.question)"><RotateCw :size="15" /></button></div></div>
               <AnswerContent v-if="turn.answer" :content="turn.answer" />
@@ -53,13 +58,15 @@ const suggestions = ['检查当前服务健康与内存趋势', 'Nacos 当前注
         </div>
         <p v-if="providerError" class="inline-error rag-provider-error" role="alert">模型列表读取失败：{{ providerError }} <button class="button secondary" :disabled="providersLoading" @click="loadProviders">重试</button></p><form class="rag-question-form chat-composer" @submit.prevent="ask()"><textarea ref="questionInput" v-model="question" required rows="3" maxlength="2000" aria-label="运维问题" :placeholder="sessionId ? '继续追问，或开始新的问题…' : '输入运维问题…'" @keydown.enter.exact.prevent="ask()" /><div class="question-submit-row"><label class="rag-model-picker"><Bot :size="14" /><select v-model="selectedProvider" aria-label="选择回答模型" :disabled="busy || providersLoading || !providersReady"><option v-if="!selectedProvider" value="">{{ providersLoading ? '读取模型配置…' : '仅数据与知识检索' }}</option><option v-for="item in providers" :key="item.provider" :value="item.provider" :disabled="!item.available">{{ item.model || item.provider }}{{ item.available ? '' : ' · ' + item.status }}</option></select></label><span class="composer-hint" role="status">{{ draftImported ? '问题已带入，可修改后发送' : 'Enter 发送 · Shift + Enter 换行' }}</span><button class="composer-send" :disabled="busy || loading || !question.trim() || !providersReady || providersLoading" :title="busy ? '生成中' : '发送问题'" aria-label="发送问题"><Send :size="16" /></button></div></form>
       </main>
-      <aside v-if="contextOpen" class="rag-context-panel"><header class="panel-header"><div><h3>参考上下文</h3><span class="panel-count">{{ references.length }} 条来源</span></div></header><p class="rag-context-note">{{ referenceTurn ? '对应问题：' + referenceTurn.question : '先查看引用，再结合实际环境核对建议。' }}</p><RagSources :references="references" /><div v-if="!references.length" class="rag-context-empty"><BookOpen :size="24" /><strong>让答案有据可查</strong><p>完成提问后，这里显示知识片段、服务目录或监控数据及其采集时间。</p></div></aside>
+      <aside v-if="contextOpen" class="rag-context-panel"><header class="panel-header"><div><h3>参考上下文</h3><span class="panel-count">{{ references.length }} 条来源</span></div></header><p class="rag-context-note">{{ referenceTurn ? '对应问题：' + assistantQuestionBody(referenceTurn.question) : '先查看引用，再结合实际环境核对建议。' }}</p><RagSources :references="references" /><div v-if="!references.length" class="rag-context-empty"><BookOpen :size="24" /><strong>让答案有据可查</strong><p>完成提问后，这里显示知识片段、服务目录或监控数据及其采集时间。</p></div></aside>
     </section>
     <BaseModal v-if="editMode" :title="editMode === 'rename' ? '重命名会话' : '删除会话'" @close="!actionBusy && (editMode = '')"><form id="manage-conversation" @submit.prevent="manageSession"><label v-if="editMode === 'rename'">会话名称<input v-model.trim="editTitle" required maxlength="120" /></label><p v-else>删除“{{ current?.title }}”后，该会话及其问答将从历史列表移除。其他会话不受影响。</p><p v-if="error" class="inline-error">{{ error }}</p></form><template #footer><button class="button secondary" :disabled="actionBusy" @click="editMode = ''">取消</button><button class="button primary" form="manage-conversation" :disabled="actionBusy || (editMode === 'rename' && !editTitle.trim())">{{ actionBusy ? '处理中…' : editMode === 'rename' ? '保存名称' : '确认删除' }}</button></template></BaseModal>
   </div>
 </template>
 
 <style scoped>
+.rag-shared-context { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0; padding: 10px 14px; border: 1px solid var(--oa-border-subtle); border-radius: var(--oa-radius-control); background: var(--oa-bg-surface); color: var(--oa-text-secondary); font-size: 12px; }
+.rag-question-evidence { margin: 8px 0 16px; color: var(--oa-text-muted); font-size: 11px; }.rag-question-evidence summary { cursor: pointer; }.rag-question-evidence pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: 10px; background: var(--oa-bg-subtle); border-radius: 8px; line-height: 1.6; }
 .rag-model-picker { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 260px; }
 .rag-model-picker select { min-width: 0; width: 100%; min-height: 34px; font-size: 12px; padding: 6px 28px 6px 8px; }
 .rag-provider-error { margin: 0 16px; }

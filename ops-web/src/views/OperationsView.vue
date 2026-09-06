@@ -12,6 +12,7 @@ import EmptyState from "@/components/EmptyState.vue";
 import CmdbView from "@/views/CmdbView.vue";
 import "@/styles/pages/operations.css";
 
+const props = defineProps<{ metricsOnly?: boolean }>();
 const route = useRoute();
 const router = useRouter();
 const tabs = [
@@ -19,7 +20,7 @@ const tabs = [
   { key: "topology", label: "服务与拓扑", icon: Network },
   { key: "governance", label: "注册与流控", icon: SlidersHorizontal },
 ];
-const activeTab = computed(() => tabs.some(tab => tab.key === route.query.tab) ? String(route.query.tab) : "overview");
+const activeTab = computed(() => props.metricsOnly ? 'overview' : tabs.some(tab => tab.key === route.query.tab) ? String(route.query.tab) : "overview");
 const snapshot = ref<OperationsOverview>();
 const workflows = ref<OperationsWorkflow[]>([]);
 const windowMinutes = ref(60);
@@ -44,10 +45,24 @@ const upCount = computed(() => snapshot.value?.targets.filter(target => target.h
 const riskCount = computed(() => snapshot.value?.risks.filter(risk => risk.severity !== "INFO").length ?? 0);
 const sampleCount = computed(() => snapshot.value?.metrics.reduce((sum, metric) => sum + metric.sampleCount, 0) ?? 0);
 const visibleMetrics = computed(() => snapshot.value?.metrics.filter(metric => metric.id === metricKind.value
-  && (!serviceFilter.value || metric.job === serviceFilter.value || metric.job === "all")) ?? []);
+  && (!serviceFilter.value || metric.job === serviceFilter.value || (!props.metricsOnly && metric.job === "all"))) ?? []);
 const activeInspection = computed(() => workflows.value.find(workflow => workflow.code === "HEALTH_CHECK"));
 
-function setTab(tab: string) { void router.replace({ query: { ...route.query, tab } }); }
+function goTopology(ciCode = typeof route.query.ciCode === 'string' ? route.query.ciCode : '') {
+  const { tab: _tab, ...query } = route.query;
+  void router.push({ path: '/observability/topology', query: { ...query, ciCode: ciCode || undefined } });
+}
+function setTab(tab: string) { if (props.metricsOnly) { if (tab === 'topology') goTopology(); return; } void router.replace({ query: { ...route.query, tab } }); }
+function changeServiceFilter() {
+  if (!props.metricsOnly) return;
+  const target = snapshot.value?.targets.find(item => item.service === serviceFilter.value);
+  void router.replace({ query: { ...route.query, ciCode: target?.ciCode || undefined } });
+}
+watch([() => route.query.ciCode, snapshot], () => {
+  if (!props.metricsOnly) return;
+  const code = typeof route.query.ciCode === 'string' ? route.query.ciCode : '';
+  serviceFilter.value = code ? snapshot.value?.targets.find(target => target.ciCode === code)?.service || '__unmapped__' : '';
+}, { immediate: true });
 function label(value: string) { return statusNames[value] || value; }
 function serviceName(value: string) { return serviceNames[value] || value; }
 function value(value: number | null | undefined, suffix = "") { return value == null ? "—" : `${value.toFixed(1)}${suffix}`; }
@@ -91,6 +106,7 @@ async function loadWorkflows() {
   } catch (cause) { if (!disposed) error.value = cause instanceof Error ? cause.message : "巡检配置读取失败"; }
 }
 watch(() => route.query.tab, (tab) => {
+  if (props.metricsOnly) return;
   if (tab === "workflows") void router.replace({
     path: "/automation", query: { ...route.query, tab: "inspection" }, hash: route.hash,
   });
@@ -100,19 +116,19 @@ watch(autoRefresh, (enabled) => {
   if (refreshTimer != null) window.clearInterval(refreshTimer);
   refreshTimer = enabled ? window.setInterval(() => { if (!document.hidden) void loadSnapshot(); }, 60_000) : undefined;
 });
-onMounted(() => { if (route.query.tab !== "workflows") void Promise.all([loadSnapshot(), loadWorkflows()]); });
+onMounted(() => { if (props.metricsOnly || route.query.tab !== "workflows") void Promise.all([loadSnapshot(), loadWorkflows()]); });
 onBeforeUnmount(() => { disposed = true; if (refreshTimer != null) window.clearInterval(refreshTimer); });
 </script>
 
 <template>
   <div class="stack-page operations-page">
-    <PageHeader :icon="Activity" title="服务与观测" description="查看服务运行证据、依赖关系与治理状态，连接告警和配置">
+    <PageHeader :icon="Activity" :title="metricsOnly ? '指标与采集' : '服务与观测'" :description="metricsOnly ? '查看真实 JVM 堆、HTTP 错误历史趋势与 Prometheus 采集目标，保留采样时间和风险依据' : '查看服务运行证据、依赖关系与治理状态，连接告警和配置'">
       <template #actions>
         <label class="operations-auto"><input v-model="autoRefresh" type="checkbox" />每分钟刷新</label>
         <button class="button secondary" :disabled="loading" @click="loadSnapshot"><RefreshCw :size="15" :class="{ 'motion-spin': loading }" />{{ loading ? '读取中…' : '刷新状态' }}</button>
       </template>
     </PageHeader>
-    <nav class="operations-tabs" aria-label="服务与观测视图">
+    <nav v-if="!metricsOnly" class="operations-tabs" aria-label="服务与观测视图">
       <button v-for="tab in tabs" :key="tab.key" :class="{ active: activeTab === tab.key }" :aria-current="activeTab === tab.key ? 'page' : undefined" @click="setTab(tab.key)"><component :is="tab.icon" :size="17" />{{ tab.label }}</button>
       <RouterLink to="/automation?tab=inspection"><GitBranch :size="17" />持续巡检<ArrowUpRight :size="13" /></RouterLink>
       <RouterLink to="/itsm/alerts"><TriangleAlert :size="17" />活动告警<ArrowUpRight :size="13" /></RouterLink>
@@ -137,14 +153,14 @@ onBeforeUnmount(() => { disposed = true; if (refreshTimer != null) window.clearI
         <section class="operations-section panel">
           <header class="operations-section-header"><div><h3>服务运行切面</h3><p>采集状态与CMDB归属关联，点击查看完整服务依赖。</p></div><button class="text-button" @click="setTab('topology')">查看依赖 <ArrowRight :size="14" /></button></header>
           <div v-if="snapshot.targets.length" class="operations-target-grid">
-            <button v-for="target in snapshot.targets" :key="target.service" class="operations-target" @click="setTab('topology')"><span class="operations-target-icon" :data-tone="tone(target.health)"><Server :size="18" /></span><span><strong>{{ serviceName(target.service) }}</strong><small>{{ target.ciCode ? '已关联服务目录' : '尚未关联配置项' }}</small></span><i class="operations-dot" :data-tone="tone(target.health)" :title="target.health === 'up' ? '可抓取' : target.health === 'down' ? '抓取异常' : '状态未知'" /><span class="sr-only">{{ target.health }}</span></button>
+            <button v-for="target in snapshot.targets" :key="target.service" class="operations-target" @click="metricsOnly ? goTopology(target.ciCode) : setTab('topology')"><span class="operations-target-icon" :data-tone="tone(target.health)"><Server :size="18" /></span><span><strong>{{ serviceName(target.service) }}</strong><small>{{ target.ciCode ? '已关联服务目录' : '尚未关联配置项' }}</small></span><i class="operations-dot" :data-tone="tone(target.health)" :title="target.health === 'up' ? '可抓取' : target.health === 'down' ? '抓取异常' : '状态未知'" /><span class="sr-only">{{ target.health }}</span></button>
           </div>
           <EmptyState v-else compact :icon="Server" title="尚未取得服务采集结果" description="请检查Prometheus连接和目标配置；这里没有使用演示数据替代。" />
         </section>
         <div class="operations-evidence-grid">
           <section class="operations-trends">
             <header class="operations-section-header"><div><h3>趋势与风险预估</h3><p>15分钟线性外推，保留采样时间和不确定性。</p></div><label class="operations-select-label"><span>观察窗口</span><select v-model.number="windowMinutes" :disabled="loading"><option :value="30">30分钟</option><option :value="60">1小时</option><option :value="180">3小时</option><option :value="360">6小时</option></select></label></header>
-            <div class="operations-chart-controls"><div class="operations-segment"><button :class="{ active: metricKind === 'heap' }" @click="metricKind = 'heap'">JVM堆</button><button :class="{ active: metricKind === 'http5xx' }" @click="metricKind = 'http5xx'">HTTP错误</button></div><select v-model="serviceFilter" aria-label="按服务筛选指标"><option value="">全部服务</option><option v-for="target in snapshot.targets" :key="target.service" :value="target.service">{{ serviceName(target.service) }}</option></select></div>
+            <div class="operations-chart-controls"><div class="operations-segment"><button :class="{ active: metricKind === 'heap' }" @click="metricKind = 'heap'">JVM堆</button><button :class="{ active: metricKind === 'http5xx' }" @click="metricKind = 'http5xx'">HTTP错误</button></div><select v-model="serviceFilter" aria-label="按服务筛选指标" @change="changeServiceFilter"><option value="">全部服务</option><option v-if="serviceFilter === '__unmapped__'" value="__unmapped__">当前服务尚无指标绑定</option><option v-for="target in snapshot.targets" :key="target.service" :value="target.service">{{ serviceName(target.service) }}</option></select></div>
             <div class="operations-chart-grid">
               <article v-for="metric in visibleMetrics" :key="`${metric.id}-${metric.job}`" class="operations-chart-card" :data-tone="tone(metric.status)">
                 <header><div><strong>{{ serviceName(metric.job) }}</strong><small>{{ metric.label }}</small></div><span class="operations-pill" :data-tone="tone(metric.status)">{{ label(metric.status) }}</span></header>

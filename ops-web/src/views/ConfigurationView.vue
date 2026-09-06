@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { Database, FileJson, History, LockKeyhole, RefreshCw, RotateCcw, Settings2, ShieldCheck } from '@lucide/vue';
 import PageHeader from '@/components/PageHeader.vue';
 import FormField from '@/components/FormField.vue';
@@ -14,17 +15,19 @@ import type { ManagedConfigurationId } from '@/api/configuration';
 import '@/styles/pages/configuration.css';
 
 const auth = useAuthStore();
-const manager = useManagedConfiguration(() => auth.isAdmin, () => auth.user?.userId);
+const router = useRouter();
+const manager = useManagedConfiguration(() => auth.isAdmin, () => auth.user?.userId, runId => { void router.push({path: '/automation', query: {tab: 'runs', run: runId}}); });
 const { items, selectedId, detail, draft, history, loading, historyLoading, busy, error, historyError, notice,
   plan, comment, dirty, writable, canPublish } = manager;
 const tab = ref<'content' | 'history'>('content');
 const destination = ref<ManagedConfigurationId>();
 watch([() => auth.user?.userId, () => auth.isAdmin], () => { destination.value = undefined; }, { flush: 'sync' });
-const actionLabel = computed(() => plan.value?.versionId == null ? '发布配置' : '回退配置');
+const actionLabel = computed(() => plan.value?.versionId == null ? '提交发布审批' : '提交回退审批');
 const statuses: Record<string, string> = { APPLIED: '已应用', READY: '已连接', CONNECTED: '已连接', AVAILABLE: '可读取',
-  HEALTHY: '连接正常', OK: '正常', REQUESTED: '已提交，待确认', UNCONFIRMED: '尚未确认', REJECTED: '已拒绝',
+  HEALTHY: '连接正常', OK: '正常', REQUESTED: '已提交，待确认', PUBLISHED: '源已发布，待业务核验', UNCONFIRMED: '尚未确认', REJECTED: '已拒绝', CONFLICT: '版本或目标冲突', FAILED: '明确失败',
   UNAVAILABLE: '暂不可用', UNKNOWN: '尚未确认', DISABLED: '未启用', INITIALIZING: '初始化中', READ_ONLY: '只读',
-  NACOS_CONFIRMATION_PENDING: '等待 Nacos 确认', INVALID_CONFIGURATION: '配置内容异常' };
+  DEFERRED_APPLICATION_PAUSE: '源已更新，目标暂停应用', DEFERRED_DURING_INCIDENT: '演练期间延后应用',
+  INVALID_OR_UNAVAILABLE_CONFIGURATION: '应用配置未确认', NACOS_CONFIRMATION_PENDING: '等待 Nacos 确认', INVALID_CONFIGURATION: '配置内容异常' };
 function status(value?: string) { return value ? statuses[value] || '等待核对' : '尚未读取'; }
 function date(value?: string | null) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'; }
 function price(value: unknown) { return typeof value === 'number' && Number.isFinite(value) ? `¥ ${value.toFixed(2)}` : '—'; }
@@ -69,6 +72,8 @@ onBeforeUnmount(manager.dispose);
               <div><dt>当前版本</dt><dd><code :title="detail.revision">{{ detail.revision?.slice(0, 12) || '—' }}</code></dd></div>
               <div><dt>目标应用版本</dt><dd><code :title="detail.appliedRevision">{{ detail.appliedRevision?.slice(0, 12) || '—' }}</code></dd></div>
               <div><dt>最近核对</dt><dd>{{ date(detail.observedAt) }}</dd></div>
+              <div v-if="detail.application?.instanceId"><dt>实际目标实例</dt><dd><code :title="detail.application.instanceId">{{ detail.application.instanceId.slice(0, 12) }}</code></dd></div>
+              <div v-if="detail.application?.namespaceId"><dt>实际源命名空间</dt><dd>{{ detail.application.namespaceId }}</dd></div>
             </dl>
             <div class="configuration-tabs" role="tablist" aria-label="配置内容与版本">
               <button role="tab" :aria-selected="tab === 'content'" :class="{ active: tab === 'content' }" @click="tab = 'content'"><FileJson :size="16" />配置内容</button>
@@ -77,7 +82,9 @@ onBeforeUnmount(manager.dispose);
             <div v-if="tab === 'content'" class="configuration-card-body" role="tabpanel">
               <p v-if="!detail.editable" class="configuration-context"><LockKeyhole :size="17" />运行配置由隔离演练管理。<RouterLink to="/automation">前往 AI 自动化</RouterLink></p>
               <template v-if="detail.editable">
+                <p class="configuration-context">仅编辑三个业务白名单字段；其余源字段由后端保留。应用核验来自当前固定目标实例，源读取不能代表未接入副本已应用。</p>
                 <p v-if="detail.blockedReason" class="configuration-notice">{{ detail.blockedReason }}</p>
+                <p v-if="detail.application?.applicationPause?.active" class="configuration-notice" role="status">隔离订单实例正在验证“发布与应用分离”：新源配置暂不应用，当前业务继续使用已应用版本。暂停最晚于 {{ date(detail.application.applicationPause.expiresAt) }} 到期，恢复后重新读取真实配置确认。</p>
                 <form class="configuration-editor" @submit.prevent="manager.prepare()">
                   <div class="configuration-editor-grid">
                     <FormField label="订单目录标题" help="实际业务预览返回的标题，最多 60 字。"><input v-model="draft.catalogTitle" maxlength="60" required :readonly="!writable" :disabled="busy" /></FormField>
@@ -108,7 +115,7 @@ onBeforeUnmount(manager.dispose);
         </template>
       </section>
     </div>
-    <BaseModal v-if="plan" :title="actionLabel" description="请核对具体变化，提交后将写入 Nacos 并通知隔离订单服务。" wide @close="!busy && (plan = undefined)">
+    <BaseModal v-if="plan" :title="actionLabel" description="提交会冻结目标、字段差异与基础版本。经现有自动化审批批准后，才会执行 Nacos CAS 发布与业务核验。" wide @close="!busy && (plan = undefined)">
       <div class="configuration-confirm"><p>目标：隔离订单服务 · {{ detail?.dataId }}</p><p v-if="plan.versionId != null">以版本 #{{ plan.versionNumber }} 的内容创建新的发布版本，保留已有历史。</p>
         <table><thead><tr><th>配置项</th><th>当前值</th><th>发布后</th></tr></thead><tbody><tr v-for="change in plan.changes" :key="change.key"><th>{{ change.label }}</th><td>{{ change.before }}</td><td>{{ change.after }}</td></tr></tbody></table>
         <FormField label="变更说明" help="必填，最多 500 字；与操作者及发布结果一同保存。"><textarea v-model="comment" rows="3" maxlength="500" :disabled="busy" placeholder="说明此次调整的原因与预期效果…"></textarea></FormField>

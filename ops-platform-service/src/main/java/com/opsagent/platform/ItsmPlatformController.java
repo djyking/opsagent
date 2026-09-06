@@ -69,6 +69,20 @@ public class ItsmPlatformController {
         return ApiResponse.success(service.topology(ciCode));
     }
 
+    @DeleteMapping("/cmdb/cis/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Void> deleteCi(@PathVariable long id) {
+        service.deleteCi(id);
+        return ApiResponse.success();
+    }
+
+    @PutMapping("/cmdb/relations/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    ApiResponse<Map<String, Object>> updateRelation(
+            @PathVariable long id, @Valid @RequestBody RelationRequest request) {
+        return ApiResponse.success(service.updateRelation(id, request));
+    }
+
     @GetMapping("/cmdb/relations")
     ApiResponse<List<Map<String, Object>>> relations() {
         return ApiResponse.success(service.relations());
@@ -165,7 +179,16 @@ public class ItsmPlatformController {
             @Size(max = 64) String ownerName,
             @Size(max = 255) String endpoint,
             @NotBlank @Size(max = 16) String status,
-            @Size(max = 500) String description) {}
+            @Size(max = 500) String description,
+            @Size(max = 128) String systemName,
+            @Size(max = 20) List<@Size(max = 64) String> tags,
+            @Valid ObservabilityDtos.Bindings bindings) {
+        CiRequest(String ciCode, String ciName, String ciType, String environment, String ownerName,
+                String endpoint, String status, String description) {
+            this(ciCode, ciName, ciType, environment, ownerName, endpoint, status, description,
+                    null, null, null);
+        }
+    }
 
     /**
      * CMDB 依赖关系维护请求。

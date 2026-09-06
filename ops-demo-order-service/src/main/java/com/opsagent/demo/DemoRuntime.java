@@ -153,6 +153,7 @@ public class DemoRuntime implements ApplicationRunner {
     synchronized Map<String, Object> inject(String incident, String scenario, Instant expiresAt)
             throws Exception {
         guard();
+        if (businessSettings.applicationPaused()) throw new IllegalStateException("TARGET_BUSY");
         if (current.faulted()) {
             if (current.incidentId().equals(incident) && current.scenarioCode().equals(scenario))
                 return snapshot();
@@ -264,6 +265,11 @@ public class DemoRuntime implements ApplicationRunner {
 
     @Scheduled(fixedDelay = 1000)
     synchronized void guard() {
+        try {
+            businessSettings.recoverExpiredPause();
+        } catch (Exception ignored) {
+            businessSettings.invalid();
+        }
         if (current.faulted() && current.expiresAtEpoch() <= Instant.now().getEpochSecond()) {
             apply(DemoConfiguration.baseline(current.incidentId(), "TTL_GUARD"));
             baselineNeedsPublish = true;
@@ -296,7 +302,7 @@ public class DemoRuntime implements ApplicationRunner {
     }
 
     synchronized Map<String, Object> managedConfiguration(String id) throws Exception {
-        if (id.equals("order-business")) return businessSettings.view();
+        if (id.equals("order-business")) return businessConfigurationView();
         if (!id.equals("order-runtime"))
             throw new IllegalArgumentException("CONFIGURATION_NOT_MANAGED");
         if (config == null) throw new IllegalStateException("NACOS_NOT_READY");
@@ -326,7 +332,35 @@ public class DemoRuntime implements ApplicationRunner {
         if (current.faulted()) throw new IllegalStateException("TARGET_BUSY");
         if (!"APPLIED".equals(configurationStatus))
             throw new IllegalStateException("NACOS_NOT_READY");
-        return businessSettings.publish(content, expectedRevision, requestId);
+        businessSettings.publish(content, expectedRevision, requestId);
+        return businessConfigurationView();
+    }
+
+    synchronized Map<String, Object> pauseBusinessApplication(
+            String pauseId, String instanceId, String expectedRevision, Instant expiresAt)
+            throws Exception {
+        guard();
+        if (current.faulted()) throw new IllegalStateException("TARGET_BUSY");
+        if (!"APPLIED".equals(configurationStatus))
+            throw new IllegalStateException("NACOS_NOT_READY");
+        if (preview().httpStatus() != 200) throw new IllegalStateException("BUSINESS_NOT_HEALTHY");
+        return businessSettings.pauseApplication(pauseId, instanceId, expectedRevision, expiresAt);
+    }
+
+    synchronized Map<String, Object> resumeBusinessApplication(String pauseId, String instanceId)
+            throws Exception {
+        if (current.faulted()) throw new IllegalStateException("TARGET_BUSY");
+        businessSettings.resumeApplication(pauseId, instanceId);
+        return businessConfigurationView();
+    }
+
+    private Map<String, Object> businessConfigurationView() throws Exception {
+        Map<String, Object> view = new LinkedHashMap<>(businessSettings.view());
+        view.put("namespaceId", namespace == null || namespace.isBlank() ? "public" : namespace);
+        view.put(
+                "sourceInstanceId",
+                "nacos-" + DemoBusinessSettings.digest("SHA-256", address).substring(0, 16));
+        return view;
     }
 
     BusinessResult preview() {

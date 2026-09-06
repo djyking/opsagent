@@ -71,6 +71,28 @@ class AgentStore {
                                 AgentJson.hash(graph));
                     });
         }
+        if (jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM agent_definition WHERE id='configuration-change'",
+                        Long.class)
+                == 0) {
+            ObjectNode graph = WorkflowGraph.configurationChange();
+            tx.executeWithoutResult(
+                    status -> {
+                        jdbc.update(
+                                "INSERT INTO agent_definition(id,name,draft_json,published_version)"
+                                    + " VALUES(?,?,?,1)",
+                                "configuration-change",
+                                "受控配置变更与应用核验",
+                                graph.toString());
+                        jdbc.update(
+                                "INSERT INTO"
+                                    + " agent_version(definition_id,version,snapshot_json,snapshot_hash)"
+                                    + " VALUES(?,1,?,?)",
+                                "configuration-change",
+                                graph.toString(),
+                                AgentJson.hash(graph));
+                    });
+        }
     }
 
     List<Map<String, Object>> definitions() {
@@ -182,14 +204,20 @@ class AgentStore {
                                         .equalsIgnoreCase(
                                                 snapshot.path("model").path("provider").asText()))
                             throw conflict();
+                        if (!previous.snapshot()
+                                .path("configurationProposal")
+                                .path("immutableDigest")
+                                .equals(
+                                        snapshot.path("configurationProposal")
+                                                .path("immutableDigest"))) throw conflict();
                         return previous.id();
                     }
                     long active =
                             jdbc.queryForObject(
                                     """
-                                    SELECT COUNT(*) FROM agent_run
-                                    WHERE status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
-                                    """,
+SELECT COUNT(*) FROM agent_run
+WHERE status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
+""",
                                     Long.class);
                     if (active >= MAX_ACTIVE_RUNS)
                         throw AgentJson.invalid("当前运行数已达演示环境上限，请先完成或取消已有运行");
@@ -315,10 +343,10 @@ class AgentStore {
                     List<String> ids =
                             jdbc.queryForList(
                                     """
-                                    SELECT id FROM agent_run WHERE status IN ('QUEUED','RUNNING')
-                                    AND next_attempt<=NOW(3) AND (lease_until IS NULL OR lease_until<NOW(3))
-                                    ORDER BY next_attempt LIMIT 1 FOR UPDATE SKIP LOCKED
-                                    """,
+SELECT id FROM agent_run WHERE status IN ('QUEUED','RUNNING')
+AND next_attempt<=NOW(3) AND (lease_until IS NULL OR lease_until<NOW(3))
+ORDER BY next_attempt LIMIT 1 FOR UPDATE SKIP LOCKED
+""",
                                     String.class);
                     if (ids.isEmpty()) return null;
                     String id = ids.get(0);
@@ -351,13 +379,13 @@ class AgentStore {
                     int updated =
                             jdbc.update(
                                     """
-                                    UPDATE agent_run SET status=CASE WHEN cancel_requested=TRUE
-                                    AND ? IN ('QUEUED','WAITING_APPROVAL','WAITING_INPUT') THEN 'QUEUED'
-                                    WHEN pause_requested=TRUE AND ?='QUEUED' THEN 'PAUSED' ELSE ? END,
-                                    node_id=?,state_json=?,lease_until=NULL,
-                                    next_attempt=TIMESTAMPADD(SECOND,?,NOW(3)),updated_at=NOW(3)
-                                    WHERE id=? AND fence=? AND lease_until>NOW(3)
-                                    """,
+UPDATE agent_run SET status=CASE WHEN cancel_requested=TRUE
+AND ? IN ('QUEUED','WAITING_APPROVAL','WAITING_INPUT') THEN 'QUEUED'
+WHEN pause_requested=TRUE AND ?='QUEUED' THEN 'PAUSED' ELSE ? END,
+node_id=?,state_json=?,lease_until=NULL,
+next_attempt=TIMESTAMPADD(SECOND,?,NOW(3)),updated_at=NOW(3)
+WHERE id=? AND fence=? AND lease_until>NOW(3)
+""",
                                     status,
                                     status,
                                     status,
@@ -530,9 +558,9 @@ class AgentStore {
                     String id = UUID.randomUUID().toString();
                     jdbc.update(
                             """
-                            INSERT INTO agent_approval(id,run_id,call_id,args_hash,payload_json,status,expires_at)
-                            VALUES(?,?,?,?,?,'PENDING',?)
-                            """,
+INSERT INTO agent_approval(id,run_id,call_id,args_hash,payload_json,status,expires_at)
+VALUES(?,?,?,?,?,'PENDING',?)
+""",
                             id,
                             run.id(),
                             pending.path("id").asText(),
@@ -568,9 +596,9 @@ class AgentStore {
                     int updated =
                             jdbc.update(
                                     """
-                                    UPDATE agent_approval SET status=?,revision=revision+1,decided_by=?,reason=?
-                                    WHERE id=? AND status='PENDING' AND revision=? AND args_hash=? AND expires_at>NOW(3)
-                                    """,
+UPDATE agent_approval SET status=?,revision=revision+1,decided_by=?,reason=?
+WHERE id=? AND status='PENDING' AND revision=? AND args_hash=? AND expires_at>NOW(3)
+""",
                                     approved ? "APPROVED" : "REJECTED",
                                     actor,
                                     reason,
@@ -580,9 +608,9 @@ class AgentStore {
                     if (updated != 1) throw conflict();
                     jdbc.update(
                             """
-                            UPDATE agent_run SET status='QUEUED',next_attempt=NOW(3),updated_at=NOW(3)
-                            WHERE id=? AND status IN ('WAITING_APPROVAL','WAITING_INPUT')
-                            """,
+UPDATE agent_run SET status='QUEUED',next_attempt=NOW(3),updated_at=NOW(3)
+WHERE id=? AND status IN ('WAITING_APPROVAL','WAITING_INPUT')
+""",
                             run);
                     event(
                             run,
@@ -609,10 +637,10 @@ class AgentStore {
                 status -> {
                     jdbc.update(
                             """
-                            UPDATE agent_run SET cancel_requested=TRUE,
-                            status=CASE WHEN lease_until>NOW(3) THEN status ELSE 'QUEUED' END,next_attempt=NOW(3)
-                            WHERE id=? AND status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
-                            """,
+UPDATE agent_run SET cancel_requested=TRUE,
+status=CASE WHEN lease_until>NOW(3) THEN status ELSE 'QUEUED' END,next_attempt=NOW(3)
+WHERE id=? AND status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
+""",
                             id);
                     event(id, "CANCEL_REQUESTED", "", Map.of("actorId", actor));
                     wake(id);
@@ -622,10 +650,10 @@ class AgentStore {
     void expireWaiting() {
         jdbc.update(
                 """
-                UPDATE agent_run r SET status='QUEUED',next_attempt=NOW(3)
-                WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
-                (SELECT 1 FROM agent_approval a WHERE a.run_id=r.id AND a.status='PENDING' AND a.expires_at<NOW(3))
-                """);
+UPDATE agent_run r SET status='QUEUED',next_attempt=NOW(3)
+WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
+(SELECT 1 FROM agent_approval a WHERE a.run_id=r.id AND a.status='PENDING' AND a.expires_at<NOW(3))
+""");
     }
 
     void requestPause(String id, long actor) {

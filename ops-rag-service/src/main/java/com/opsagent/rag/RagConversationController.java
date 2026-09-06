@@ -67,7 +67,13 @@ public class RagConversationController {
             @Min(1) @Max(20) Integer topK,
             @Min(1) Long documentId,
             @Min(1) Long ticketId,
-            @Size(max = 20) String provider) {}
+            @Size(max = 20) String provider,
+            @Valid ObservabilityContext observabilityContext) {
+        QuestionRequest(
+                String question, Integer topK, Long documentId, Long ticketId, String provider) {
+            this(question, topK, documentId, ticketId, provider, null);
+        }
+    }
 
     @GetMapping
     ApiResponse<RagConversationService.ConversationPage> list(
@@ -109,24 +115,58 @@ public class RagConversationController {
         long userId = SecurityUsers.current().userId();
         conversations.owned(id, userId);
         limiter.check();
-        long turnId = conversations.begin(id, userId, request.question().trim());
+        var scope = limiter.requestScope();
+        long startedTurn = -1;
         try {
+            long turnId = conversations.begin(id, userId, request.question().trim());
+            startedTurn = turnId;
             String context = conversations.context(id, userId);
             var plan =
-                    rag.prepareStream(
-                            request.question().trim(),
-                            request.topK(),
-                            request.documentId(),
-                            request.ticketId(),
-                            context,
-                            request.provider());
+                    request.observabilityContext() == null
+                            ? rag.prepareStream(
+                                    request.question().trim(),
+                                    request.topK(),
+                                    request.documentId(),
+                                    request.ticketId(),
+                                    context,
+                                    request.provider())
+                            : rag.prepareStream(
+                                    request.question().trim(),
+                                    request.topK(),
+                                    request.documentId(),
+                                    request.ticketId(),
+                                    context,
+                                    request.provider(),
+                                    request.observabilityContext());
             return streaming.open(
                     plan,
                     rag.auditContext(),
-                    answer -> conversations.complete(id, userId, turnId, answer),
-                    message -> conversations.fail(id, userId, turnId, message));
+                    answer -> {
+                        try {
+                            conversations.complete(id, userId, turnId, answer);
+                        } catch (RuntimeException exception) {
+                            scope.failure(exception);
+                            throw exception;
+                        } finally {
+                            scope.close();
+                        }
+                    },
+                    message -> {
+                        try {
+                            conversations.fail(id, userId, turnId, message);
+                        } finally {
+                            scope.failure(new IllegalStateException("RAG conversation incomplete"));
+                        }
+                    });
         } catch (RuntimeException exception) {
-            conversations.fail(id, userId, turnId, "知识检索或生成准备失败，请重试");
+            try {
+                if (startedTurn >= 0)
+                    conversations.fail(id, userId, startedTurn, "知识检索或生成准备失败，请重试");
+            } catch (RuntimeException persistenceFailure) {
+                exception.addSuppressed(persistenceFailure);
+            } finally {
+                scope.failure(exception);
+            }
             throw exception;
         }
     }

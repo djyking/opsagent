@@ -18,6 +18,8 @@ HELP.md
 !docs/configuration-and-runtime-release-report.md
 !docs/event-workspace-implementation-plan.md
 !docs/event-workspace-release-report.md
+!docs/observability-workspace-implementation.md
+!docs/v3/*.md
 !docs/isolated-operations-runbook.md
 !ops-demo-order-service/README.md
 !rag-inference/reranker/README.md

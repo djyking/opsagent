@@ -47,7 +47,7 @@ class ManagedConfigurationRepository {
         var rows =
                 jdbc.queryForList(
                         "SELECT id,request_hash,actor_id FROM operations_managed_config_change"
-                            + " WHERE request_id=?",
+                                + " WHERE request_id=?",
                         requestId);
         if (rows.isEmpty()) return null;
         Map<String, Object> row = rows.get(0);
@@ -69,12 +69,12 @@ class ManagedConfigurationRepository {
                 status -> {
                     jdbc.update(
                             "INSERT IGNORE INTO operations_demo_target_lease(target_code)"
-                                + " VALUES(?)",
+                                    + " VALUES(?)",
                             DemoTargetDtos.TARGET);
                     Map<String, Object> lease =
                             jdbc.queryForMap(
                                     "SELECT * FROM operations_demo_target_lease WHERE target_code=?"
-                                        + " FOR UPDATE",
+                                            + " FOR UPDATE",
                                     DemoTargetDtos.TARGET);
                     var existing = existing(request.requestId(), hash, actor.userId());
                     if (existing != null) return existing;
@@ -86,7 +86,7 @@ class ManagedConfigurationRepository {
                     Long busy =
                             jdbc.queryForObject(
                                     "SELECT COUNT(*) FROM operations_managed_config_guard WHERE"
-                                        + " target_code=? AND expires_at>?",
+                                            + " target_code=? AND expires_at>?",
                                     Long.class,
                                     DemoTargetDtos.TARGET,
                                     Timestamp.from(Instant.now()));
@@ -104,7 +104,7 @@ class ManagedConfigurationRepository {
                     Long historyCount =
                             jdbc.queryForObject(
                                     "SELECT COUNT(*) FROM operations_managed_config_change WHERE"
-                                        + " configuration_id='order-business'",
+                                            + " configuration_id='order-business'",
                                     Long.class);
                     if (historyCount != null && historyCount == 0) {
                         jdbc.update(
@@ -170,8 +170,8 @@ class ManagedConfigurationRepository {
                     int changed =
                             jdbc.update(
                                     "UPDATE operations_managed_config_change SET"
-                                        + " status=?,result_revision=?,message=?,finished_at=?"
-                                        + " WHERE id=? AND status='REQUESTED'",
+                                            + " status=?,result_revision=?,message=?,finished_at=?"
+                                            + " WHERE id=? AND status='REQUESTED'",
                                     status,
                                     revision,
                                     message,
@@ -194,14 +194,14 @@ class ManagedConfigurationRepository {
                     if (status.equals("UNCONFIRMED")) {
                         jdbc.update(
                                 "UPDATE operations_managed_config_guard SET expires_at=? WHERE"
-                                    + " target_code=? AND request_id=?",
+                                        + " target_code=? AND request_id=?",
                                 Timestamp.from(Instant.now().plusSeconds(30)),
                                 DemoTargetDtos.TARGET,
                                 requestId);
                     } else {
                         jdbc.update(
                                 "DELETE FROM operations_managed_config_guard WHERE target_code=?"
-                                    + " AND request_id=?",
+                                        + " AND request_id=?",
                                 DemoTargetDtos.TARGET,
                                 requestId);
                     }
@@ -216,7 +216,7 @@ class ManagedConfigurationRepository {
                             jdbc.queryForList(
                                     "SELECT id,content_json,actor_id FROM"
                                         + " operations_managed_config_change WHERE request_id=? AND"
-                                        + " status IN ('REQUESTED','UNCONFIRMED')",
+                                        + " status IN ('REQUESTED','UNCONFIRMED','PUBLISHED')",
                                     publicationId);
                     if (rows.isEmpty()) return;
                     Map<String, Object> row = rows.get(0);
@@ -226,7 +226,8 @@ class ManagedConfigurationRepository {
                             jdbc.update(
                                     "UPDATE operations_managed_config_change SET"
                                         + " status='APPLIED',result_revision=?,message=?,finished_at=?"
-                                        + " WHERE id=? AND status IN ('REQUESTED','UNCONFIRMED')",
+                                        + " WHERE id=? AND status IN"
+                                        + " ('REQUESTED','UNCONFIRMED','PUBLISHED')",
                                     revision,
                                     "后续核验Nacos与目标应用版本一致，已确认生效",
                                     Timestamp.from(Instant.now()),
@@ -240,7 +241,7 @@ class ManagedConfigurationRepository {
                                 jsonString(Map.of("versionId", id, "revision", revision)));
                     jdbc.update(
                             "DELETE FROM operations_managed_config_guard WHERE target_code=? AND"
-                                + " request_id=?",
+                                    + " request_id=?",
                             DemoTargetDtos.TARGET,
                             publicationId);
                 });
@@ -250,7 +251,7 @@ class ManagedConfigurationRepository {
         var items =
                 jdbc.query(
                         "SELECT * FROM operations_managed_config_change WHERE configuration_id=?"
-                            + " ORDER BY id DESC LIMIT ? OFFSET ?",
+                                + " ORDER BY id DESC LIMIT ? OFFSET ?",
                         this::map,
                         id,
                         size,
@@ -258,7 +259,7 @@ class ManagedConfigurationRepository {
         long total =
                 jdbc.queryForObject(
                         "SELECT COUNT(*) FROM operations_managed_config_change WHERE"
-                            + " configuration_id=?",
+                                + " configuration_id=?",
                         Long.class,
                         id);
         return new ManagedConfigurationDtos.HistoryPage(items, total, page, size);
@@ -268,12 +269,24 @@ class ManagedConfigurationRepository {
         return jdbc
                 .query(
                         "SELECT * FROM operations_managed_config_change WHERE id=? AND"
-                            + " configuration_id='order-business'",
+                                + " configuration_id='order-business'",
                         this::map,
                         id)
                 .stream()
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "配置历史版本不存在"));
+    }
+
+    ManagedConfigurationDtos.History byRequestId(String requestId) {
+        return jdbc
+                .query(
+                        "SELECT * FROM operations_managed_config_change WHERE request_id=? AND"
+                                + " configuration_id='order-business'",
+                        this::map,
+                        requestId)
+                .stream()
+                .findFirst()
+                .orElse(null);
     }
 
     private ManagedConfigurationDtos.History map(ResultSet row, int index) throws SQLException {

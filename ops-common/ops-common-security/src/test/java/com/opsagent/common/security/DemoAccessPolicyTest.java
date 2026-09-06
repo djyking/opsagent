@@ -79,4 +79,40 @@ class DemoAccessPolicyTest {
         assertThat(DemoAccessPolicy.allows("DELETE", "/api/rag/conversations/abc/anything"))
                 .isFalse();
     }
+
+    @Test
+    void permitsObservabilityReadsAndReadOnlyChecksWithoutGovernanceWrites() {
+        for (String path : new String[] {
+                "/api/platform/observability/topology",
+                "/api/platform/observability/wallboard",
+                "/api/platform/observability/services/ops-rag-service",
+                "/api/platform/observability/inspections",
+                "/api/platform/observability/inspections/ops-rag-service/history",
+                "/api/platform/config-center",
+                "/api/platform/config-center/summary",
+                "/api/platform/config-center/nacos_YQ/history",
+                "/api/platform/config-center/nacos_YQ/diff",
+                "/api/platform/traffic",
+                "/api/platform/traffic/summary",
+                "/api/platform/traffic/rules/FLOW",
+                "/api/platform/traffic/history",
+                "/api/rag/runtime/traffic"
+        }) assertThat(DemoAccessPolicy.allows("GET", path)).as(path).isTrue();
+        assertThat(DemoAccessPolicy.allows("POST",
+                "/api/platform/observability/inspections/ops-rag-service/run")).isTrue();
+        for (String path : new String[] {
+                "/api/platform/traffic/rules/FLOW/validate",
+                "/api/platform/traffic/rules/FLOW/publish",
+                "/api/platform/traffic/rules/FLOW/rollback",
+                "/api/platform/config-center/new",
+                "/api/platform/observability/topology/layout",
+                "/api/platform/observability/services/ops-rag-service/restart"
+        }) {
+            assertThat(DemoAccessPolicy.allows("POST", path)).as(path).isFalse();
+            assertThat(DemoAccessPolicy.allows("PUT", path)).as(path).isFalse();
+            assertThat(DemoAccessPolicy.allows("DELETE", path)).as(path).isFalse();
+        }
+        assertThat(DemoAccessPolicy.allows("GET",
+                "/api/platform/config-center/secret/raw")).isFalse();
+    }
 }

@@ -181,8 +181,11 @@ final class WorkflowGraph {
                                 literals.put(
                                         entry.getKey(),
                                         entry.getKey().equals("expectedRevision")
+                                                        || entry.getKey().equals("immutableDigest")
                                                 ? "a".repeat(64)
-                                                : "reference");
+                                                : entry.getKey().equals("proposalId")
+                                                        ? "00000000-0000-0000-0000-000000000000"
+                                                        : "reference");
                             }
                         });
         AgentTools.validate(name, literals);
@@ -209,15 +212,29 @@ final class WorkflowGraph {
         return (ObjectNode)
                 AgentJson.read(
                         """
-                               {"nodes":[
-                                 {"id":"start","type":"START","label":"监控事件"},
-                                 {"id":"diagnose","type":"AGENT","label":"AI 诊断与处置","config":{
-                                   "prompt":"先读工单和目标证据，诊断真实原因。需要修复时选择匹配的固定修复工具。修复后再探测；仅证据允许时解决工单。最后用中文总结原因、动作和验证结果。"}},
-                         {"id":"verify","type":"TOOL","label":"验证恢复与工单收口","config":{
-                           "tool":"ticket_resolve","arguments":{"comment":"系统根据新鲜业务探针和告警恢复事件验证工单收口"}}},
-                         {"id":"end","type":"END","label":"记录结果"}],
-                        "edges":[{"from":"start","to":"diagnose"},{"from":"diagnose","to":"verify"},
-                          {"from":"verify","to":"end"}]}
+       {"nodes":[
+         {"id":"start","type":"START","label":"监控事件"},
+         {"id":"diagnose","type":"AGENT","label":"AI 诊断与处置","config":{
+           "prompt":"先读工单和目标证据，诊断真实原因。需要修复时选择匹配的固定修复工具。修复后再探测；仅证据允许时解决工单。最后用中文总结原因、动作和验证结果。"}},
+ {"id":"verify","type":"TOOL","label":"验证恢复与工单收口","config":{
+   "tool":"ticket_resolve","arguments":{"comment":"系统根据新鲜业务探针和告警恢复事件验证工单收口"}}},
+ {"id":"end","type":"END","label":"记录结果"}],
+"edges":[{"from":"start","to":"diagnose"},{"from":"diagnose","to":"verify"},
+  {"from":"verify","to":"end"}]}
+""");
+    }
+
+    static ObjectNode configurationChange() {
+        return (ObjectNode)
+                AgentJson.read(
+                        """
+                        {"nodes":[{"id":"start","type":"START","label":"已校验配置提案"},
+                        {"id":"apply","type":"TOOL","label":"审批并执行精确配置变更","config":{
+                        "tool":"config_change_apply","arguments":{
+                        "proposalId":{"$ref":"/outputs/proposal/proposalId"},
+                        "immutableDigest":{"$ref":"/outputs/proposal/immutableDigest"}}}},
+                        {"id":"end","type":"END","label":"保留源发布及实例应用结果"}],
+                        "edges":[{"from":"start","to":"apply"},{"from":"apply","to":"end"}]}
                         """);
     }
 }

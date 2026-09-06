@@ -8,6 +8,7 @@ import PriorityIndicator from "@/components/PriorityIndicator.vue";
 import LoadingState from "@/components/LoadingState.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import WorkspaceLauncher from "@/components/dashboard/WorkspaceLauncher.vue";
+import DashboardTopology from "@/components/dashboard/DashboardTopology.vue";
 import OperationsDecision from "@/components/dashboard/OperationsDecision.vue";
 import { itsmApi } from "@/api/modules";
 import { slaApi, type SlaSummary } from "@/api/sla";
@@ -48,7 +49,7 @@ const queueTabs = computed(() => [
   { key: "confirm" as const, label: "待确认", count: confirmTickets.value.length },
 ]);
 const queueTickets = computed(() => activeQueue.value === "priority" ? priorityTickets.value : activeQueue.value === "confirm" ? confirmTickets.value : activeTickets.value);
-const visibleTickets = computed(() => queueTickets.value.slice(0, 7));
+const visibleTickets = computed(() => queueTickets.value.slice(0, 5));
 const recentTickets = computed(() => [...tickets.value].sort((left, right) => timeValue(right.updateTime) - timeValue(left.updateTime) || right.id - left.id).slice(0, 4));
 const processing = computed(() => tickets.value.filter(ticket => ticket.status === "PROCESSING").length);
 const slaRisk = computed(() => slaSummary.value?.counts.risk ?? 0);
@@ -134,11 +135,11 @@ onBeforeUnmount(() => { loadVersion++; });
     <PageHeader title="运行总览" :description="syncDescription"><template #actions><button class="button secondary" :disabled="loading" @click="load"><RefreshCw :size="15" :class="{ 'motion-spin': loading }" />{{ loading ? "刷新中…" : "刷新状态" }}</button></template></PageHeader>
     <WorkspaceLauncher />
     <p v-if="error" class="inline-error dashboard-sync-error" role="status">{{ error }}</p>
-    <OperationsDecision :event-count="activeTickets.length" :events-known="loaded.tickets" :events-loading="loading" :events-stale="failedSources.includes('tickets')" />
+    <DashboardTopology :priority-count="loaded.tickets ? priorityTickets.length : undefined" :verification-count="loaded.tickets ? confirmTickets.length : undefined" :events-stale="failedSources.includes('tickets')" />
 
     <section class="oa-dashboard-grid">
       <article id="dashboard-active-work" ref="workPanel" class="panel oa-active-work">
-        <header class="panel-header"><div><h3>活跃事件</h3><p>按优先级与更新时间排列</p></div><RouterLink class="text-button" to="/tickets">进入事件处置 <ArrowUpRight :size="15" /></RouterLink></header>
+        <header class="panel-header"><div><h3>优先行动</h3><p>高优先级优先 · 最多展示 5 项，完整队列见事件处置</p></div><RouterLink class="text-button" to="/tickets">进入事件处置 <ArrowUpRight :size="15" /></RouterLink></header>
         <div class="dashboard-queue-tabs" role="tablist" aria-label="活跃事件范围" @keydown="onQueueKeydown"><button v-for="tab in queueTabs" :id="`dashboard-queue-${tab.key}`" :key="tab.key" type="button" role="tab" :data-queue="tab.key" :aria-selected="activeQueue === tab.key" aria-controls="dashboard-queue-content" :tabindex="activeQueue === tab.key ? 0 : -1" @click="activeQueue = tab.key">{{ tab.label }}<span>{{ loaded.tickets ? tab.count : '—' }}</span></button></div>
         <div id="dashboard-queue-content" role="tabpanel" :aria-labelledby="`dashboard-queue-${activeQueue}`" :aria-busy="loading">
           <LoadingState v-if="loading && !loaded.tickets" text="正在读取当前可见事件…" />
@@ -170,7 +171,8 @@ onBeforeUnmount(() => { loadVersion++; });
     </section>
 
     <details class="dashboard-support">
-    <summary>协作与服务观测摘要<span>SLA、值班、服务采集与历史分布</span></summary>
+    <summary>处置闭环与协作摘要<span>SLA、值班、服务采集与历史分布</span></summary>
+    <OperationsDecision :event-count="activeTickets.length" :events-known="loaded.tickets" :events-loading="loading" :events-stale="failedSources.includes('tickets')" />
     <MetricStrip class="oa-dashboard-metrics" :items="overviewMetrics" label="协作与观测指标" />
     <section class="oa-dashboard-lower">
       <article class="panel oa-health-card"><header class="panel-header"><div><h3>服务健康</h3><p>最近一次 Prometheus 抓取</p></div><RouterLink class="text-button" to="/system/monitor">监控 <ArrowUpRight :size="14" /></RouterLink></header>

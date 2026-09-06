@@ -16,6 +16,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Set;
 
 /**
  * 管理 CMDB Lite 和值班排班，并记录管理员的配置变更审计。
@@ -39,15 +41,25 @@ public class ItsmPlatformService {
     }
 
     List<Map<String, Object>> cis(String keyword, String type) {
-        return repository.cis(keyword, type);
+        return repository.cis(keyword, type).stream().map(this::safeCi).toList();
     }
 
     Map<String, Object> ci(String ciCode) {
-        return required(repository.ci(ciCode), "配置项不存在");
+        return safeCi(required(repository.ci(ciCode), "配置项不存在"));
     }
 
     Map<String, Object> topology(String ciCode) {
-        return required(repository.topology(ciCode), "配置项不存在");
+        Map<String, Object> root = ci(ciCode);
+        List<Map<String, Object>> edges = relations().stream().filter(edge ->
+                ciCode.equals(edge.get("sourceCiCode")) || ciCode.equals(edge.get("targetCiCode"))).toList();
+        Set<String> codes = new java.util.HashSet<>();
+        codes.add(ciCode);
+        edges.forEach(edge -> {
+            codes.add(String.valueOf(edge.get("sourceCiCode")));
+            codes.add(String.valueOf(edge.get("targetCiCode")));
+        });
+        return Map.of("root", root, "nodes", cis(null, null).stream()
+                .filter(row -> codes.contains(row.get("ciCode"))).toList(), "edges", edges);
     }
 
     List<Map<String, Object>> relations() {
@@ -87,6 +99,7 @@ public class ItsmPlatformService {
 
     @Transactional
     Map<String, Object> addCi(ItsmPlatformController.CiRequest request) {
+        validateCi(request);
         long id;
         try {
             id = repository.addCi(
@@ -101,12 +114,18 @@ public class ItsmPlatformService {
         } catch (DuplicateKeyException exception) {
             throw conflict("CI 编码已存在");
         }
+        saveMetadata(request);
         audit("CMDB", Long.toString(id), "CMDB_CREATE", request);
-        return repository.ci(id);
+        return safeCi(repository.ci(id));
     }
 
     @Transactional
     Map<String, Object> updateCi(long id, ItsmPlatformController.CiRequest request) {
+        validateCi(request);
+        Map<String, Object> current = required(repository.ci(id), "配置项不存在");
+        if (!current.get("ciCode").equals(normalized(request.ciCode()))) {
+            throw new BusinessException(ErrorCode.VALIDATION, "CI 编码是事件关联标识，创建后不能重命名");
+        }
         try {
             if (repository.updateCi(
                             id,
@@ -124,12 +143,14 @@ public class ItsmPlatformService {
         } catch (DuplicateKeyException exception) {
             throw conflict("CI 编码已存在");
         }
+        saveMetadata(request);
         audit("CMDB", Long.toString(id), "CMDB_UPDATE", request);
-        return repository.ci(id);
+        return safeCi(repository.ci(id));
     }
 
     @Transactional
     Map<String, Object> addRelation(ItsmPlatformController.RelationRequest request) {
+        validateRelation(request);
         String source = normalized(request.sourceCiCode());
         String target = normalized(request.targetCiCode());
         if (source.equals(target)) {
@@ -157,6 +178,82 @@ public class ItsmPlatformService {
             throw notFound("依赖关系不存在");
         }
         audit("CMDB_RELATION", Long.toString(id), "CMDB_RELATION_CHANGE", Map.of("deleted", true));
+    }
+
+    @Transactional
+    void deleteCi(long id) {
+        Map<String, Object> row = required(repository.ci(id), "配置项不存在");
+        repository.archiveCi(String.valueOf(row.get("ciCode")));
+        audit("CMDB", Long.toString(id), "CMDB_DELETE", Map.of("ciCode", row.get("ciCode")));
+    }
+
+    @Transactional
+    Map<String, Object> updateRelation(long id, ItsmPlatformController.RelationRequest request) {
+        validateRelation(request);
+        required(repository.ci(request.sourceCiCode()), "源配置项不存在");
+        required(repository.ci(request.targetCiCode()), "目标配置项不存在");
+        try {
+            if (repository.updateRelation(id, request) == 0) throw notFound("依赖关系不存在");
+        } catch (DuplicateKeyException exception) {
+            throw conflict("该依赖关系已存在");
+        }
+        audit("CMDB_RELATION", Long.toString(id), "CMDB_RELATION_CHANGE", request);
+        return Map.of("id", id);
+    }
+
+    private void validateRelation(ItsmPlatformController.RelationRequest request) {
+        if (request.sourceCiCode().equals(request.targetCiCode())) {
+            throw new BusinessException(ErrorCode.VALIDATION, "配置项不能依赖自身");
+        }
+        if (!Set.of("CALLS", "ROUTES_TO", "DEPENDS_ON", "READS_FROM", "WRITES_TO", "PUBLISHES_TO",
+                "CONSUMES_FROM", "AUTHENTICATES_WITH", "MONITORED_BY", "REGISTERS_TO")
+                .contains(upper(request.relationType()))) {
+            throw new BusinessException(ErrorCode.VALIDATION, "不支持的关系类型");
+        }
+    }
+
+    private void validateCi(ItsmPlatformController.CiRequest request) {
+        if (!request.ciCode().matches("[A-Za-z0-9_.:-]{1,64}")) {
+            throw new BusinessException(ErrorCode.VALIDATION, "CI 编码只支持字母、数字、点、横线、冒号和下划线");
+        }
+        String endpoint = request.endpoint();
+        if (endpoint != null && (endpoint.contains("@") || endpoint.contains("?") || endpoint.contains("#"))) {
+            throw new BusinessException(ErrorCode.VALIDATION, "访问地址不能包含凭据、查询参数或片段");
+        }
+    }
+
+    private void saveMetadata(ItsmPlatformController.CiRequest request) {
+        if (request.bindings() == null && request.systemName() == null && request.tags() == null) return;
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("bindings", request.bindings());
+        metadata.put("systemName", request.systemName());
+        metadata.put("tags", request.tags() == null ? List.of() : request.tags());
+        try {
+            repository.saveMetadata(request.ciCode(), json.writeValueAsString(metadata));
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("观测绑定序列化失败", exception);
+        }
+    }
+
+    private Map<String, Object> safeCi(Map<String, Object> row) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (String field : List.of("id", "ciCode", "ciName", "ciType", "environment", "ownerName",
+                "endpoint", "status", "description", "updateTime")) {
+            result.put(field, row.get(field));
+        }
+        Object metadata = row.get("metadataJson");
+        if (metadata != null) {
+            try {
+                var value = json.readTree(String.valueOf(metadata));
+                result.put("bindings", value.path("bindings"));
+                result.put("systemName", value.path("systemName").asText(""));
+                result.put("tags", value.path("tags"));
+            } catch (JsonProcessingException ignored) {
+                result.put("bindings", Map.of());
+            }
+        }
+        result.put("endpoint", ObservabilitySanitizer.endpoint(result.get("endpoint")));
+        return result;
     }
 
     @Transactional

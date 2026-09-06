@@ -1,0 +1,88 @@
+# Apply after compose.yaml. No receiver or middleware host ports are published.
+x-trace-env: &trace-env
+  JDK_JAVA_OPTIONS: -javaagent:/opt/otel/opentelemetry-javaagent.jar
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+  OTEL_METRICS_EXPORTER: none
+  OTEL_LOGS_EXPORTER: none
+  OTEL_TRACES_SAMPLER: parentbased_traceidratio
+  OTEL_TRACES_SAMPLER_ARG: "0.1"
+  OTEL_BSP_MAX_QUEUE_SIZE: "1024"
+  OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "256"
+  OTEL_BSP_EXPORT_TIMEOUT: "5000"
+  OTEL_INSTRUMENTATION_HTTP_SERVER_EXCLUDE_URLS: /actuator/.*
+  OTEL_INSTRUMENTATION_JDBC_STATEMENT_SANITIZER_ENABLED: "true"
+  OTEL_INSTRUMENTATION_COMMON_DB_STATEMENT_SANITIZER_ENABLED: "true"
+
+x-trace-volumes: &trace-volumes
+  - ./otel/opentelemetry-javaagent-2.31.1.jar:/opt/otel/opentelemetry-javaagent.jar:ro
+  - ./config/otel/java-entrypoint.sh:/opt/otel/java-entrypoint.sh:ro
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    restart: unless-stopped
+    networks: [backplane]
+    mem_limit: 384m
+    cpus: 1.0
+    environment: {GOMEMLIMIT: 180MiB, GOMAXPROCS: "2"}
+    command: [--config=/etc/otelcol/config.yaml]
+    volumes: [./config/otel/collector.yaml:/etc/otelcol/config.yaml:ro]
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "3"}}
+    depends_on: [tempo]
+
+  tempo:
+    image: grafana/tempo:2.10.8@sha256:f0561deb1c68ec44d6e6e7e4487f30106c4e5e768642077695b37958b105812a
+    restart: unless-stopped
+    networks: [backplane]
+    mem_limit: 512m
+    cpus: 1.0
+    environment: {GOMEMLIMIT: 384MiB, GOMAXPROCS: "2"}
+    command: [-config.file=/etc/tempo/config.yaml]
+    volumes:
+      - ./config/otel/tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    logging: {driver: json-file, options: {max-size: 10m, max-file: "3"}}
+
+  ops-gateway-app:
+    entrypoint: [/bin/sh, /opt/otel/java-entrypoint.sh]
+    volumes: *trace-volumes
+    environment:
+      <<: *trace-env
+      OTEL_SERVICE_NAME: opsagent:PROD:ops-gateway
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=opsagent,deployment.environment.name=PROD,opsagent.environment=PROD,opsagent.ci.code=ops-gateway
+  ops-platform-app:
+    entrypoint: [/bin/sh, /opt/otel/java-entrypoint.sh]
+    volumes: *trace-volumes
+    environment:
+      <<: *trace-env
+      OTEL_SERVICE_NAME: opsagent:PROD:ops-platform-service
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=opsagent,deployment.environment.name=PROD,opsagent.environment=PROD,opsagent.ci.code=ops-platform-service
+      OPS_TRACE_ENABLED: "true"
+      OPS_TEMPO_URL: http://tempo:3200
+      OPS_OBSERVABILITY_HISTORY_ENABLED: "true"
+  ops-agent-app:
+    entrypoint: [/bin/sh, /opt/otel/java-entrypoint.sh]
+    volumes: *trace-volumes
+    environment:
+      <<: *trace-env
+      OTEL_SERVICE_NAME: opsagent:PROD:ops-agent-service
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=opsagent,deployment.environment.name=PROD,opsagent.environment=PROD,opsagent.ci.code=ops-agent-service
+  ops-rag-app:
+    entrypoint: [/bin/sh, /opt/otel/java-entrypoint.sh]
+    volumes: *trace-volumes
+    environment:
+      <<: *trace-env
+      OTEL_SERVICE_NAME: opsagent:PROD:ops-rag-service
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=opsagent,deployment.environment.name=PROD,opsagent.environment=PROD,opsagent.ci.code=ops-rag-service
+  ops-demo-order-app:
+    entrypoint: [/bin/sh, /opt/otel/java-entrypoint.sh]
+    volumes: *trace-volumes
+    environment:
+      <<: *trace-env
+      OTEL_SERVICE_NAME: opsagent:DEMO:ops-demo-order-service
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=opsagent,deployment.environment.name=DEMO,opsagent.environment=DEMO,opsagent.ci.code=ops-demo-order-service
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+
+volumes:
+  tempo-data:

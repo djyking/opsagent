@@ -1,0 +1,6 @@
+opentelemetry-javaagent=2.31.1
+opentelemetry-javaagent.sha256=bbf83c151b6400709e2f225bdd07a04f839d9d13b8b93464241333fd25d3e3ba
+opentelemetry-collector-contrib=0.160.0
+opentelemetry-collector-contrib.digest=sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+tempo=2.10.8
+tempo.digest=sha256:f0561deb1c68ec44d6e6e7e4487f30106c4e5e768642077695b37958b105812a

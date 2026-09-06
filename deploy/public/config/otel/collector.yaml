@@ -1,0 +1,77 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 180
+    spike_limit_mib: 32
+  transform/privacy:
+    error_mode: propagate
+    trace_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.namespace", "service.instance.id", "deployment.environment.name", "opsagent.ci.code", "opsagent.environment", "opsagent.runtime.kind", "host.name", "process.pid", "process.runtime.name", "process.runtime.version"])
+      - context: span
+        statements:
+          - keep_keys(attributes, ["http.request.method", "http.method", "http.route", "http.response.status_code", "http.status_code", "db.system", "db.system.name", "db.operation", "db.operation.name", "server.address", "server.port", "net.peer.name", "net.peer.port", "messaging.system", "messaging.operation", "messaging.operation.type", "messaging.operation.name"])
+          - set(name, "operation")
+          - set(name, attributes["http.route"]) where attributes["http.route"] != nil
+          - set(attributes["peer.service"], "opsagent:DEMO:ops-demo-redis") where attributes["server.address"] == "demo-redis" or attributes["net.peer.name"] == "demo-redis"
+          - set(attributes["peer.service"], "opsagent:DEMO:ops-demo-rabbitmq") where attributes["server.address"] == "demo-rabbitmq" or attributes["net.peer.name"] == "demo-rabbitmq"
+          - set(attributes["peer.service"], "opsagent:PROD:redis") where attributes["server.address"] == "redis" or attributes["net.peer.name"] == "redis"
+          - set(attributes["peer.service"], "opsagent:PROD:mysql") where attributes["server.address"] == "mysql" or attributes["net.peer.name"] == "mysql"
+          - set(attributes["peer.service"], "opsagent:PROD:rabbitmq") where attributes["server.address"] == "rabbitmq" or attributes["net.peer.name"] == "rabbitmq"
+          - set(attributes["peer.service"], "opsagent:PROD:nacos") where attributes["server.address"] == "nacos" or attributes["net.peer.name"] == "nacos"
+          - set(attributes["peer.service"], "opsagent:PROD:qdrant") where attributes["server.address"] == "qdrant" or attributes["net.peer.name"] == "qdrant"
+          - set(status.message, "")
+      - context: spanevent
+        statements:
+          - keep_keys(attributes, ["exception.type"])
+  batch:
+    timeout: 2s
+    send_batch_size: 256
+    send_batch_max_size: 512
+
+connectors:
+  service_graph:
+    latency_histogram_buckets: [5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2s, 5s, 10s]
+    dimensions: [messaging.system, peer.service]
+    virtual_node_peer_attributes: [peer.service, server.address, net.peer.name, db.system.name, db.system, messaging.system]
+    database_name_attributes: [peer.service, db.system.name, db.system]
+    virtual_node_extra_label: true
+    metrics_flush_interval: 15s
+    store: {ttl: 10s, max_items: 5000}
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls: {insecure: true}
+    timeout: 5s
+    sending_queue: {enabled: true, num_consumers: 2, queue_size: 64}
+    retry_on_failure: {enabled: true, initial_interval: 1s, max_interval: 5s, max_elapsed_time: 30s}
+  prometheus/servicegraph:
+    endpoint: 0.0.0.0:9464
+    metric_expiration: 10m
+
+extensions:
+  health_check: {endpoint: 0.0.0.0:13133}
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs: {level: warn}
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/privacy, batch]
+      exporters: [otlp/tempo, service_graph]
+    metrics/servicegraph:
+      receivers: [service_graph]
+      exporters: [prometheus/servicegraph]

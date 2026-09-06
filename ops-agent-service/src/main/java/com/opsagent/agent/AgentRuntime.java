@@ -147,6 +147,11 @@ class AgentRuntime {
                                 .put("name", config.path("tool").asText())
                                 .put("graphTool", true);
                 intent.set("arguments", resolveArgs(config.path("arguments"), state));
+                if (config.path("tool").asText().equals("config_change_apply")) {
+                    intent.set(
+                            "approvalSummary",
+                            run.snapshot().path("configurationProposal").deepCopy());
+                }
                 AgentTools.validateForSnapshot(
                         run, intent.path("name").asText(), intent.path("arguments"));
                 state.set("toolIntent", intent);
@@ -381,6 +386,16 @@ class AgentRuntime {
                 AgentTools.allowedBySnapshot(run, "recent_changes")
                         ? "诊断先用recent_changes核对真实变更，时间接近不等于因果。\n"
                         : "";
+        if (AgentTools.allowedBySnapshot(run, "observability_evidence")) {
+            changes +=
+                    String.join(
+                            "\n",
+                            "先用observability_evidence取得后端证据包。结论引用entry.id，标明采样时间；",
+                            "分别说明确认事实、候选原因、反证和替代解释、建议只读检查、风险及恢复验证条件。",
+                            "ticket_add_analysis填写conclusionLevel：INSUFFICIENT_EVIDENCE/HYPOTHESIS/SUPPORTED。",
+                            "SUPPORTED必须在evidence引用本运行证据ID；不得自称人工确认，不提供无依据百分比。",
+                            "");
+        }
         JsonNode properties =
                 AgentTools.frozenParameters(run, "ticket_add_analysis").path("properties");
         if (properties.has("knownFacts")
@@ -451,6 +466,21 @@ class AgentRuntime {
         }
         if (AgentTools.HIGH.contains(name)) state.remove("approvedRepair");
         JsonNode result = tools.execute(run, call, freshActor);
+        if (name.equals("config_change_apply")
+                && !"APPLIED".equals(result.path("operation").path("status").asText())) {
+            state.set("configurationVerification", result);
+            state.withObject("/observations").set(call.path("id").asText(), result);
+            state.put("toolCount", state.path("toolCount").asInt() + 1);
+            finish(
+                    run,
+                    "NEEDS_ATTENTION",
+                    "配置尚未获得目标实例应用确认（"
+                            + result.path("operation").path("status").asText("UNKNOWN")
+                            + "）；保留原提案与审批，仅可在有效期内按原意图对账，不宣称已生效。");
+            return;
+        }
+        if (name.equals("config_change_apply")) state.set("configurationVerification", result);
+        if (name.equals("observability_evidence")) state.set("observabilityEvidence", result);
         AgentRepairHandoff.record(run, call, result, exactApproval, freshActor);
         if (name.equals("knowledge_search")) state.put("knowledgeLookupNode", run.node());
         if (name.equals("ticket_add_analysis")) {
@@ -458,6 +488,7 @@ class AgentRuntime {
             for (String field :
                     List.of(
                             "summary",
+                            "conclusionLevel",
                             "knownFacts",
                             "candidateCauses",
                             "evidenceGaps",

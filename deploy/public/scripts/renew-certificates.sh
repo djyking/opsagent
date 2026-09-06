@@ -2,8 +2,11 @@
 set -Eeuo pipefail
 umask 077
 
-readonly COMPOSE_DIR=/opt/opsagent/deploy/public
-readonly -a COMPOSE=(docker compose --project-directory "$COMPOSE_DIR" --env-file "$COMPOSE_DIR/secret.env" -f "$COMPOSE_DIR/compose.yaml")
+source "$(dirname -- "${BASH_SOURCE[0]}")/compose-command.sh"
+opsagent_compose_init /opt/opsagent/deploy/public
+opsagent_trace_artifacts
+readonly COMPOSE_DIR
+readonly -a COMPOSE
 dry_run=false
 case "${1:-}" in
   '') [[ $# -eq 0 ]] ;;

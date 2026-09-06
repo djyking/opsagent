@@ -83,8 +83,10 @@ class RagConversationServiceTest {
         login(1);
         var rag = mock(RagService.class);
         var streaming = mock(RagStreamingService.class);
-        var controller =
-                new RagConversationController(service, rag, streaming, mock(RagRateLimiter.class));
+        var limiter = mock(RagRateLimiter.class);
+        var requestScope = mock(RagRateLimiter.Scope.class);
+        org.mockito.Mockito.when(limiter.requestScope()).thenReturn(requestScope);
+        var controller = new RagConversationController(service, rag, streaming, limiter);
         String id = service.create(1, "运行诊断").id();
         String observedAt = java.time.Instant.now().toString();
         var source =
@@ -145,6 +147,9 @@ class RagConversationServiceTest {
         assertThat(saved.model()).isEqualTo("selected-model");
         assertThat(saved.references()).containsExactly(source);
         org.mockito.Mockito.verify(rag).prepareStream("当前服务健康", 5, null, null, "", "openai");
+        org.mockito.Mockito.verify(requestScope).close();
+        org.mockito.Mockito.verify(requestScope, org.mockito.Mockito.never())
+                .failure(org.mockito.ArgumentMatchers.any());
     }
 
     @Test

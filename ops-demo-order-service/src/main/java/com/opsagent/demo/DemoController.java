@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 
 import org.springframework.http.ResponseEntity;
@@ -54,6 +55,22 @@ public class DemoController {
                 request.content(), request.expectedRevision(), request.requestId());
     }
 
+    @PostMapping("/internal/demo/configuration/order-business/application-pause")
+    Map<String, Object> pauseBusinessApplication(@Valid @RequestBody ApplicationPause request)
+            throws Exception {
+        return runtime.pauseBusinessApplication(
+                request.pauseId(),
+                request.instanceId(),
+                request.expectedRevision(),
+                request.expiresAt());
+    }
+
+    @PostMapping("/internal/demo/configuration/order-business/application-pause/resume")
+    Map<String, Object> resumeBusinessApplication(@Valid @RequestBody ApplicationResume request)
+            throws Exception {
+        return runtime.resumeBusinessApplication(request.pauseId(), request.instanceId());
+    }
+
     @PostMapping("/internal/demo/scenarios")
     Map<String, Object> inject(@Valid @RequestBody Fault request) throws Exception {
         return runtime.inject(request.incidentId(), request.scenarioCode(), request.expiresAt());
@@ -100,4 +117,20 @@ public class DemoController {
             JsonNode content,
             @NotBlank @Pattern(regexp = "[a-f0-9]{64}") String expectedRevision,
             @NotBlank @Pattern(regexp = "[a-f0-9-]{36}") String requestId) {}
+
+    /**
+     * @author heyu
+     */
+    public record ApplicationPause(
+            @NotBlank @Pattern(regexp = "[a-f0-9-]{36}") String pauseId,
+            @NotBlank @Pattern(regexp = "[a-f0-9-]{36}") String instanceId,
+            @NotBlank @Pattern(regexp = "[a-f0-9]{64}") String expectedRevision,
+            @NotNull Instant expiresAt) {}
+
+    /**
+     * @author heyu
+     */
+    public record ApplicationResume(
+            @NotBlank @Pattern(regexp = "[a-f0-9-]{36}") String pauseId,
+            @NotBlank @Pattern(regexp = "[a-f0-9-]{36}") String instanceId) {}
 }

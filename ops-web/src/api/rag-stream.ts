@@ -1,3 +1,4 @@
+import type { AiObservabilityReference } from "./ai-observability-context";
 import type { AiReference } from "@/types/api";
 
 export interface RagStreamResult {
@@ -62,7 +63,7 @@ const RETRIEVAL_TIMEOUT_MS = 90_000;
 const GENERATION_FIRST_TOKEN_TIMEOUT_MS = 90_000;
 
 export async function streamRagAnswer(
-  data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string; provider?: string },
+  data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string; provider?: string; observabilityContext?: AiObservabilityReference },
   handlers: RagStreamHandlers = {},
   signal?: AbortSignal,
 ): Promise<RagStreamResult> {
@@ -112,6 +113,7 @@ export async function streamRagAnswer(
         topK: data.topK || 5,
         documentId: data.documentId,
         ticketId: data.ticketId,
+        observabilityContext: data.observabilityContext,
         provider: data.provider,
       }),
       signal: controller.signal,

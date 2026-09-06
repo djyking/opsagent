@@ -1,14 +1,15 @@
 groups:
   - name: opsagent-service-health
     rules:
-      - alert: OpsAgentServiceDown
+      - alert: OpsAgentScrapeFailed
         expr: up{job=~"opsagent.*"} == 0
         for: 2m
         labels:
-          severity: critical
+          severity: warning
+          incident_scope: collection
           service: "{{ $labels.job }}"
         annotations:
-          summary: "OpsAgent 服务 {{ $labels.job }} 不可用"
+          summary: "OpsAgent 指标采集 {{ $labels.job }} 失败，业务状态待独立验证"
           description: "Prometheus 连续 2 分钟无法抓取该服务，请检查进程、端口和日志。"
 
   - name: opsagent-demo-business

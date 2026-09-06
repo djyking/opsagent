@@ -202,6 +202,17 @@ function componentFixture(path, props = {}, extra = {}) {
 }
 console.log('PASS shared real ApprovalCard render: human summary, closed technical evidence and gated actions');
 {
+  const item = approval('configuration', {ticketId: 0, payload: {name: 'config_change_apply', arguments: {proposalId: 'proposal', immutableDigest: 'a'.repeat(64)}, approvalSummary: {action: 'PUBLISH', expectedRevision: 'b'.repeat(64), changes: [{field: 'discountPercent', before: 0, after: 10}]}}});
+  const app = componentFixture('components/automation/ApprovalCard.vue', {approval: item, available: true});
+  try {
+    const html = await app.html();
+    assert.match(html, /审批发布订单业务配置/); assert.match(html, /演示折扣/); assert.match(html, /0 → 10/);
+    assert.ok(!html.includes('/tickets/0')); assert.ok(!html.includes('工单 #0'));
+    assert.match(html, /\/observability\/config\/managed/); assert.match(html, /批准基础版本/);
+  } finally {app.stop();}
+}
+console.log('PASS exact configuration approval field diff, source version, controlled destination and no fabricated ticket #0');
+{
   const app = componentFixture('views/AutomationView.vue');
   try {
     assert.equal(app.state.tab.value, 'runs', 'Automation opens the operational queue by default');
@@ -266,6 +277,8 @@ console.log('PASS real AutomationView render: drill buttons, event chronology, t
   });
   const topbar = componentFixture('components/GlobalTopbar.vue', { isAdmin: true }, {
     '@/stores/approval-inbox': { useApprovalInboxStore: () => sharedInbox },
+    '@/stores/ai-assistant': { useAiAssistantStore: () => ({ open: false, busy: false, show() {}, newSession() {} }) },
+    '@/components/AppBreadcrumb.vue': { render: () => null },
     '@/data/navigation': { navigationFor: () => ({ group: '运维', label: '工单中心' }) },
   });
   try {

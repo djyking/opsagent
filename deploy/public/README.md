@@ -26,8 +26,38 @@
 配置检查（不启动服务，也不要把完整解析结果打印到共享日志）：
 
 ```sh
-docker compose --env-file secret.env -f compose.yaml config --quiet
+bash scripts/compose.sh config --quiet
 ```
+
+## Trace启用与后续发布入口
+
+云端的发布、日常维护、备份与恢复统一使用 `bash scripts/compose.sh`。该入口固定项目目录和配置文件；不要在后续发布中直接使用只有 `-f compose.yaml` 的旧命令，否则重建应用时会丢失Javaagent挂载、入口脚本及Trace配置，即使应用健康检查仍正常。
+
+源码包含 `compose.observability-v3.yaml` 不代表已启用Trace。默认只有本机 `runtime/observability-v3.enabled` 保存已验证标记时，才同时加载基础配置与Trace覆盖文件；标记内容错误、覆盖文件或Javaagent缺失、JAR校验失败会阻止执行，不会悄悄降级到基础配置。该标记已由 `runtime/*` 忽略规则排除Git，源码包不携带它；它也不是密钥。
+
+首次启用时，先按 `config/otel/versions.lock` 准备Javaagent、Collector与Tempo配置，并显式选择Trace。以下命令仅适用于已完成相应版本与运行资源检查的发布流程：
+
+```sh
+bash scripts/compose.sh --trace config --quiet
+bash scripts/compose.sh --trace up -d --no-deps tempo otel-collector
+bash scripts/compose.sh --trace up -d --no-deps --wait --wait-timeout 360 \
+  ops-demo-order-app ops-platform-app ops-agent-app ops-rag-app ops-gateway-app
+bash scripts/compose.sh --record-trace-enabled
+```
+
+`--record-trace-enabled` 不重启容器：它核对上述五个JVM确实使用覆盖文件与Javaagent入口、健康状态正常，检查Collector与Tempo内网就绪接口和Javaagent SHA256，成功后才写入本机启用标记。对于已经启用Trace的服务器，更新本目录脚本后先执行该命令登记当前已验证状态，再进行下一次发布。
+
+后续导入并指向已验收镜像后，使用同一入口发布或回退目标服务，例如：
+
+```sh
+bash scripts/compose.sh config --quiet
+bash scripts/compose.sh up -d --no-deps --wait --wait-timeout 300 ops-platform-app ops-web-app
+bash scripts/compose.sh ps
+```
+
+备份与证书定时脚本复用相同选择逻辑。启用Trace时，备份健康门禁会同时检查Collector、Tempo以及二者内网就绪接口。每日备份仍只包含业务数据库与知识附件，Tempo的72小时Trace数据及本机启用标记不在逻辑备份中；同机恢复保留原标记，新服务器应恢复匹配的运行配置与JAR、显式启动Trace并重新验证登记。发布脚本须同步复制整个 `scripts/` 目录，保留共享的 `compose-command.sh`。
+
+Collector容器上限为384MiB，`GOMEMLIMIT`与内存限制处理器仍为180MiB；额外余量用于运行时映射、缓存和队列，并未增大Go堆预算。没有新增公网监听端口。
 
 ## 数据与模型迁移
 
@@ -61,8 +91,8 @@ reranker固定使用 `BAAI/bge-reranker-v2-m3`，已验证的模型revision为 `
 
 ```sh
 cp config/nginx/bootstrap.conf config/nginx/active.conf
-docker compose --env-file secret.env -f compose.yaml up -d
-docker compose --env-file secret.env -f compose.yaml ps
+bash scripts/compose.sh up -d
+bash scripts/compose.sh ps
 ```
 
 引导阶段用于验证前端、匿名API和ACME路径。确认HTTP连通后立即申请证书；账号登录和业务数据验收在HTTPS启用后进行。
@@ -70,7 +100,7 @@ docker compose --env-file secret.env -f compose.yaml ps
 使用真实管理员邮箱申请同时覆盖根域和www的证书：
 
 ```sh
-docker compose --env-file secret.env -f compose.yaml --profile tls run --rm certbot certonly \
+bash scripts/compose.sh --profile tls run --rm certbot certonly \
   --webroot -w /var/www/certbot --cert-name opsagent.cloud \
   -d opsagent.cloud -d www.opsagent.cloud --email YOUR_ADMIN_EMAIL --agree-tos --non-interactive
 ```
@@ -79,8 +109,8 @@ docker compose --env-file secret.env -f compose.yaml --profile tls run --rm cert
 
 ```sh
 cat config/nginx/https.conf > config/nginx/active.conf
-docker compose --env-file secret.env -f compose.yaml exec -T ops-web-app nginx -t
-docker compose --env-file secret.env -f compose.yaml exec -T ops-web-app nginx -s reload
+bash scripts/compose.sh exec -T ops-web-app nginx -t
+bash scripts/compose.sh exec -T ops-web-app nginx -s reload
 ```
 
 若检查失败，先查看具体错误，不要盲目reload；需要恢复引导时同样用 `cat bootstrap.conf > active.conf` 覆盖内容再检查和reload。
@@ -88,10 +118,10 @@ docker compose --env-file secret.env -f compose.yaml exec -T ops-web-app nginx -
 证书和ACME文件分别位于 `opsagent_letsencrypt`、`opsagent_acme-webroot`。安排宿主定时执行续期命令，并在成功后重新加载同一个web容器：
 
 ```sh
-docker compose --env-file secret.env -f compose.yaml --profile tls run --rm certbot renew \
+bash scripts/compose.sh --profile tls run --rm certbot renew \
   --webroot -w /var/www/certbot --quiet
-docker compose --env-file secret.env -f compose.yaml exec -T ops-web-app nginx -t
-docker compose --env-file secret.env -f compose.yaml exec -T ops-web-app nginx -s reload
+bash scripts/compose.sh exec -T ops-web-app nginx -t
+bash scripts/compose.sh exec -T ops-web-app nginx -s reload
 ```
 
 正式启用后先运行一次 `certbot renew --dry-run` 验证续期链路，之后设置每日检查。不要删除已有证书volume。
@@ -216,14 +246,14 @@ test -f "$BACKUP/.complete"
 (cd "$BACKUP" && sha256sum --check SHA256SUMS)
 systemctl stop opsagent-backup.timer
 systemctl stop opsagent-backup.service
-docker compose --env-file secret.env -f compose.yaml stop \
+bash scripts/compose.sh stop \
   ops-auth-app ops-ticket-app ops-knowledge-app ops-rag-app ops-platform-app ops-gateway-app ops-agent-app ops-demo-order-app
-gzip -dc "$BACKUP/mysql.sql.gz" | docker compose --env-file secret.env -f compose.yaml exec -T mysql \
+gzip -dc "$BACKUP/mysql.sql.gz" | bash scripts/compose.sh exec -T mysql \
   sh -c 'exec env MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot --default-character-set=utf8mb4'
-docker compose --env-file secret.env -f compose.yaml run --rm --no-deps --user 0:0 --entrypoint tar \
+bash scripts/compose.sh run --rm --no-deps --user 0:0 --entrypoint tar \
   --volume "$BACKUP/knowledge-uploads.tgz:/restore/knowledge-uploads.tgz:ro" ops-knowledge-app \
   --numeric-owner -xzf /restore/knowledge-uploads.tgz -C /app/data/uploads
-docker compose --env-file secret.env -f compose.yaml start --wait --wait-timeout 240
+bash scripts/compose.sh start --wait --wait-timeout 240
 # After business and attachment checks pass:
 systemctl start opsagent-backup.timer
 ```

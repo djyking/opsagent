@@ -68,7 +68,9 @@ class ManagedConfigurationController {
     @PreAuthorize("hasRole('ADMIN')")
     ApiResponse<ManagedConfigurationDtos.Result> publish(
             @PathVariable String id, @Valid @RequestBody ManagedConfigurationDtos.Publish request) {
-        return ApiResponse.success(service.publish(id, request));
+        throw new com.opsagent.common.core.BusinessException(
+                com.opsagent.common.core.ErrorCode.FORBIDDEN,
+                "配置发布须先创建不可变变更提案并经AI自动化的现有审批，直接发布入口已关闭。");
     }
 
     @PostMapping("/{id}/rollback")
@@ -76,7 +78,8 @@ class ManagedConfigurationController {
     ApiResponse<ManagedConfigurationDtos.Result> rollback(
             @PathVariable String id,
             @Valid @RequestBody ManagedConfigurationDtos.Rollback request) {
-        return ApiResponse.success(service.rollback(id, request));
+        throw new com.opsagent.common.core.BusinessException(
+                com.opsagent.common.core.ErrorCode.FORBIDDEN, "配置回退须创建新的回退提案并通过现有审批，直接回退入口已关闭。");
     }
 
     private static <T> ResponseEntity<ApiResponse<T>> response(T value) {

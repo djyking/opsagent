@@ -43,6 +43,9 @@ public class RagService {
     private final CmdbAnswerService cmdb;
     private final OperationsAnswerService operations;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ObservabilityEvidenceClient observationEvidence;
+
     RagService(
             KnowledgeClient knowledge,
             RagProperties ragProperties,
@@ -86,9 +89,26 @@ public class RagService {
             Long documentId,
             Long ticketId,
             String provider) {
+        return ask(question, requestedTopK, documentId, ticketId, provider, null);
+    }
+
+    Answer ask(
+            String question,
+            Integer requestedTopK,
+            Long documentId,
+            Long ticketId,
+            String provider,
+            ObservabilityContext observabilityContext) {
         long started = System.nanoTime();
         StreamPlan plan =
-                prepareStream(question, requestedTopK, documentId, ticketId, null, provider);
+                prepareStream(
+                        question,
+                        requestedTopK,
+                        documentId,
+                        ticketId,
+                        null,
+                        provider,
+                        observabilityContext);
         Answer answer;
         if (plan.immediate() != null) {
             answer = plan.immediate();
@@ -134,10 +154,42 @@ public class RagService {
             Long ticketId,
             String conversationContext,
             String requestedProvider) {
+        return prepareStream(
+                question,
+                requestedTopK,
+                documentId,
+                ticketId,
+                conversationContext,
+                requestedProvider,
+                null);
+    }
+
+    StreamPlan prepareStream(
+            String question,
+            Integer requestedTopK,
+            Long documentId,
+            Long ticketId,
+            String conversationContext,
+            String requestedProvider,
+            ObservabilityContext observabilityContext) {
         long started = System.nanoTime();
         String provider = aiProperties.resolveProvider(requestedProvider);
-        if (credentialExtractionQuestion(question)) {
+        boolean protectedQuestion = credentialExtractionQuestion(question);
+        if (protectedQuestion && observabilityContext == null) {
             return StreamPlan.completed(question, noEvidence(), started);
+        }
+        var observed =
+                observabilityContext == null
+                        ? null
+                        : observationEvidence == null
+                                ? ObservabilityEvidenceClient.Evidence.unavailable(
+                                        observabilityContext, "OBSERVABILITY_SOURCE_UNAVAILABLE")
+                                : observationEvidence.load(observabilityContext);
+        if (protectedQuestion) return StreamPlan.completed(question, noEvidence(), started);
+        if (observed != null && (!observed.available() || observed.entries().isEmpty())) {
+            var attachment = ObservabilityPromptContext.attach(observed, 0);
+            return StreamPlan.completed(
+                    question, observationFallback(attachment, List.of(), "未生成诊断结论。"), started);
         }
         if (ticketId != null && cmdb.supports(question, documentId)) {
             try {
@@ -148,11 +200,14 @@ public class RagService {
                 throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "工单权限暂时无法验证，请稍后重试");
             }
         }
-        Answer directoryAnswer = cmdb.answerIfApplicable(question, documentId);
+        Answer directoryAnswer =
+                observed == null ? cmdb.answerIfApplicable(question, documentId) : null;
         if (directoryAnswer != null)
             return StreamPlan.completed(question, directoryAnswer, started);
         StreamPlan operationsPlan =
-                operations.prepareIfApplicable(question, documentId, ticketId, provider);
+                observed == null
+                        ? operations.prepareIfApplicable(question, documentId, ticketId, provider)
+                        : null;
         if (operationsPlan != null) return operationsPlan;
         int topK = ragProperties.limit(requestedTopK);
         int retrievalCandidates = Math.max(topK, ragProperties.getRetrievalCandidates());
@@ -176,7 +231,8 @@ public class RagService {
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "知识检索暂时不可用");
         }
-        if (chunks.isEmpty()
+        if (observed == null
+                && chunks.isEmpty()
                 && (documentId != null || ticketId != null || internalFactQuestion(question))) {
             return StreamPlan.completed(question, noEvidence(), started);
         }
@@ -185,13 +241,47 @@ public class RagService {
                 contextAssembler.assemble(reranked.chunks(), chunks, documentId != null);
         List<Source> sources = context.sources().stream().map(Source::from).toList();
         AnswerMetadata metadata = metadata(chunks, context, reranked);
+        ObservabilityPromptContext.Attached attachment =
+                observed == null
+                        ? null
+                        : ObservabilityPromptContext.attach(observed, context.sources().size());
+        List<ContextAssembler.ContextSource> citationContexts = context.sources();
+        Answer fallback = null;
+        if (attachment != null) {
+            var combinedSources = new java.util.ArrayList<>(sources);
+            combinedSources.addAll(attachment.sources());
+            sources = List.copyOf(combinedSources);
+            var combinedContexts = new java.util.ArrayList<>(citationContexts);
+            combinedContexts.addAll(attachment.contexts());
+            citationContexts = List.copyOf(combinedContexts);
+            metadata =
+                    new AnswerMetadata(
+                            "OBSERVABILITY_RAG",
+                            metadata.rerankApplied(),
+                            metadata.candidateCount(),
+                            citationContexts.size(),
+                            metadata.contextTokens() + attachment.tokenEstimate(),
+                            metadata.degraded() || attachment.degraded(),
+                            attachment.reason() == null
+                                    ? metadata.degradedReason()
+                                    : attachment.reason());
+            fallback = observationFallback(attachment, sources, "以下仅列出已取得的证据引用，未生成诊断结论。");
+        }
         if (!aiProperties.isEnabled()) {
             return StreamPlan.completed(
-                    question, localFallback(context, sources, "LLM_DISABLED"), started);
+                    question,
+                    fallback == null
+                            ? localFallback(context, sources, "LLM_DISABLED")
+                            : observationGenerationUnavailable(fallback, "LLM_DISABLED"),
+                    started);
         }
         if (!aiProperties.settings(provider).configured()) {
             return StreamPlan.completed(
-                    question, localFallback(context, sources, "LLM_NOT_CONFIGURED"), started);
+                    question,
+                    fallback == null
+                            ? localFallback(context, sources, "LLM_NOT_CONFIGURED")
+                            : observationGenerationUnavailable(fallback, "LLM_NOT_CONFIGURED"),
+                    started);
         }
         LlmRequest request = promptBuilder.build(question, context);
         if (documentId != null || ticketId != null) {
@@ -225,17 +315,65 @@ public class RagService {
                                     + question,
                             request.maxOutputTokens());
         }
+        if (attachment != null) request = attachment.enrich(request);
         return new StreamPlan(
                 question,
                 reranked.chunks(),
-                context.sources(),
+                citationContexts,
                 sources,
                 request,
                 metadata,
                 null,
                 started,
                 requestedProvider == null || requestedProvider.isBlank() ? null : provider,
-                null);
+                fallback);
+    }
+
+    private Answer observationFallback(
+            ObservabilityPromptContext.Attached context, List<Source> sources, String message) {
+        return new Answer(
+                message + "\n" + context.facts(),
+                sources,
+                "observability",
+                "evidence-readonly",
+                0,
+                0,
+                0,
+                new AnswerMetadata(
+                        "OBSERVABILITY_RAG",
+                        false,
+                        0,
+                        context.contexts().size(),
+                        context.tokenEstimate(),
+                        context.degraded(),
+                        context.reason(),
+                        true,
+                        "structured_data",
+                        0));
+    }
+
+    private Answer observationGenerationUnavailable(Answer facts, String reason) {
+        var metadata = facts.metadata();
+        String explanation = "LLM_DISABLED".equals(reason) ? "AI 生成功能未启用。" : "所选 AI 模型尚未配置完成。";
+        return new Answer(
+                explanation + "\n" + facts.answer(),
+                facts.references(),
+                facts.provider(),
+                facts.model(),
+                0,
+                0,
+                0,
+                new AnswerMetadata(
+                        metadata.retrievalMode(),
+                        metadata.rerankApplied(),
+                        metadata.candidateCount(),
+                        metadata.contextChunkCount(),
+                        metadata.contextTokens(),
+                        true,
+                        reason,
+                        true,
+                        "structured_data",
+                        0));
     }
 
     private String followupRetrievalQuestion(String question, String conversationContext) {
@@ -680,7 +818,57 @@ public class RagService {
             String sourceType,
             String sourceUrl,
             String sourceUpdatedAt,
-            String sourceRetrievedAt) {
+            String sourceRetrievedAt,
+            String evidenceBundleId,
+            String evidenceId) {
+        Source(
+                long chunkId,
+                long documentId,
+                int chunkIndex,
+                String documentName,
+                Integer page,
+                Integer version,
+                String updateTime,
+                double score,
+                String sourceId,
+                String headingPath,
+                Integer pageStart,
+                Integer pageEnd,
+                Double rrfScore,
+                Double rerankScore,
+                java.util.Set<String> retrievalChannels,
+                boolean neighbor,
+                Long parentChunkId,
+                String sourceType,
+                String sourceUrl,
+                String sourceUpdatedAt,
+                String sourceRetrievedAt) {
+            this(
+                    chunkId,
+                    documentId,
+                    chunkIndex,
+                    documentName,
+                    page,
+                    version,
+                    updateTime,
+                    score,
+                    sourceId,
+                    headingPath,
+                    pageStart,
+                    pageEnd,
+                    rrfScore,
+                    rerankScore,
+                    retrievalChannels,
+                    neighbor,
+                    parentChunkId,
+                    sourceType,
+                    sourceUrl,
+                    sourceUpdatedAt,
+                    sourceRetrievedAt,
+                    null,
+                    null);
+        }
+
         static Source from(ContextAssembler.ContextSource contextSource) {
             RetrievedChunk chunk = contextSource.chunk();
             return new Source(

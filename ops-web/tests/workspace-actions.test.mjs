@@ -43,7 +43,7 @@ for (const query of ['查询工单', '工单', '工单中心', ' 搜索工单 ']
   assert.deepEqual(actionDestination(action('ticket-search'), query), { path: '/tickets' });
 }
 assert.deepEqual(actionDestination(action('event-diagnosis'), 'AI诊断'), { path: '/tickets' });
-assert.deepEqual(actionDestination(action('workflow'), '持续巡检'), { path: '/automation', query: { tab: 'inspection' } });
+assert.deepEqual(actionDestination(action('workflow'), '持续巡检'), { path: '/observability/inspections' });
 assert.deepEqual(actionDestination(action('ticket-search'), '查询事件'), { path: '/tickets' });
 assert.deepEqual(actionDestination(action('ticket-search'), '搜索事件 Redis'), { path: '/tickets', query: { keyword: 'Redis' } });
 assert.deepEqual(actionDestination(action('ticket-search'), '搜索工单 Redis'), { path: '/tickets', query: { keyword: 'Redis' } });

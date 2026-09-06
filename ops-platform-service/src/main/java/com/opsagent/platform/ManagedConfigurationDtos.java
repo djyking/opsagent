@@ -49,7 +49,8 @@ public final class ManagedConfigurationDtos {
             boolean canPublish,
             String blockedReason,
             Instant observedAt,
-            JsonNode business) {}
+            JsonNode business,
+            JsonNode application) {}
 
     /**
      * @author heyu

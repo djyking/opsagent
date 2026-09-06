@@ -43,10 +43,11 @@ function compile(filename) {
 
 // Compile and execute the real page setup/template. Only child visuals and API transport
 // are stubbed; navigation and RouterLink rendering use a real Vue Router memory history.
-async function fixture(filename, initialUrl, extra = {}) {
+async function fixture(filename, initialUrl, extra = {}, props = {}) {
   const router = createRouter({ history: createMemoryHistory(), routes: [
     '/operations', '/automation', '/itsm/alerts', '/configuration', '/knowledge',
     '/knowledge/review', '/knowledge/index-admin', '/rag/chat',
+    '/observability/metrics', '/observability/topology',
   ].map(path => ({ path, component: Stub })) });
   await router.push(initialUrl);
   const route = { get query() { return router.currentRoute.value.query; },
@@ -58,18 +59,19 @@ async function fixture(filename, initialUrl, extra = {}) {
     vue: { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounting.push(fn) },
     'vue-router': { useRoute: () => route, useRouter: () => ({
       replace: destination => pendingNavigation = router.replace(destination),
+      push: destination => pendingNavigation = router.push(destination),
     }) },
     '@lucide/vue': icons, '@/components/PageHeader.vue': Header, ...extra,
   }).default;
   const scope = vue.effectScope();
-  const state = scope.run(() => component.setup({}, { expose() {} }));
+  const state = scope.run(() => component.setup(props, { expose() {} }));
   return {
-    router,
+    router, state,
     async mount() { await Promise.all(mounted.map(fn => fn())); await vue.nextTick(); },
     async settle() { await vue.nextTick(); await pendingNavigation; await vue.nextTick(); },
     async html() {
-      const context = vue.proxyRefs({ ...state });
-      const app = vue.createSSRApp({ render: () => render(context, [], {}, context, {}, {}) });
+      const context = vue.proxyRefs({ ...state, ...props });
+      const app = vue.createSSRApp({ render: () => render(context, [], props, context, {}, {}) });
       app.use(router);
       return renderToString(app);
     },
@@ -148,6 +150,35 @@ console.log('PASS legacy inspection initial URL: real redirect preserves repeate
   } finally { page.stop(); }
 }
 console.log('PASS observation render: three active tabs, real secondary links, read-only HEALTH_CHECK summary and same-instance legacy redirect');
+
+{
+  const api = operationsTransport(); const wrapped = api.imports['@/api/operations'].operationsApi;
+  const metric = (job, id = 'heap') => ({ id, job, label: id === 'heap' ? 'JVM堆使用率' : 'HTTP错误率', unit: '%', currentValue: 12,
+    forecastValue: 13, sampleCount: 2, status: 'OK', reason: '真实采样', method: '线性趋势', points: [], observedAt: '2026-09-06T08:00:00Z' });
+  const metricsApi = { overview: async minutes => ({ ...(await wrapped.overview(minutes)),
+    targets: [{ service: 'opsagent-rag', ciCode: 'ops-rag-service', health: 'up' }, { service: 'opsagent-auth', ciCode: 'ops-auth-service', health: 'up' }],
+    metrics: [metric('opsagent-rag'), metric('opsagent-auth'), metric('all'), metric('opsagent-rag', 'http5xx')] }), workflows: wrapped.workflows };
+  const page = await fixture('OperationsView.vue', '/observability/metrics?tab=governance&ciCode=ops-rag-service&environment=PROD',
+    { '@/api/operations': { operationsApi: metricsApi } }, { metricsOnly: true });
+  try {
+    await page.mount(); await page.settle();
+    assert.equal(page.router.currentRoute.value.path, '/observability/metrics');
+    assert.equal(page.state.activeTab.value, 'overview');
+    let rendered = await page.html();
+    assert.match(rendered, /指标与采集/); assert.match(rendered, /服务运行切面/); assert.match(rendered, /趋势与风险预估/);
+    assert.doesNotMatch(rendered, /class="operations-tabs"/); assert.doesNotMatch(rendered, /class="operations-governance-grid"/);
+    assert.equal(page.state.serviceFilter.value, 'opsagent-rag');
+    assert.deepEqual(page.state.visibleMetrics.value.map(item => item.job), ['opsagent-rag']);
+    page.state.metricKind.value = 'http5xx'; assert.equal(page.state.visibleMetrics.value[0].id, 'http5xx');
+    page.state.serviceFilter.value = 'opsagent-auth'; page.state.changeServiceFilter(); await page.settle();
+    assert.equal(page.router.currentRoute.value.query.ciCode, 'ops-auth-service');
+    await page.router.push('/observability/metrics?ciCode=unmapped'); await page.settle();
+    assert.equal(page.state.serviceFilter.value, '__unmapped__'); assert.equal(page.state.visibleMetrics.value.length, 0);
+    page.state.goTopology('ops-rag-service'); await page.settle();
+    assert.equal(page.router.currentRoute.value.path, '/observability/topology'); assert.equal(page.router.currentRoute.value.query.ciCode, 'ops-rag-service');
+  } finally { page.stop(); }
+}
+console.log('PASS retained metrics-only workspace: real heap/HTTP history, collection targets, hidden legacy tabs, service-scope mapping and topology return');
 
 {
   const auth = vue.reactive({ isAdmin: true, isDemo: false });

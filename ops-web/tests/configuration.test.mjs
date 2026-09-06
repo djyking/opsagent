@@ -42,9 +42,14 @@ function fixture() {
       return { operation: version({ action: 'ROLLBACK' }), configuration: currentDetail }; },
   };
   const scope = vue.effectScope();
-  const module = evaluate(read('composables/useManagedConfiguration.ts'), { vue, '@/api/configuration': { configurationApi: api } });
+  const center = {
+    list: async () => ({items: [{id: 'full-identity', source: 'NACOS', group: 'OPSAGENT_DEMO', dataId: 'ops-demo-order-business.json', capabilities: {canPublish: true}}]}),
+    propose: async (id, request) => {calls.push(['propose', id, structuredClone(request)]); return {proposalId: request.requestId, immutableDigest: 'd'.repeat(64)};},
+    configurationRun: async request => {calls.push(['run', structuredClone(request)]); return {id: 'created-run'};},
+  };
+  const module = evaluate(read('composables/useManagedConfiguration.ts'), { vue, '@/api/configuration': { configurationApi: api }, '@/api/configCenter': {configCenterApi: center} });
   const manager = scope.run(() => module.useManagedConfiguration(() => auth.admin, () => auth.userId));
-  return { manager, api, auth, calls, stop() { manager.dispose(); scope.stop(); } };
+  return { manager, api, center, auth, calls, stop() { manager.dispose(); scope.stop(); } };
 }
 async function prepare(app) {
   await app.manager.select('order-business'); app.manager.draft.value.catalogTitle = '新订单目录';
@@ -73,14 +78,16 @@ console.log('PASS runtime content preservation and administrator-only validate/p
     await prepare(app); const request = JSON.parse(JSON.stringify(app.manager.plan.value));
     app.manager.comment.value = ' '; await app.manager.confirm(); assert.equal(app.calls.filter(x => x[0] === 'publish').length, 0);
     app.manager.comment.value = '  已核对变更  '; await Promise.all([app.manager.confirm(), app.manager.confirm()]);
-    const writes = app.calls.filter(x => x[0] === 'publish'); assert.equal(writes.length, 1);
-    assert.deepEqual(writes[0], ['publish', 'order-business', { expectedRevision: request.expectedRevision,
-      requestId: request.requestId, comment: '已核对变更', content: request.content }]);
+    const writes = app.calls.filter(x => x[0] === 'propose'); assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0], ['propose', 'full-identity', { expectedRevision: request.expectedRevision,
+      requestId: request.requestId, comment: '已核对变更', patch: [{op: 'replace', path: '/catalogTitle', value: request.content.catalogTitle}] }]);
+    assert.deepEqual(app.calls.find(x => x[0] === 'run')[1], {proposalId: request.requestId, immutableDigest: 'd'.repeat(64), requestId: request.requestId});
+    assert.equal(app.calls.filter(x => x[0] === 'publish' || x[0] === 'rollback').length, 0);
     await app.manager.prepare(version({ status: 'UNCONFIRMED' })); assert.match(app.manager.error.value, /只能回退/);
     await app.manager.prepare(version()); assert.equal(app.manager.plan.value.versionId, 91); assert.equal(app.manager.plan.value.versionNumber, 1);
     app.manager.comment.value = '回退到初始基线'; await app.manager.confirm();
-    assert.equal(app.calls.filter(x => x[0] === 'rollback').length, 1);
-    assert.equal(app.calls.find(x => x[0] === 'rollback')[2].versionId, 91);
+    assert.equal(app.calls.filter(x => x[0] === 'propose').length, 2);
+    assert.equal(app.calls.filter(x => x[0] === 'propose')[1][2].rollbackVersionId, 91);
   } finally { app.stop(); }
 }
 console.log('PASS reviewed publish/rollback payloads, baseline identity, comment validation and duplicate-click exclusion');
@@ -119,23 +126,25 @@ console.log('PASS draft changes invalidate pending validation and cancel a stale
   const app = fixture();
   try {
     await prepare(app); let posts = 0;
-    app.api.publish = async () => { posts++; throw new Error('网络连接中断'); };
-    await app.manager.confirm(); assert.equal(posts, 1); assert.equal(app.manager.canPublish.value, false);
-    assert.equal(app.manager.plan.value, undefined); assert.match(app.manager.detail.value.blockedReason, /刷新/);
-    await app.manager.prepare(); await app.manager.confirm(); assert.equal(posts, 1, 'An uncertain response must not create another request');
+    const submitted = [];
+    app.center.configurationRun = async request => { posts++; submitted.push({...request}); throw new Error('网络连接中断'); };
+    await app.manager.confirm(); assert.equal(posts, 1); assert.ok(app.manager.plan.value);
+    await app.manager.confirm(); assert.equal(posts, 2);
+    assert.deepEqual(submitted[0], submitted[1], 'An uncertain response must reuse the same immutable proposal/run identity');
+    assert.equal(app.calls.filter(x => ['publish', 'rollback'].includes(x[0])).length, 0);
     app.api.detail = async () => detail({ canPublish: false, blockedReason: '已有配置发布正在确认' });
     await app.manager.select('order-business'); app.manager.draft.value.notice = '仍需等待';
-    await app.manager.prepare(); assert.equal(app.manager.plan.value, undefined); assert.equal(posts, 1);
+    await app.manager.prepare(); assert.equal(app.manager.plan.value, undefined); assert.equal(posts, 2);
   } finally { app.stop(); }
   const uncertain = fixture();
   try {
     await prepare(uncertain);
-    uncertain.api.publish = async () => ({ operation: version({ status: 'UNCONFIRMED', message: '目标版本尚未确认一致' }), configuration: detail() });
-    await uncertain.manager.confirm(); assert.equal(uncertain.manager.writable.value, false);
-    assert.equal(uncertain.manager.notice.value, '目标版本尚未确认一致');
+    await uncertain.manager.confirm(); assert.equal(uncertain.manager.lastRunId.value, 'created-run');
+    assert.match(uncertain.manager.notice.value, /批准前不会修改源配置/);
+    assert.equal(uncertain.manager.detail.value.revision, 'a'.repeat(64));
   } finally { uncertain.stop(); }
 }
-console.log('PASS uncertain transport/result locks further writes and uses operation.message from the real response contract');
+console.log('PASS uncertain Agent-run response reuses exact proposal identity and never falls back to direct publication');
 
 {
   const app = fixture();
@@ -155,11 +164,11 @@ console.log('PASS late directory/detail responses cannot overwrite the latest se
 {
   const app = fixture();
   try {
-    await prepare(app); const publication = deferred(); app.api.publish = () => publication.promise;
+    await prepare(app); const publication = deferred(); app.center.propose = () => publication.promise;
     const old = app.manager.confirm(); await flush(); assert.equal(app.manager.busy.value, true);
     app.auth.userId = 8; assert.equal(app.manager.detail.value, undefined); assert.equal(app.manager.plan.value, undefined);
     assert.equal(app.manager.busy.value, false); await app.manager.select('order-business'); app.manager.draft.value.notice = '新账号的编辑';
-    publication.resolve({ operation: version(), configuration: detail({ content: { ...content(), notice: '旧账号结果' } }) }); await old;
+    publication.resolve({proposalId: 'old-identity-proposal', immutableDigest: 'd'.repeat(64)}); await old;
     assert.equal(app.manager.draft.value.notice, '新账号的编辑'); assert.notEqual(app.manager.detail.value.content.notice, '旧账号结果');
     await app.manager.prepare(); app.auth.admin = false; assert.equal(app.manager.plan.value, undefined);
     await app.manager.confirm(); assert.equal(app.manager.writable.value, false);
@@ -180,6 +189,7 @@ function compile(path, imports = {}) {
 function view(app) {
   const component = compile('views/ConfigurationView.vue', {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
+    'vue-router': {useRouter: () => ({push() {}})},
     '@/stores/auth': { useAuthStore: () => vue.reactive({ get isAdmin() { return app.auth.admin; }, get user() { return { userId: app.auth.userId }; } }) },
     '@/composables/useManagedConfiguration': { useManagedConfiguration: () => app.manager },
     ...Object.fromEntries(['PageHeader', 'InlineError', 'LoadingState', 'EmptyState', 'BaseModal', 'PaginationBar'].map(name => ['@/components/' + name + '.vue', Stub])),

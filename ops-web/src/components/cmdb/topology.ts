@@ -1,4 +1,4 @@
-import { Activity, Bell, Boxes, Database, Globe, Layers3, Network, Radio, Search, Server, Workflow } from "@lucide/vue";
+import { Activity, Bell, Boxes, Database, Globe, Layers3, Network, Radio, Search, Server, ShieldCheck, Workflow } from "@lucide/vue";
 
 export type CiRecord = Record<string, unknown>;
 export interface CiNode extends CiRecord { ciCode: string; ciName: string; ciType: string }
@@ -18,6 +18,9 @@ export const ciTypes = {
   REGISTRY: { label: "注册中心", icon: Network, tone: "registry" },
   SEARCH: { label: "搜索", icon: Search, tone: "search" },
   VECTOR_DB: { label: "向量库", icon: Boxes, tone: "database" },
+  VECTOR_DATABASE: { label: "向量库", icon: Boxes, tone: "database" },
+  EXTERNAL_API: { label: "外部 API", icon: Globe, tone: "gateway" },
+  GOVERNANCE: { label: "流量治理", icon: ShieldCheck, tone: "registry" },
 };
 export function ciType(value: unknown) {
   const key = String(value || "");

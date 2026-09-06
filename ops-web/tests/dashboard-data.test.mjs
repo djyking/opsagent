@@ -73,6 +73,7 @@ function setup(overrides = {}, isAdmin = true) {
   const imports = {
     vue: lifecycleVue,
     '@/components/dashboard/OperationsDecision.vue': SlotSurface,
+    '@/components/dashboard/DashboardTopology.vue': SlotSurface,
     '@/stores/auth': { useAuthStore: () => ({ isAdmin }) },
     '@/composables/usePageFeedback': { usePageFeedback: () => ({}) },
     '@/api/http': { request: ({ url }) => {
@@ -127,7 +128,7 @@ function setup(overrides = {}, isAdmin = true) {
     assert.equal(app.metric('priority').value, 2);
     assert.equal(app.metric('processing').value, 1);
     assert.equal(app.state.statusMetrics.value.reduce((total, item) => total + item.value, 0), 125);
-    assert.equal(app.state.visibleTickets.value.length, 7, 'preview size must not become the total count');
+    assert.equal(app.state.visibleTickets.value.length, 5, 'preview size must not become the total count');
     assert.ok(app.state.visibleTickets.value.some(row => row.id === 121));
     assert.match(await app.html(), /当前范围 123 项/);
   } finally { app.stop(); }

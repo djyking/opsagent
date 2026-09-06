@@ -69,7 +69,12 @@ class ManagedConfigurationService {
         String blocked = "";
         try {
             view = target.managedConfiguration(id);
+            business = safeBusiness(target.preview());
             if (id.equals("order-business")
+                    && business.path("httpStatus").asInt() == 200
+                    && business.path("businessConfigurationRevision")
+                            .asText()
+                            .equals(view.path("revision").asText())
                     && "APPLIED".equals(view.path("applicationStatus").asText())
                     && view.path("revision")
                             .asText()
@@ -80,7 +85,6 @@ class ManagedConfigurationService {
                         safeContent(id, view.path("content")));
             }
             JsonNode runtime = target.snapshot();
-            business = safeBusiness(target.preview());
             Instant available = incidents.availableAfter();
             if (!"BASELINE".equals(runtime.path("status").asText()) || incidents.active() != null) {
                 blocked = "目标正在演练，恢复后才能发布配置";
@@ -114,7 +118,8 @@ class ManagedConfigurationService {
                 definition.editable() && administrator(actor) && blocked.isBlank(),
                 blocked,
                 Instant.now(),
-                business);
+                business,
+                safeApplication(view));
     }
 
     ManagedConfigurationDtos.Validated validate(String id, JsonNode content) {
@@ -191,8 +196,10 @@ class ManagedConfigurationService {
                                 + request.comment());
         synchronized (demo) {
             var existing = repository.existing(request.requestId(), hash, actor.userId());
-            if (existing != null)
-                return new ManagedConfigurationDtos.Result(existing, detail("order-business"));
+            if (existing != null) {
+                var actual = detail("order-business");
+                return new ManagedConfigurationDtos.Result(repository.get(existing.id()), actual);
+            }
             var before = detail("order-business");
             if (!before.canPublish())
                 throw new BusinessException(ErrorCode.CONFLICT, before.blockedReason());
@@ -213,20 +220,33 @@ class ManagedConfigurationService {
                                 request.content(), request.expectedRevision(), request.requestId());
                 revision = result.path("revision").asText();
                 if (revision.matches("[a-f0-9]{64}")
-                        && revision.equals(result.path("appliedRevision").asText())
                         && result.path("content").equals(request.content())
-                        && result.path("publicationId").asText().equals(request.requestId())
-                        && "APPLIED".equals(result.path("applicationStatus").asText())) {
-                    status = "APPLIED";
-                    message = "Nacos版本与目标已应用版本一致，配置已生效";
+                        && result.path("publicationId").asText().equals(request.requestId())) {
+                    status = "PUBLISHED";
+                    message = "源配置回读一致，正在核验真实目标业务。";
+                    JsonNode business = safeBusiness(target.preview());
+                    if (revision.equals(result.path("appliedRevision").asText())
+                            && "APPLIED".equals(result.path("applicationStatus").asText())
+                            && business.path("httpStatus").asInt() == 200
+                            && revision.equals(
+                                    business.path("businessConfigurationRevision").asText())) {
+                        status = "APPLIED";
+                        message = "源回读、目标应用版本及真实业务结果一致。";
+                    }
                 } else message = "Nacos发布返回，但目标版本或内容尚未确认一致，请刷新核对";
             } catch (RuntimeException exception) {
                 message = "发布结果尚未确认，请刷新查看实际版本；未把请求成功当成业务生效";
+                if (exception instanceof DemoTargetClient.ConfigurationRejected rejected
+                        && List.of("REVISION_CONFLICT", "NACOS_CAS_CONFLICT", "TARGET_BUSY")
+                                .contains(rejected.reason())) {
+                    status = "CONFLICT";
+                    message = "上游明确拒绝版本或目标状态冲突，未覆盖新配置；请重新读取并审批。";
+                }
             }
             repository.complete(
                     entry.id(), request.requestId(), status, revision, message, actor.userId());
-            return new ManagedConfigurationDtos.Result(
-                    repository.get(entry.id()), detail("order-business"));
+            var actual = detail("order-business");
+            return new ManagedConfigurationDtos.Result(repository.get(entry.id()), actual);
         }
     }
 
@@ -301,6 +321,49 @@ class ManagedConfigurationService {
             if (item.isValueNode() && item.toString().length() <= 500) safe.set(field, item);
         }
         return safe;
+    }
+
+    JsonNode applicationSnapshot() {
+        return safeApplication(target.managedConfiguration("order-business"));
+    }
+
+    private JsonNode safeApplication(JsonNode value) {
+        ObjectNode result = json.createObjectNode();
+        for (String field :
+                List.of(
+                        "instanceId",
+                        "targetCode",
+                        "revision",
+                        "appliedRevision",
+                        "applicationStatus",
+                        "observedAt",
+                        "appliedAt",
+                        "publicationId",
+                        "namespaceId",
+                        "sourceInstanceId")) {
+            JsonNode item = value.path(field);
+            if (item.isValueNode() && item.toString().length() <= 150) result.set(field, item);
+        }
+        result.put("verificationScope", "FIXED_TARGET_INSTANCE");
+        result.put("multiInstanceCoverage", false);
+        JsonNode pause = value.path("applicationPause");
+        if (pause.isObject()) {
+            ObjectNode safePause = result.putObject("applicationPause");
+            for (String field :
+                    List.of(
+                            "pauseId",
+                            "active",
+                            "startedAt",
+                            "expiresAt",
+                            "endedAt",
+                            "recoverySource",
+                            "scope")) {
+                JsonNode item = pause.path(field);
+                if (item.isValueNode() && item.toString().length() <= 150)
+                    safePause.set(field, item);
+            }
+        }
+        return result;
     }
 
     private ManagedConfigurationDtos.Definition definition(String id) {

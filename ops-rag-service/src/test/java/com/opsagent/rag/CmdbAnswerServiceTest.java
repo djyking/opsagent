@@ -71,6 +71,20 @@ class CmdbAnswerServiceTest {
     }
 
     @Test
+    void diagnosisAndAppendedPageEvidenceMustNotBecomeACatalogRequest() {
+        String context = "\n\n当前页面上下文：ops-rag-service。请针对当前对象进行只读分析。"
+                + "\n服务目录、依赖关系和健康证据：UNKNOWN";
+        String diagnosis = "请分析当前服务的异常现象、证据和可能原因，并说明还需要核对哪些信息。";
+        assertThat(cmdb.supports(diagnosis, null)).isFalse();
+        assertThat(cmdb.supports(diagnosis + context, null)).isFalse();
+        assertThat(cmdb.supports("哪些服务有异常？", null)).isFalse();
+        assertThat(cmdb.supports("你好" + context, null)).isFalse();
+        assertThat(cmdb.supports("列出服务清单" + context, null)).isTrue();
+        assertThat(cmdb.supports("这个服务依赖哪些组件？" + context, null)).isTrue();
+        verifyNoInteractions(platform);
+    }
+
+    @Test
     void shouldRespectDependencyDirectionAndNotInventUnknownServiceRelations() {
         when(platform.cis()).thenReturn(envelope(cis));
         when(platform.relations())

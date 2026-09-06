@@ -30,6 +30,20 @@ spring:
             group-id: DEFAULT_GROUP
             data-type: json
             rule-type: flow
+        rag-degrade:
+          nacos:
+            server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+            data-id: ops-rag-sentinel-degrade-rules
+            group-id: DEFAULT_GROUP
+            data-type: json
+            rule-type: degrade
+        rag-system:
+          nacos:
+            server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+            data-id: ops-rag-sentinel-system-rules
+            group-id: DEFAULT_GROUP
+            data-type: json
+            rule-type: system
 ops:
   security:
     secret: ${OPS_JWT_SECRET:}

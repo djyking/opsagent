@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue';
 import { configurationApi, type BusinessConfiguration, type ConfigurationHistory, type ConfigurationVersion,
   type ManagedConfiguration, type ManagedConfigurationId, type ManagedConfigurationItem } from '@/api/configuration';
+import { configCenterApi, type ConfigurationProposal } from '@/api/configCenter';
 
 export function businessContent(content: Record<string, unknown>): BusinessConfiguration {
   return { catalogTitle: String(content.catalogTitle ?? ''), notice: String(content.notice ?? ''), discountPercent: Number(content.discountPercent ?? 0) };
@@ -14,7 +15,7 @@ export function configurationChanges(before: Record<string, unknown>, after: Bus
 type Plan = { id: ManagedConfigurationId; expectedRevision: string; requestId: string; content: BusinessConfiguration;
   versionId?: number; versionNumber?: number; changes: ReturnType<typeof configurationChanges> };
 
-export function useManagedConfiguration(isAdmin: () => boolean, identity: () => unknown) {
+export function useManagedConfiguration(isAdmin: () => boolean, identity: () => unknown, onSubmitted?: (runId: string) => void) {
   const items = ref<ManagedConfigurationItem[]>([]);
   const selectedId = ref<ManagedConfigurationId>('order-business');
   const detail = ref<ManagedConfiguration>();
@@ -28,6 +29,8 @@ export function useManagedConfiguration(isAdmin: () => boolean, identity: () => 
   const notice = ref('');
   const plan = ref<Plan>();
   const comment = ref('');
+  const proposal = ref<ConfigurationProposal>();
+  const lastRunId = ref('');
   let generation = 0;
   let historyGeneration = 0;
   let directoryGeneration = 0;
@@ -42,6 +45,7 @@ export function useManagedConfiguration(isAdmin: () => boolean, identity: () => 
   const stopIdentityWatch = watch([identity, isAdmin], () => {
     generation++; historyGeneration++; directoryGeneration++;
     detail.value = undefined; items.value = []; plan.value = undefined; comment.value = '';
+    proposal.value = undefined; lastRunId.value = '';
     draft.value = { catalogTitle: '', notice: '', discountPercent: 0 };
     history.value = { items: [], total: 0, page: 1, size: 8 };
     busy.value = false; loading.value = false; historyLoading.value = false;
@@ -118,29 +122,29 @@ export function useManagedConfiguration(isAdmin: () => boolean, identity: () => 
         return;
       }
       const base = { expectedRevision: request.expectedRevision, requestId: request.requestId, comment: reason };
-      const result = request.versionId == null
-        ? await configurationApi.publish(request.id, { ...base, content: request.content })
-        : await configurationApi.rollback(request.id, { ...base, versionId: request.versionId });
+      const catalog = await configCenterApi.list('ops-demo-order-service');
+      if (!current(epoch, actor) || !isAdmin() || plan.value !== request || edit !== draftGeneration) return;
+      const source = catalog.items.find(item => item.source === 'NACOS' && item.group === 'OPSAGENT_DEMO' && item.dataId === 'ops-demo-order-business.json');
+      if (!source?.capabilities.canPublish) throw new Error('当前配置完整身份不具备审批发布能力。');
+      const immutable = await configCenterApi.propose(source.id, { ...base,
+        ...(request.versionId == null ? {patch: request.changes.map(change => ({op: 'replace' as const, path: `/${change.key}`, value: request.content[change.key]}))} : {rollbackVersionId: request.versionId}) });
+      if (!current(epoch, actor) || plan.value !== request || edit !== draftGeneration) return;
+      proposal.value = immutable;
+      const run = await configCenterApi.configurationRun({proposalId: immutable.proposalId, immutableDigest: immutable.immutableDigest, requestId: request.requestId});
       if (!current(epoch, actor)) return;
-      detail.value = result.configuration;
-      if (result.operation.status !== 'APPLIED') detail.value = { ...detail.value, canPublish: false,
-        blockedReason: '上次发布结果尚未确认，请刷新配置与版本记录后继续。' };
-      if (edit === draftGeneration) resetDraft(); else plan.value = undefined;
-      notice.value = result.operation.status === 'APPLIED' ? '配置已发布，目标服务已确认应用。'
-        : result.operation.message || '发布请求已记录，尚未确认目标服务应用。请刷新并核对版本状态。';
-      await loadHistory(1);
+      lastRunId.value = run.id; plan.value = undefined;
+      notice.value = '变更提案已交给现有自动化审批，批准前不会修改源配置；执行后须分别核对源版本、目标应用和业务结果。';
+      onSubmitted?.(run.id);
     } catch (cause) {
       if (current(epoch, actor)) {
-        error.value = cause instanceof Error ? cause.message : '发布状态未能确认，请刷新检查';
-        plan.value = undefined;
-        // A failed response may follow a successful remote write. Require a fresh read before another edit.
-        if (detail.value) detail.value = { ...detail.value, canPublish: false, blockedReason: '请刷新最新配置与版本记录，核对上次请求结果后继续。' };
-        await loadHistory(1);
+        error.value = cause instanceof Error ? cause.message : '提案或运行创建未能确认，请检查已有运行后重试同一请求。';
+        // Keep the exact request ID; an uncertain proposal/run response must not create another change.
+        notice.value = '当前操作只创建审批提案。重试沿用同一请求标识，不会绕过审批直接发布。';
       }
     } finally { if (current(epoch, actor)) busy.value = false; }
   }
   function dispose() { disposed = true; generation++; historyGeneration++; directoryGeneration++;
     stopDraftWatch(); stopIdentityWatch(); plan.value = undefined; }
   return { items, selectedId, detail, draft, history, loading, historyLoading, busy, error, historyError, notice,
-    plan, comment, dirty, writable, canPublish, select, load, loadHistory, resetDraft, prepare, confirm, dispose };
+    plan, comment, proposal, lastRunId, dirty, writable, canPublish, select, load, loadHistory, resetDraft, prepare, confirm, dispose };
 }

@@ -28,16 +28,22 @@ class AgentTools {
                     "ticket_get",
                     "ticket_history",
                     "demo_target_inspect",
+                    "observability_evidence",
                     "demo_config_restore",
                     "demo_flow_restore",
                     "demo_queue_restore",
+                    "config_change_apply",
                     "recent_changes",
                     "knowledge_search",
                     "official_docs_search",
                     "ticket_add_analysis",
                     "ticket_resolve");
     static final Set<String> HIGH =
-            Set.of("demo_config_restore", "demo_flow_restore", "demo_queue_restore");
+            Set.of(
+                    "demo_config_restore",
+                    "demo_flow_restore",
+                    "demo_queue_restore",
+                    "config_change_apply");
     private final AgentClients clients;
     private final OfficialDocsSearch officialDocs;
 
@@ -53,8 +59,20 @@ class AgentTools {
 
     static ArrayNode schemas() {
         ArrayNode tools = AgentJson.MAPPER.createArrayNode();
+        tools.add(
+                schema(
+                        "config_change_apply",
+                        "执行本次运行绑定的不可变配置提案；必须人工精确审批，版本漂移拒绝。",
+                        Map.of("proposalId", "string", "immutableDigest", "string"),
+                        Set.of("proposalId", "immutableDigest")));
         tools.add(schema("ticket_get", "读取当前运行绑定的工单；不能指定其他工单。", Map.of(), Set.of()));
         tools.add(schema("ticket_history", "读取当前工单的处理历史。", Map.of(), Set.of()));
+        tools.add(
+                schema(
+                        "observability_evidence",
+                        "读取本运行绑定服务、环境和工单的后端证据包；含来源、采样时间、质量及缺口。" + "必须引用证据ID，缺失观测不能当作正常或确认根因。",
+                        Map.of(),
+                        Set.of()));
         tools.add(
                 schema(
                         "demo_target_inspect",
@@ -116,6 +134,8 @@ class AgentTools {
                                 "candidateCauses",
                                 "string",
                                 "evidenceGaps",
+                                "string",
+                                "conclusionLevel",
                                 "string"),
                         Set.of("summary", "evidence", "recommendation")));
         tools.add(
@@ -130,7 +150,8 @@ class AgentTools {
     static ArrayNode schemas(String target) {
         ArrayNode result = AgentJson.MAPPER.createArrayNode();
         for (JsonNode tool : schemas()) {
-            if (AgentTargets.allows(target, tool.path("function").path("name").asText()))
+            if (!tool.path("function").path("name").asText().equals("config_change_apply")
+                    && AgentTargets.allows(target, tool.path("function").path("name").asText()))
                 result.add(tool);
         }
         return result;
@@ -196,13 +217,25 @@ class AgentTools {
                 throw AgentJson.invalid("缺少必填工具参数");
         }
         if (HIGH.contains(name)
+                && !name.equals("config_change_apply")
                 && !args.path("expectedRevision").asText().matches("[a-f0-9]{64}")) {
             throw AgentJson.invalid("修复必须提供本次观测的配置版本");
+        }
+        if (name.equals("config_change_apply")
+                && (!args.path("proposalId").asText().matches("[a-f0-9-]{36}")
+                        || !args.path("immutableDigest").asText().matches("[a-f0-9]{64}"))) {
+            throw AgentJson.invalid("配置提案标识或摘要无效");
         }
         if (name.equals("official_docs_search")
                 && (!OfficialDocsSearch.CATALOG.containsKey(args.path("topic").asText())
                         || !OfficialDocsSearch.GAPS.contains(args.path("gap").asText()))) {
             throw AgentJson.invalid("公开文档检索只接受固定技术主题和知识不足原因");
+        }
+        if (name.equals("ticket_add_analysis")
+                && args.has("conclusionLevel")
+                && !Set.of("INSUFFICIENT_EVIDENCE", "HYPOTHESIS", "SUPPORTED")
+                        .contains(args.path("conclusionLevel").asText())) {
+            throw AgentJson.invalid("模型结论仅可声明证据不足、假设或证据支持；不能自称人工确认");
         }
     }
 
@@ -215,10 +248,39 @@ class AgentTools {
         String ticketPath = "/internal/agent/tickets/" + ticket;
         String key = run.id() + ":" + call.path("id").asText();
         return switch (name) {
+            case "config_change_apply" -> {
+                JsonNode proposal = run.snapshot().path("configurationProposal");
+                if (!actor.roles().contains("ADMIN")
+                        || !AgentTargets.ORDER.equals(actor.targetCode())
+                        || !args.path("proposalId").equals(proposal.path("proposalId"))
+                        || !args.path("immutableDigest").equals(proposal.path("immutableDigest"))) {
+                    throw AgentClients.denied();
+                }
+                yield clients.call(
+                        "platform",
+                        "/internal/platform/configuration/proposals/"
+                                + args.path("proposalId").asText()
+                                + "/apply",
+                        "POST",
+                        AgentJson.object()
+                                .put("immutableDigest", args.path("immutableDigest").asText()),
+                        actor);
+            }
             case "ticket_get" -> clients.call("ticket", ticketPath, "GET", null, actor);
             case "ticket_history" ->
                     clients.call("ticket", ticketPath + "/history", "GET", null, actor);
             case "demo_target_inspect" -> inspect(actor);
+            case "observability_evidence" ->
+                    clients.call(
+                            "platform",
+                            "/internal/platform/observability/evidence",
+                            "POST",
+                            AgentJson.object()
+                                    .put("service", actor.targetCode())
+                                    .put("environment", "DEMO")
+                                    .put("timeRange", "30m")
+                                    .put("ticketId", ticket),
+                            actor);
             case "recent_changes" -> recentChanges(run, actor);
             case "knowledge_search" -> searchKnowledge(args, actor);
             case "official_docs_search" -> {
@@ -369,6 +431,19 @@ class AgentTools {
         validateForSnapshot(run, name, call.path("arguments"));
         String path = "/internal/agent/tickets/" + run.state().path("ticketId").asLong();
         if (name.equals("ticket_add_analysis")) {
+            if ("SUPPORTED".equals(call.path("arguments").path("conclusionLevel").asText())) {
+                JsonNode bundle = run.state().path("observabilityEvidence");
+                boolean referenced = false;
+                for (JsonNode entry : bundle.path("entries")) {
+                    String evidenceId = entry.path("id").asText();
+                    if (!evidenceId.isBlank()
+                            && call.path("arguments")
+                                    .path("evidence")
+                                    .asText()
+                                    .contains(evidenceId)) referenced = true;
+                }
+                if (!referenced) throw AgentJson.invalid("证据支持结论必须引用本运行后端证据包中的实际证据ID");
+            }
             JsonNode ticket = clients.call("ticket", path, "GET", null, actor);
             return AgentJson.object()
                     .set(
@@ -554,7 +629,11 @@ class AgentTools {
 
     private static JsonNode analysisInput(JsonNode args) {
         ObjectNode input = AgentJson.object();
-        String summary = args.path("summary").asText();
+        String summary =
+                "结论级别："
+                        + args.path("conclusionLevel").asText("HYPOTHESIS")
+                        + "\n"
+                        + args.path("summary").asText();
         if (args.has("knownFacts") || args.has("candidateCauses") || args.has("evidenceGaps")) {
             summary =
                     bounded(summary, 350)

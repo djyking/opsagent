@@ -66,7 +66,10 @@ class RagVisitorIntegrationTest {
                         .token();
         var mvc =
                 MockMvcBuilders.standaloneSetup(
-                                new RagController(rag, mock(RagRateLimiter.class), streaming))
+                                new RagController(
+                                        rag,
+                                        new RagRateLimiter(mock(AiBudgetGuard.class), metrics),
+                                        streaming))
                         .addFilters(new JwtAuthenticationFilter(jwt))
                         .build();
         var started =
@@ -98,5 +101,11 @@ class RagVisitorIntegrationTest {
         verify(invocation, never()).invoke(anyString(), any());
         verify(invocation, never()).stream(anyString(), any(), any(), any());
         verify(invocation, never()).stream(anyString(), anyString(), any(), any(), any());
+        assertThat(
+                        com.alibaba.csp.sentinel.slots.clusterbuilder.ClusterBuilderSlot
+                                .getClusterNode(RagRateLimiter.REQUEST_RESOURCE)
+                                .curThreadNum())
+                .isZero();
+        metrics.close();
     }
 }

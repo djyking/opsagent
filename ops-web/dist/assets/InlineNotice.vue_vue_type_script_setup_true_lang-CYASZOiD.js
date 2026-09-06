@@ -1,0 +1,1 @@
+import{d as o,b as t,e as s,t as a,j as i,f as l,R as r}from"./index-DrSjOvC7.js";const c={class:"oa-inline-notice"},d={key:0},p=o({__name:"InlineNotice",props:{title:{}},setup(e){return(n,m)=>(t(),s("aside",c,[e.title?(t(),s("strong",d,a(e.title),1)):i("",!0),l("span",null,[r(n.$slots,"default")])]))}});export{p as _};
