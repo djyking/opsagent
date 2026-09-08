@@ -1,4 +1,5 @@
 import { ApiError, request } from "./http";
+import { sessionFetch } from "./session";
 
 export interface ReviewChunk {
   id: number;
@@ -16,6 +17,7 @@ export interface ReviewPreview {
   version: number;
   parseStatus: string;
   reviewStatus: string;
+  indexStatus?: string;
   parseError: string;
   sourceAvailable: boolean;
   total: number;
@@ -32,17 +34,10 @@ export const knowledgeReviewApi = {
     url: `/api/knowledge/review/documents/${id}/text`,
   }),
   source: async (id: number): Promise<Blob> => {
-    const token = localStorage.getItem("opsagent_token");
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || ""}/api/knowledge/review/documents/${id}/source`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    const response = await sessionFetch(`${import.meta.env.VITE_API_BASE_URL || ""}/api/knowledge/review/documents/${id}/source`, {
       cache: "no-store",
       signal: AbortSignal.timeout(65_000),
-    });
-    if (response.status === 401) {
-      localStorage.removeItem("opsagent_token");
-      localStorage.removeItem("opsagent_token_expire_at");
-      if (!location.pathname.startsWith("/login")) location.assign("/login");
-    }
+    }, "read");
     if (response.headers.get("content-type")?.includes("json")) {
       const body = await response.json();
       throw new ApiError(body.message || "原文件下载失败", response.status, body.code);

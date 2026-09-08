@@ -1,5 +1,6 @@
-import type { AiObservabilityReference } from "./ai-observability-context";
 import type { AiReference } from "@/types/api";
+import { sessionFetch } from "./session";
+import type { AiObservabilityContext } from '@/utils/ai-context';
 
 export interface RagStreamResult {
   answer: string;
@@ -7,7 +8,7 @@ export interface RagStreamResult {
   provider: string;
   model: string;
   latencyMs: number;
-  metadata?: { degraded: boolean; degradedReason?: string | null; generationComplete?: boolean; finishReason?: string; continuationCount?: number };
+  metadata?: { degraded: boolean; degradedReason?: string | null; generationComplete?: boolean; finishReason?: string; continuationCount?: number; budgetLimit?: number; budgetChargedTokens?: number; budgetUsageKnown?: boolean; requestAttempts?: number };
 }
 
 export function ragCompletionLabel(result: RagStreamResult): string {
@@ -15,13 +16,14 @@ export function ragCompletionLabel(result: RagStreamResult): string {
   if (result.provider === "cmdb" && result.metadata?.degradedReason === "CMDB_UNAVAILABLE") return "目录暂不可用";
   if (result.provider === "cmdb") return "查询完成";
   if (result.provider === "operations") return result.metadata?.degradedReason === "OPERATIONS_UNAVAILABLE" ? "运行数据暂不可用" : "运行快照已读取";
-  if (result.provider === "disabled") return "仅返回知识检索结果";
+  if (result.provider === "disabled") return result.references.some(item => item.sourceType === 'OFFICIAL_WEB') ? "官方参考已读取" : "仅返回知识检索结果";
   if (result.provider === "none") return "知识依据不足";
   return "回答完成";
 }
 
 export function ragIncompleteMessage(result: RagStreamResult): string {
   if (result.metadata?.generationComplete !== false) return "";
+  if (result.metadata.finishReason === 'budget_exhausted') return `本次回答的输入、输出和重试累计额度 ${(result.metadata.budgetLimit || 10000).toLocaleString('zh-CN')} token 已不足，已保留生成内容。请缩小问题范围。`;
   if (result.metadata.finishReason === "length") return "本次回答已达到输出上限，以下内容尚未完整生成。可以继续追问缺少的部分。";
   if (result.metadata.finishReason === "content_filter") return "模型未能完整生成本次回答，请调整问题后重试。";
   return "生成连接中断或未正常结束，已保留收到的内容，请重新提问。";
@@ -33,6 +35,7 @@ export function ragAnswerLabel(result: RagStreamResult): string {
   if (result.provider === "operations") return result.metadata?.degradedReason === "OPERATIONS_UNAVAILABLE" ? "实时运行数据 · 读取失败" : "实时运行数据 · 直接读取";
   if (result.provider === "disabled") {
     const reason = result.metadata?.degradedReason;
+    if (result.references.some(item => item.sourceType === 'OFFICIAL_WEB')) return "官方公开文档 · 未经 AI 生成";
     if (reason === "LLM_DISABLED") return "仅知识检索 · AI 生成未启用";
     if (reason === "LLM_NOT_CONFIGURED") return "仅知识检索 · AI 模型未配置";
     return "仅知识检索 · AI 模型调用失败";
@@ -63,7 +66,7 @@ const RETRIEVAL_TIMEOUT_MS = 90_000;
 const GENERATION_FIRST_TOKEN_TIMEOUT_MS = 90_000;
 
 export async function streamRagAnswer(
-  data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string; provider?: string; observabilityContext?: AiObservabilityReference },
+  data: { question: string; topK?: number; documentId?: number; ticketId?: number; conversationId?: string; provider?: string; observabilityContext?: AiObservabilityContext },
   handlers: RagStreamHandlers = {},
   signal?: AbortSignal,
 ): Promise<RagStreamResult> {
@@ -99,22 +102,20 @@ export async function streamRagAnswer(
       /\/$/,
       "",
     );
-    const token = localStorage.getItem("opsagent_token");
     const endpoint = data.conversationId ? `/api/rag/conversations/${encodeURIComponent(data.conversationId)}/stream` : "/api/rag/stream";
-    const response = await fetch(`${baseUrl}${endpoint}`, {
+    const response = await sessionFetch(`${baseUrl}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({
         question: data.question,
         topK: data.topK || 5,
         documentId: data.documentId,
         ticketId: data.ticketId,
-        observabilityContext: data.observabilityContext,
         provider: data.provider,
+        observabilityContext: data.observabilityContext,
       }),
       signal: controller.signal,
     });
@@ -223,6 +224,8 @@ export function normalizeReferences(rows?: Record<string, unknown>[]): AiReferen
     sourceUrl: row.sourceUrl == null ? undefined : String(row.sourceUrl),
     sourceUpdatedAt: row.sourceUpdatedAt == null ? undefined : String(row.sourceUpdatedAt),
     sourceRetrievedAt: row.sourceRetrievedAt == null ? undefined : String(row.sourceRetrievedAt),
+    evidenceBundleId: row.evidenceBundleId == null ? undefined : String(row.evidenceBundleId),
+    evidenceId: row.evidenceId == null ? undefined : String(row.evidenceId),
     headingPath: row.headingPath == null ? undefined : String(row.headingPath),
     pageStart: row.pageStart == null ? undefined : Number(row.pageStart),
     pageEnd: row.pageEnd == null ? undefined : Number(row.pageEnd),

@@ -61,7 +61,7 @@ function setup(query = {}, overrides = {}) {
     vue, pinia: piniaApi, '@/stores/auth': { useAuthStore: () => auth }, '@/utils/ai-context': contextModule,
     '@/api/conversations': { conversationApi: api, ragProviderApi: { list: overrides.providers || (async () => providerCatalog()) } },
     '@/api/rag-stream': { streamRagAnswer: stream, ragCompletionLabel: () => '回答完成', ragIncompleteMessage: () => '' },
-    '@/api/ai-observability-context': { resolveAiObservabilityContext: overrides.evidence || (async scope => scope.service ? { service: scope.service, environment: (scope.environment || 'PROD').toUpperCase(), timeRange: scope.timeRange || '15m' } : undefined) },
+    '@/api/ai-observability-context': { readAiObservabilityEvidence: overrides.evidence || (async () => '') },
   });
   const assistant = useAiAssistantStore(pinia);
   const { useRagConversations } = load('composables/useRagConversations.ts', {
@@ -127,7 +127,7 @@ function setup(query = {}, overrides = {}) {
   await app.state.ask();
   await flush();
   assert.equal(app.calls.create, 1);
-  assert.deepEqual(app.calls.stream, [{ question: '排查 Redis', topK: 5, conversationId: 'created', provider: 'deepseek' }]);
+  assert.deepEqual(app.calls.stream, [{ question: '排查 Redis', topK: 5, conversationId: 'created', provider: 'deepseek', observabilityContext: undefined }]);
   assert.equal(app.state.sessionId.value, 'created');
   assert.deepEqual(app.route.query, { conversation: 'created' });
   app.stop();
@@ -256,9 +256,7 @@ console.log('PASS provider discovery: real choices, selected provider propagatio
   const sending = app.assistant.ask('查看当前服务的恢复证据'); await flush();
   app.assistant.setContext({ page: '/observability/topology', service: 'ops-rag-service' });
   assert.equal(app.calls.stream[0].ticketId, 2068);
-  assert.equal(app.calls.stream[0].question, '查看当前服务的恢复证据');
-  assert.equal(app.calls.stream[0].observabilityContext.service, 'ops-demo-notification-service');
-  assert.equal(app.calls.stream[0].observabilityContext.environment, 'DEMO');
+  assert.match(app.calls.stream[0].question, /ops-demo-notification-service/);
   assert.doesNotMatch(app.calls.stream[0].question, /ops-rag-service/);
   assert.match(app.assistant.contextSummary, /ops-rag-service/);
   stream.resolve(answer); await sending; await flush();
@@ -299,28 +297,29 @@ assert.equal(contextModule.contextualQuestion('x'.repeat(2000), { service: 'ops-
 console.log('PASS shared AI session, current context, frozen request scope, no automatic send and account/late-response isolation');
 
 {
-  const evidence = deferred(); const scopes = [];
-  const app = setup({}, { evidence: async (scope, signal) => { scopes.push({ ...scope }); return evidence.promise; } }); await flush();
+  const stream = deferred(); const scopes = [];
+  const app = setup({}, { stream: () => stream.promise, evidence: async scope => { scopes.push({ ...scope }); return 'client supplied blockQps=2'; } }); await flush();
   app.assistant.setContext({ service: 'ops-rag-service', environment: 'PROD', timeRange: '15m' });
   const sending = app.assistant.ask('检查当前阻断情况'); await flush();
-  assert.equal(app.calls.create, 0, 'Resolve a reference before creating a persisted turn');
+  assert.equal(app.calls.create, 1, 'The backend reads authorized evidence after receiving the structured scope');
   app.assistant.setContext({ service: 'redis' });
-  evidence.resolve({ service: 'ops-rag-service', environment: 'PROD', timeRange: '15m' }); await sending; await flush();
-  assert.equal(scopes[0].service, 'ops-rag-service');
-  assert.equal(app.calls.stream[0].question, '检查当前阻断情况');
+  stream.resolve(answer); await sending; await flush();
+  assert.equal(scopes.length, 0, 'Browser-side snapshots are no longer submitted as facts');
   assert.deepEqual(app.calls.stream[0].observabilityContext, { service: 'ops-rag-service', environment: 'PROD', timeRange: '15m' });
-  assert.doesNotMatch(app.calls.stream[0].question, /blockQps|现场快照|ops-rag-service/);
+  assert.match(app.calls.stream[0].question, /ops-rag-service/);
+  assert.doesNotMatch(app.calls.stream[0].question, /blockQps=2/);
   assert.doesNotMatch(app.calls.stream[0].question, /redis/);
   app.stop();
 }
 {
-  const evidence = deferred();
-  const app = setup({}, { evidence: () => evidence.promise }); await flush();
+  const created = deferred();
+  let sessionRequests = 0;
+  const app = setup({}, { api: { create: () => { sessionRequests++; return created.promise; } } }); await flush();
   app.assistant.setContext({ service: 'ops-rag-service' });
   const sending = app.assistant.ask('当前服务健康'); await flush();
-  app.auth.user = { userId: 8 }; evidence.resolve({ service: 'ops-rag-service', environment: 'PROD', timeRange: '15m' }); await sending; await flush();
-  assert.equal(app.calls.create, 0); assert.equal(app.calls.stream.length, 0);
+  app.auth.user = { userId: 8 }; created.resolve({ ...oldSession, id: 'old-owner-scoped-session' }); await sending; await flush();
+  assert.equal(sessionRequests, 1); assert.equal(app.calls.stream.length, 0, 'A late session response cannot submit the previous owner scope or trigger model retrieval');
   assert.deepEqual(app.assistant.turns, []);
   app.stop();
 }
-console.log('PASS send-time object reference without browser-authored facts, frozen service despite route changes and identity abort before persistence');
+console.log('PASS backend-only observation facts, frozen structured service scope and identity abort before model submission');

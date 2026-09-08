@@ -9,7 +9,7 @@ export function useTrafficGovernance(ciCode: () => string) {
   const selectedType = ref('FLOW');
   const plan = ref<{ type: string; before: TrafficRule[]; after: TrafficRule[]; revision: string; requestId: string; rollbackVersionId?: number }>();
   let generation = 0; let historyGeneration = 0; let actionGeneration = 0;
-  const identity = () => auth.token;
+  const identity = () => auth.identity;
   async function load() {
     const turn = ++generation, token = identity(); loading.value = true; error.value = '';
     try {

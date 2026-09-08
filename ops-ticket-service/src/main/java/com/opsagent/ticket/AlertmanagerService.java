@@ -42,6 +42,7 @@ public class AlertmanagerService {
     private final String webhookToken;
     private final AlertEpisodeMapper episodes;
     private final AlertProvenanceResolver provenance;
+    private final AlertTargetClient targets;
 
     AlertmanagerService(
             AlertMapper alerts,
@@ -51,6 +52,7 @@ public class AlertmanagerService {
             MeterRegistry metrics,
             AlertEpisodeMapper episodes,
             AlertProvenanceResolver provenance,
+            AlertTargetClient targets,
             @Value("${ops.alertmanager.enabled:false}") boolean enabled,
             @Value("${ops.alertmanager.webhook-token:}") String webhookToken) {
         this.alerts = alerts;
@@ -60,6 +62,7 @@ public class AlertmanagerService {
         this.metrics = metrics;
         this.episodes = episodes;
         this.provenance = provenance;
+        this.targets = targets;
         this.enabled = enabled;
         this.webhookToken = webhookToken;
     }
@@ -179,14 +182,17 @@ public class AlertmanagerService {
             metrics.counter("opsagent.alert.resolved").increment();
             outcome = "RESOLVED_RECORDED";
         } else if (episode.ticketId() == null && latest) {
+            var target = targets.resolve(labels, episodeId);
+            String canonical = target.targetCode();
             TicketService.AlertProvenance origin =
-                    provenance.resolve(serviceCode, startsAt, episodeId);
+                    provenance.resolve(canonical, startsAt, episodeId);
+            if (!origin.isolated()) origin = origin.withEnvironment(target.environment());
             Ticket ticket =
                     tickets.createFromAlert(
                             alertName + " - " + text(annotations, "summary", "监控告警"),
                             description(alertName, serviceCode, labels, annotations),
                             priority(severity),
-                            serviceCode,
+                            canonical,
                             episodeId,
                             origin);
             episodes.link(
@@ -194,12 +200,21 @@ public class AlertmanagerService {
                     ticket.getId(),
                     origin.incidentId(),
                     origin.ownerActorId(),
-                    origin.isolated() ? "ISOLATED" : "CORE");
+                    origin.isolated() ? "ISOLATED" : origin.environment());
             episodes.observed(episodeId, status, seenTime);
             alerts.linkTicket(record.id(), ticket.getId(), seenTime, labelsJson, annotationsJson);
+            alerts.bindService(record.id(), canonical);
             alerts.event(record.id(), status, stringify(item));
+            if (!target.matched()) {
+                audit.workRecord(
+                        ticket.getId(),
+                        "ALERT_BINDING_PENDING",
+                        target.message(),
+                        target.status() + "；原始标签与告警记录已保留",
+                        0L);
+            }
             metrics.counter("opsagent.alert.created").increment();
-            if (serviceCode.isBlank()) {
+            if (canonical.isBlank()) {
                 metrics.counter("opsagent.alert.mapping.miss").increment();
             }
             outcome = "TICKET_CREATED";
@@ -209,7 +224,12 @@ public class AlertmanagerService {
         } else {
             episodes.observed(episodeId, status, seenTime);
             alerts.duplicateFiring(
-                    record.id(), seenTime, severity, serviceCode, labelsJson, annotationsJson);
+                    record.id(),
+                    seenTime,
+                    severity,
+                    record.serviceCode(),
+                    labelsJson,
+                    annotationsJson);
             alerts.event(record.id(), status, stringify(item));
             metrics.counter("opsagent.alert.deduplicated").increment();
             outcome = "DEDUPLICATED";

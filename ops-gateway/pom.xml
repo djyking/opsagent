@@ -9,6 +9,16 @@
     <artifactId>ops-gateway</artifactId>
     <dependencies>
         <dependency>
+            <groupId>com.opsagent</groupId>
+            <artifactId>ops-common-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
         </dependency>

@@ -168,6 +168,8 @@ function componentFixture(path, props = {}, extra = {}) {
     '@/stores/approval-inbox': { useApprovalInboxStore: () => ({ isCurrent: () => true, decisionVersion: 0 }) },
     '@/components/PageHeader.vue': Stub, '@/components/InlineError.vue': Stub, '@/components/EmptyState.vue': Stub,
     '@/components/automation/ApprovalCard.vue': Stub, '@/components/automation/InspectionRuns.vue': Stub,
+    '@/components/automation/AutomationUsage.vue': Stub, '@/components/events/EventManualRecovery.vue': Stub,
+    '@/api/modules': { ticketApi: { detail: async id => ({ id }) } },
     '@/styles/pages/automation.css': {}, '@/styles/components/automation-approval.css': {}, ...extra,
   };
   const component = evaluate(script.content, imports).default;
@@ -202,17 +204,6 @@ function componentFixture(path, props = {}, extra = {}) {
 }
 console.log('PASS shared real ApprovalCard render: human summary, closed technical evidence and gated actions');
 {
-  const item = approval('configuration', {ticketId: 0, payload: {name: 'config_change_apply', arguments: {proposalId: 'proposal', immutableDigest: 'a'.repeat(64)}, approvalSummary: {action: 'PUBLISH', expectedRevision: 'b'.repeat(64), changes: [{field: 'discountPercent', before: 0, after: 10}]}}});
-  const app = componentFixture('components/automation/ApprovalCard.vue', {approval: item, available: true});
-  try {
-    const html = await app.html();
-    assert.match(html, /审批发布订单业务配置/); assert.match(html, /演示折扣/); assert.match(html, /0 → 10/);
-    assert.ok(!html.includes('/tickets/0')); assert.ok(!html.includes('工单 #0'));
-    assert.match(html, /\/observability\/config\/managed/); assert.match(html, /批准基础版本/);
-  } finally {app.stop();}
-}
-console.log('PASS exact configuration approval field diff, source version, controlled destination and no fabricated ticket #0');
-{
   const app = componentFixture('views/AutomationView.vue');
   try {
     assert.equal(app.state.tab.value, 'runs', 'Automation opens the operational queue by default');
@@ -244,7 +235,7 @@ console.log('PASS exact configuration approval field diff, source version, contr
     assert.ok(interrupted.includes('等待人工处理'));
     assert.ok(!interrupted.includes('本次运行已结束'));
     assert.ok(interrupted.includes('本次运行尚未产生审批请求'));
-    assert.match(interrupted, /<details class="automation-failure-detail"><summary>查看错误代码<\/summary><code>MODEL_OUTCOME_UNKNOWN<\/code>/);
+    assert.match(interrupted, /<details class="automation-failure-detail"><summary>技术详情与审批说明<\/summary>[\s\S]*?<code>MODEL_OUTCOME_UNKNOWN<\/code>/);
     assert.equal(app.state.canResume.value, false, 'An unknown model receipt cannot safely resume the same call');
     app.state.detail.value.state.modelFailure = { code: 'MODEL_PROVIDER_UNAVAILABLE', reason: '模型服务当前不可用，请检查配置。',
       canResume: false, retryable: false, recoveryAction: 'CHECK_CONFIGURATION' };
@@ -255,6 +246,18 @@ console.log('PASS exact configuration approval field diff, source version, contr
     delete app.state.detail.value.state.modelFailure;
     app.state.detail.value.state.message = '人工输入待确认';
     assert.equal(app.state.canResume.value, true, 'A non-model attention state retains existing continuation behavior');
+    app.state.detail.value.status = 'BUDGET_EXCEEDED';
+    app.state.detail.value.approvals = [];
+    app.state.detail.value.state.tokens = 25422;
+    app.state.detail.value.state.tokenBudget = 40000;
+    app.state.detail.value.state.message = '剩余Token预算无法容纳原生调用链、关键观测与回复预留';
+    const budgetLimited = await app.html();
+    assert.match(budgetLimited, /预算限制已触发/);
+    assert.match(budgetLimited, /已计入 25,422 \/ 40,000 Token/);
+    assert.match(budgetLimited, /剩余Token预算无法容纳原生调用链、关键观测与回复预留/);
+    assert.ok(!budgetLimited.includes('预算已达上限'), 'A reservation failure must not claim all allowed tokens were spent');
+    delete app.state.detail.value.state.tokenBudget;
+    assert.match(await app.html(), /上限未记录/, 'Historical runs must not borrow the current policy ceiling');
   } finally { app.stop(); }
 }
 console.log('PASS real AutomationView render: drill buttons, event chronology, truthful recovery/model failure, exact resume gate');

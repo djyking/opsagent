@@ -22,6 +22,7 @@ function evaluate(source, imports) {
     if (Object.hasOwn(imports, id)) return imports[id];
     if (id.endsWith('.vue')) return Stub;
     if (id.endsWith('.css')) return {};
+    if (id === '@/utils/knowledge-stage') return evaluate(readFileSync(new URL('../src/utils/knowledge-stage.ts', import.meta.url), 'utf8'), {});
     return require(id);
   }, module, module.exports);
   return module.exports;

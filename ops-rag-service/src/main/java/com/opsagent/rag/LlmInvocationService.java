@@ -54,8 +54,17 @@ public class LlmInvocationService {
     private Invocation invoke(
             LlmClient client, String question, LlmRequest request, AuditContext context) {
         long started = System.nanoTime();
-        try (AiBudgetGuard.Permit permit = budget.acquire()) {
-            LlmResult result = client.generate(request);
+        try (AssistantTokenBudget tokens =
+                        AssistantTokenBudget.open(
+                                request.priorReservedTokens(),
+                                value ->
+                                        usageRepository.saveBudget(
+                                                context.traceId(),
+                                                context.userId(),
+                                                hash(question),
+                                                value));
+                AiBudgetGuard.Permit permit = budget.acquire()) {
+            LlmResult result = client.generate(request).withBudget(tokens);
             long latency = elapsedMillis(started);
             record(
                     client,
@@ -93,8 +102,17 @@ public class LlmInvocationService {
             AuditContext context) {
         LlmClient client = provider == null ? router.selected() : router.selected(provider);
         long started = System.nanoTime();
-        try (AiBudgetGuard.Permit permit = budget.acquire()) {
-            LlmResult result = client.stream(request, onDelta);
+        try (AssistantTokenBudget tokens =
+                        AssistantTokenBudget.open(
+                                request.priorReservedTokens(),
+                                value ->
+                                        usageRepository.saveBudget(
+                                                context.traceId(),
+                                                context.userId(),
+                                                hash(question),
+                                                value));
+                AiBudgetGuard.Permit permit = budget.acquire()) {
+            LlmResult result = client.stream(request, onDelta).withBudget(tokens);
             long latency = elapsedMillis(started);
             record(
                     client,
@@ -121,6 +139,14 @@ public class LlmInvocationService {
 
     AuditContext currentContext() {
         return new AuditContext(SecurityUsers.current().userId(), MDC.get("traceId"));
+    }
+
+    void recordRetrievalBudget(String question, int reservedTokens) {
+        if (reservedTokens <= 0) return;
+        AuditContext context = currentContext();
+        try (var tokens = AssistantTokenBudget.open(reservedTokens, null)) {
+            usageRepository.saveBudget(context.traceId(), context.userId(), hash(question), tokens);
+        }
     }
 
     private void record(

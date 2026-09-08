@@ -1,9 +1,18 @@
-export interface AiContext { page?: string; service?: string; ticketId?: number; alertId?: string; environment?: string; timeRange?: string; evidenceBundleId?: string }
+export interface AiContext { page?: string; service?: string; ticketId?: number; alertId?: string; environment?: string; timeRange?: string }
+export interface AiObservabilityContext { service: string; environment: 'PROD' | 'DEMO'; timeRange: '5m' | '15m' | '30m' | '1h' | '6h' }
+export function serverObservabilityContext(scope: AiContext, question = ''): AiObservabilityContext | undefined {
+  if (/(?:什么是|原理|教程|如何设计|怎么设计|如何实现|常见原因|推荐.*(?:Runbook|手册|文档))/i.test(assistantQuestionBody(question))
+    && !/(?:当前|现在|最近).*(?:异常|故障|健康|状态|是否)/.test(assistantQuestionBody(question))) return undefined;
+  const context = cleanAiContext(scope);
+  if (!context.service || context.service.length > 64) return undefined;
+  return { service: context.service, environment: context.environment === 'PROD' ? 'PROD' : context.environment === 'DEMO' || context.service.startsWith('ops-demo-') ? 'DEMO' : 'PROD',
+    timeRange: ['5m', '15m', '30m', '1h', '6h'].includes(context.timeRange || '') ? context.timeRange as AiObservabilityContext['timeRange'] : '15m' };
+}
 const identifier = (value: unknown, limit = 120) => typeof value === 'string' && value.length <= limit && /^[\w.:-]+$/.test(value) ? value : undefined;
 export function cleanAiContext(context: AiContext): AiContext {
   return { page: typeof context.page === 'string' && /^\/[\w/-]*$/.test(context.page) ? context.page : undefined,
     service: identifier(context.service), ticketId: Number.isSafeInteger(context.ticketId) && Number(context.ticketId) > 0 ? context.ticketId : undefined,
-    alertId: identifier(context.alertId), environment: identifier(context.environment, 40), timeRange: identifier(context.timeRange, 20), ...(identifier(context.evidenceBundleId, 120) ? { evidenceBundleId: identifier(context.evidenceBundleId, 120) } : {}) };
+    alertId: identifier(context.alertId), environment: identifier(context.environment, 40), timeRange: identifier(context.timeRange, 20) };
 }
 export function contextFromRoute(route: { path: string; params: Record<string, unknown>; query: Record<string, unknown> }): AiContext {
   return cleanAiContext({ page: route.path,

@@ -24,6 +24,8 @@ groups:
         labels:
           severity: high
           service: ops-demo-order-service
+          service_ci_code: ops-demo-order-service
+          ci_code: ops-demo-order-service
           environment: ISOLATED_DEMO
         annotations:
           summary: "隔离订单服务真实业务请求失败"
@@ -37,6 +39,8 @@ groups:
         labels:
           severity: high
           service: ops-demo-notification-service
+          service_ci_code: ops-demo-notification-service
+          ci_code: ops-demo-notification-service
           environment: ISOLATED_DEMO
         annotations:
           summary: "隔离通知服务真实消息投递未完成"

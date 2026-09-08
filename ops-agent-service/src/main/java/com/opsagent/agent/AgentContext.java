@@ -17,6 +17,7 @@ final class AgentContext {
     private static final int TOOL_CHARACTERS = 1200;
     private static final String CLIPPED = " [已截断]";
     private static final String BUDGET_NOTE = "预算摘要；完整证据见持久化记录。\n";
+    private static final String ASSISTANT_NOTE = "历史分析节选；完整正文见持久化消息，工具调用保持完整。\n";
 
     private AgentContext() {}
 
@@ -320,6 +321,17 @@ final class AgentContext {
                 || request.path("tools").size() > 20) return false;
         if (fits(request)) return true;
         ArrayNode messages = (ArrayNode) request.path("messages");
+        for (JsonNode message : messages) {
+            if (!"assistant".equals(message.path("role").asText())
+                    || !message.path("tool_calls").isArray()
+                    || message.path("tool_calls").isEmpty()
+                    || !message.path("content").isTextual()) continue;
+            String content = message.path("content").asText();
+            if (content.length() <= 320) continue;
+            ((ObjectNode) message)
+                    .put("content", ASSISTANT_NOTE + clip(content, 320 - ASSISTANT_NOTE.length()));
+            if (fits(request)) return true;
+        }
         int recentBatch = messages.size();
         for (int index = 0; index < messages.size(); index++) {
             JsonNode message = messages.path(index);
@@ -359,7 +371,98 @@ final class AgentContext {
                 if (fits(request)) return true;
             }
         }
+        if (fits(request)) return true;
+        compactMappedMessages(request);
+        if (fits(request)) return true;
+        compactToolDescriptions(request);
+        if (fits(request)) return true;
+        long input = inputUpperBound(request);
+        long availableOutput =
+                Math.min(
+                        request.path("maxOutputTokens").asInt(),
+                        request.path("remainingTokens").asLong() - input);
+        if (input > 32768 || availableOutput < 1024) return false;
+        request.put("maxOutputTokens", (int) availableOutput);
         return fits(request);
+    }
+
+    /** 完整实测映射已存在时，去掉重复说明；原生参数及调用配对绝不裁剪。 */
+    static void compactMappedMessages(ObjectNode request) {
+        String system = request.path("messages").path(0).path("content").asText();
+        if (!system.contains(AgentEvidenceRegistry.MAPPING_PREFIX)) return;
+        for (JsonNode message : request.path("messages")) {
+            ObjectNode object = (ObjectNode) message;
+            if ("assistant".equals(message.path("role").asText())
+                    && message.path("tool_calls").isArray()) {
+                object.put("content", "");
+                continue;
+            }
+            if (!"tool".equals(message.path("role").asText())) continue;
+            String content = message.path("content").asText();
+            String original =
+                    content.startsWith(BUDGET_NOTE)
+                            ? content.substring(BUDGET_NOTE.length())
+                            : content;
+            if (content.startsWith(BUDGET_NOTE)) object.put("content", "[摘要]\n" + original);
+            boolean probe =
+                    original.startsWith("工具=demo_target_inspect；")
+                            && mappingCovers(system, "demo_target_inspect", original);
+            boolean changes =
+                    original.startsWith("工具=recent_changes；")
+                            && mappingCovers(system, "recent_changes", original);
+            boolean recorded = original.startsWith("工具=ticket_add_analysis；");
+            if (!probe && !changes && !recorded) continue;
+            StringBuilder compact = new StringBuilder(original.lines().findFirst().orElse(""));
+            if (recorded) compact.append(" 已返回写入结果。");
+            else compact.append(" 测量/质量见系统证据映射。");
+            original.lines()
+                    .filter(
+                            line ->
+                                    line.matches(
+                                            "(?:expectedRevision|appliedRevision|incidentId|targetCode|"
+                                                    + "observedAt|current|changesComplete|id|ticketId|"
+                                                    + "recordType|createTime)=.*"))
+                    .forEach(line -> compact.append('\n').append(line));
+            object.put("content", compact.toString());
+        }
+    }
+
+    private static boolean mappingCovers(String system, String tool, String projection) {
+        int start = system.indexOf(AgentEvidenceRegistry.MAPPING_PREFIX);
+        if (start < 0) return false;
+        var pointer =
+                java.util.regex.Pattern.compile("observations/([^。\\s]+)").matcher(projection);
+        return pointer.find()
+                && system.substring(start)
+                        .contains("\ntool=" + tool + ";observations/" + pointer.group(1) + "\n");
+    }
+
+    /** 只缩短新请求中的说明，不删除工具或改变参数、枚举和冻结权限。 */
+    private static void compactToolDescriptions(ObjectNode request) {
+        ArrayNode copied = request.path("tools").deepCopy();
+        for (JsonNode tool : copied) {
+            ObjectNode function = (ObjectNode) tool.path("function");
+            String description =
+                    switch (function.path("name").asText()) {
+                        case "ticket_get",
+                                "ticket_history",
+                                "demo_target_inspect",
+                                "observability_evidence",
+                                "recent_changes",
+                                "knowledge_search",
+                                "official_docs_search",
+                                "ticket_add_analysis" ->
+                                "";
+                        default -> null;
+                    };
+            if (description != null
+                    && description.getBytes(StandardCharsets.UTF_8).length
+                            < function.path("description")
+                                    .asText()
+                                    .getBytes(StandardCharsets.UTF_8)
+                                    .length) function.put("description", description);
+        }
+        request.set("tools", copied);
     }
 
     private static boolean fits(JsonNode request) {

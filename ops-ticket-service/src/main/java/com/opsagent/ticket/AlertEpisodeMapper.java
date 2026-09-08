@@ -28,14 +28,22 @@ public interface AlertEpisodeMapper {
             """)
     Episode lock(String id);
 
+    @Select(
+            "SELECT episode_id episodeId,alert_id alertId,fingerprint,starts_at"
+                + " startsAt,last_event_time lastEventTime,current_status currentStatus,ticket_id"
+                + " ticketId,incident_id incidentId,owner_actor_id"
+                + " ownerActorId,environment,resolved_at resolvedAt FROM monitor_alert_episode"
+                + " WHERE episode_id=#{id}")
+    Episode find(String id);
+
     @Select("SELECT MAX(starts_at) FROM monitor_alert_episode WHERE alert_id=#{alertId}")
     LocalDateTime latestStart(long alertId);
 
     @Insert(
             """
-            INSERT IGNORE INTO monitor_alert_delivery(delivery_key,episode_id,event_status,event_time)
-            VALUES(#{key},#{episodeId},#{status},#{time})
-            """)
+INSERT IGNORE INTO monitor_alert_delivery(delivery_key,episode_id,event_status,event_time)
+VALUES(#{key},#{episodeId},#{status},#{time})
+""")
     int delivery(String key, String episodeId, String status, LocalDateTime time);
 
     @Update(

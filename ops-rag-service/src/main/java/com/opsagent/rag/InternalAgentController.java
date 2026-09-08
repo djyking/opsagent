@@ -24,17 +24,20 @@ import org.springframework.web.bind.annotation.RestController;
 class InternalAgentController {
     private final InternalAgentModelService models;
     private final InternalAgentSearchService search;
+    private final InternalAgentUsageService usage;
     private final InternalActorTokens tokens;
     private final InternalActorAccess access;
 
     InternalAgentController(
             InternalAgentModelService models,
             InternalAgentSearchService search,
+            InternalAgentUsageService usage,
             @Value("${OPS_AGENT_INTERNAL_SECRET:}") String secret,
             @Value("${OPS_AUTH_INTERNAL_URL:${OPS_AGENT_AUTH_URL:http://ops-auth-service:8101}}")
                     String authUrl) {
         this.models = models;
         this.search = search;
+        this.usage = usage;
         tokens = new InternalActorTokens(secret);
         access = new InternalActorAccess(tokens, authUrl);
     }
@@ -65,6 +68,16 @@ class InternalAgentController {
         var actor = access.verify(authorization, "rag");
         try (var scope = InternalActorAccess.open(actor)) {
             return ApiResponse.success(models.turn(request, actor));
+        }
+    }
+
+    @GetMapping("/internal/ai/runs/{runId}/usage")
+    ApiResponse<?> usage(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @PathVariable String runId) {
+        var actor = access.verify(authorization, "rag");
+        try (var scope = InternalActorAccess.open(actor)) {
+            return ApiResponse.success(usage.usage(runId, actor));
         }
     }
 

@@ -1,0 +1,837 @@
+{
+  "ops-auth-service": {
+    "label": "认证服务",
+    "serviceId": "ops-auth-service",
+    "services": [
+      "ops-auth-service"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.datasource.url",
+        "label": "数据库地址",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.username",
+        "label": "数据库账号",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.data.redis.host",
+        "label": "Redis 地址",
+        "category": "缓存",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.data.redis.port",
+        "label": "Redis 端口",
+        "category": "缓存",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.auth.registration-enabled",
+        "label": "允许注册",
+        "category": "认证",
+        "type": "boolean",
+        "sensitive": false
+      },
+      {
+        "key": "ops.auth.captcha.peer-limit-per-minute",
+        "label": "验证码每分钟上限",
+        "category": "认证",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.datasource.hikari.maximum-pool-size",
+        "label": "连接池上限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 1,
+        "max": 8
+      },
+      {
+        "key": "spring.datasource.hikari.minimum-idle",
+        "label": "空闲连接下限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 4
+      }
+    ]
+  },
+  "ops-auth-service-secrets": {
+    "label": "认证服务 · 敏感参数",
+    "serviceId": "ops-auth-service",
+    "services": [
+      "ops-auth-service"
+    ],
+    "format": "yaml",
+    "sensitive": true,
+    "fields": [
+      {
+        "key": "spring.datasource.password",
+        "label": "数据库密码",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": true,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.data.redis.password",
+        "label": "Redis 密码",
+        "category": "缓存",
+        "type": "string",
+        "sensitive": true
+      }
+    ]
+  },
+  "ops-ticket-service": {
+    "label": "工单服务",
+    "serviceId": "ops-ticket-service",
+    "services": [
+      "ops-ticket-service"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.datasource.url",
+        "label": "数据库地址",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.username",
+        "label": "数据库账号",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.rabbitmq.host",
+        "label": "RabbitMQ 地址",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.rabbitmq.port",
+        "label": "RabbitMQ 端口",
+        "category": "消息",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.username",
+        "label": "RabbitMQ 账号",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.data.redis.host",
+        "label": "Redis 地址",
+        "category": "缓存",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.data.redis.port",
+        "label": "Redis 端口",
+        "category": "缓存",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.datasource.hikari.maximum-pool-size",
+        "label": "连接池上限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 1,
+        "max": 8
+      },
+      {
+        "key": "spring.datasource.hikari.minimum-idle",
+        "label": "空闲连接下限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 4
+      }
+    ]
+  },
+  "ops-ticket-service-secrets": {
+    "label": "工单服务 · 敏感参数",
+    "serviceId": "ops-ticket-service",
+    "services": [
+      "ops-ticket-service"
+    ],
+    "format": "yaml",
+    "sensitive": true,
+    "fields": [
+      {
+        "key": "spring.datasource.password",
+        "label": "数据库密码",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": true,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.password",
+        "label": "RabbitMQ 密码",
+        "category": "消息",
+        "type": "string",
+        "sensitive": true
+      },
+      {
+        "key": "spring.data.redis.password",
+        "label": "Redis 密码",
+        "category": "缓存",
+        "type": "string",
+        "sensitive": true
+      }
+    ]
+  },
+  "ops-knowledge-service": {
+    "label": "知识服务",
+    "serviceId": "ops-knowledge-service",
+    "services": [
+      "ops-knowledge-service"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.datasource.url",
+        "label": "数据库地址",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.username",
+        "label": "数据库账号",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.rabbitmq.host",
+        "label": "RabbitMQ 地址",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.rabbitmq.port",
+        "label": "RabbitMQ 端口",
+        "category": "消息",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.username",
+        "label": "RabbitMQ 账号",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.data.redis.host",
+        "label": "Redis 地址",
+        "category": "缓存",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.data.redis.port",
+        "label": "Redis 端口",
+        "category": "缓存",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.knowledge.chunk.max-tokens",
+        "label": "切片最大长度",
+        "category": "知识处理",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.knowledge.vector.enabled",
+        "label": "启用向量检索",
+        "category": "检索",
+        "type": "boolean",
+        "sensitive": false
+      },
+      {
+        "key": "ops.knowledge.vector.minimum-score",
+        "label": "向量最低分数",
+        "category": "检索",
+        "type": "number",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.hikari.maximum-pool-size",
+        "label": "连接池上限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 1,
+        "max": 8
+      },
+      {
+        "key": "spring.datasource.hikari.minimum-idle",
+        "label": "空闲连接下限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 4
+      },
+      {
+        "key": "ops.knowledge.chunk.target-tokens",
+        "label": "切片目标长度",
+        "category": "知识处理",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      }
+    ]
+  },
+  "ops-knowledge-service-secrets": {
+    "label": "知识服务 · 敏感参数",
+    "serviceId": "ops-knowledge-service",
+    "services": [
+      "ops-knowledge-service"
+    ],
+    "format": "yaml",
+    "sensitive": true,
+    "fields": [
+      {
+        "key": "spring.datasource.password",
+        "label": "数据库密码",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": true,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.password",
+        "label": "RabbitMQ 密码",
+        "category": "消息",
+        "type": "string",
+        "sensitive": true
+      },
+      {
+        "key": "spring.data.redis.password",
+        "label": "Redis 密码",
+        "category": "缓存",
+        "type": "string",
+        "sensitive": true
+      }
+    ]
+  },
+  "ops-rag-service": {
+    "label": "问答服务",
+    "serviceId": "ops-rag-service",
+    "services": [
+      "ops-rag-service"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.datasource.url",
+        "label": "数据库地址",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.username",
+        "label": "数据库账号",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "ops.rag.top-k",
+        "label": "检索片段数量",
+        "category": "检索",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.rag.max-context-tokens",
+        "label": "知识上下文上限",
+        "category": "检索",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.ai.enabled",
+        "label": "启用真实模型",
+        "category": "模型",
+        "type": "boolean",
+        "sensitive": false
+      },
+      {
+        "key": "ops.ai.timeout-seconds",
+        "label": "模型超时秒数",
+        "category": "模型",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.ai.max-output-tokens",
+        "label": "单轮输出上限",
+        "category": "模型",
+        "type": "integer",
+        "sensitive": false,
+        "min": 256,
+        "max": 8192
+      },
+      {
+        "key": "ops.ai.providers.deepseek.base-url",
+        "label": "DeepSeek 地址",
+        "category": "模型",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "ops.ai.providers.deepseek.model",
+        "label": "DeepSeek 模型",
+        "category": "模型",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.hikari.maximum-pool-size",
+        "label": "连接池上限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 1,
+        "max": 8
+      },
+      {
+        "key": "spring.datasource.hikari.minimum-idle",
+        "label": "空闲连接下限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 4
+      }
+    ]
+  },
+  "ops-rag-service-secrets": {
+    "label": "问答服务 · 敏感参数",
+    "serviceId": "ops-rag-service",
+    "services": [
+      "ops-rag-service"
+    ],
+    "format": "yaml",
+    "sensitive": true,
+    "fields": [
+      {
+        "key": "spring.datasource.password",
+        "label": "数据库密码",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": true,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.ai.providers.deepseek.api-key",
+        "label": "DeepSeek 密钥",
+        "category": "模型",
+        "type": "string",
+        "sensitive": true
+      }
+    ]
+  },
+  "ops-platform-service": {
+    "label": "平台服务",
+    "serviceId": "ops-platform-service",
+    "services": [
+      "ops-platform-service"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.datasource.url",
+        "label": "数据库地址",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.username",
+        "label": "数据库账号",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.rabbitmq.host",
+        "label": "RabbitMQ 地址",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.rabbitmq.port",
+        "label": "RabbitMQ 端口",
+        "category": "消息",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.username",
+        "label": "RabbitMQ 账号",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "ops.observability.error-rate-threshold",
+        "label": "错误率阈值",
+        "category": "观测",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.observability.sample-max-age-seconds",
+        "label": "样本有效期秒数",
+        "category": "观测",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "ops.operations.inspection-enabled",
+        "label": "启用持续巡检",
+        "category": "观测",
+        "type": "boolean",
+        "sensitive": false
+      },
+      {
+        "key": "ops.operations.inspection-interval-ms",
+        "label": "巡检间隔毫秒",
+        "category": "观测",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.datasource.hikari.maximum-pool-size",
+        "label": "连接池上限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 1,
+        "max": 8
+      },
+      {
+        "key": "spring.datasource.hikari.minimum-idle",
+        "label": "空闲连接下限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 4
+      }
+    ]
+  },
+  "ops-platform-service-secrets": {
+    "label": "平台服务 · 敏感参数",
+    "serviceId": "ops-platform-service",
+    "services": [
+      "ops-platform-service"
+    ],
+    "format": "yaml",
+    "sensitive": true,
+    "fields": [
+      {
+        "key": "spring.datasource.password",
+        "label": "数据库密码",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": true,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.password",
+        "label": "RabbitMQ 密码",
+        "category": "消息",
+        "type": "string",
+        "sensitive": true
+      }
+    ]
+  },
+  "ops-agent-service": {
+    "label": "自动化服务",
+    "serviceId": "ops-agent-service",
+    "services": [
+      "ops-agent-service"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.datasource.url",
+        "label": "数据库地址",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.username",
+        "label": "数据库账号",
+        "category": "数据库连接",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.datasource.hikari.maximum-pool-size",
+        "label": "连接池上限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 1,
+        "max": 8
+      },
+      {
+        "key": "spring.datasource.hikari.minimum-idle",
+        "label": "空闲连接下限",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 4
+      },
+      {
+        "key": "spring.rabbitmq.host",
+        "label": "RabbitMQ 地址",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.rabbitmq.port",
+        "label": "RabbitMQ 端口",
+        "category": "消息",
+        "type": "integer",
+        "sensitive": false,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.username",
+        "label": "RabbitMQ 账号",
+        "category": "消息",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "ops.agent.worker-enabled",
+        "label": "启用自动执行器",
+        "category": "自动化",
+        "type": "boolean",
+        "sensitive": false
+      },
+      {
+        "key": "ops.agent.model-max-output-tokens",
+        "label": "单轮输出上限",
+        "category": "自动化",
+        "type": "integer",
+        "sensitive": false,
+        "min": 256,
+        "max": 8192
+      },
+      {
+        "key": "ops.agent.run-token-budget",
+        "label": "单流程累计 token 上限",
+        "category": "自动化",
+        "type": "integer",
+        "sensitive": false,
+        "min": 1000,
+        "max": 40000
+      }
+    ]
+  },
+  "ops-agent-service-secrets": {
+    "label": "自动化服务 · 敏感参数",
+    "serviceId": "ops-agent-service",
+    "services": [
+      "ops-agent-service"
+    ],
+    "format": "yaml",
+    "sensitive": true,
+    "fields": [
+      {
+        "key": "spring.datasource.password",
+        "label": "数据库密码",
+        "category": "数据库连接",
+        "type": "integer",
+        "sensitive": true,
+        "min": 0,
+        "max": 1000000
+      },
+      {
+        "key": "spring.rabbitmq.password",
+        "label": "RabbitMQ 密码",
+        "category": "消息",
+        "type": "string",
+        "sensitive": true
+      }
+    ]
+  },
+  "ops-gateway": {
+    "label": "网关",
+    "serviceId": "ops-gateway",
+    "services": [
+      "ops-gateway"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.cloud.gateway.server.webflux.routes",
+        "label": "已登记服务路由",
+        "category": "网关",
+        "type": "json",
+        "sensitive": false
+      }
+    ]
+  },
+  "ops-gateway-secrets": {
+    "label": "网关 · 敏感参数",
+    "serviceId": "ops-gateway",
+    "services": [
+      "ops-gateway"
+    ],
+    "format": "yaml",
+    "sensitive": true,
+    "fields": []
+  },
+  "common": {
+    "label": "共用注册配置",
+    "serviceId": "common",
+    "services": [
+      "ops-auth-service",
+      "ops-ticket-service",
+      "ops-knowledge-service",
+      "ops-rag-service",
+      "ops-agent-service",
+      "ops-platform-service",
+      "ops-gateway"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "spring.cloud.nacos.discovery.enabled",
+        "label": "启用服务注册",
+        "category": "服务注册",
+        "type": "boolean",
+        "sensitive": false
+      },
+      {
+        "key": "spring.cloud.nacos.discovery.server-addr",
+        "label": "注册中心地址",
+        "category": "服务注册",
+        "type": "string",
+        "sensitive": false
+      },
+      {
+        "key": "spring.cloud.nacos.discovery.ip",
+        "label": "本机注册地址",
+        "category": "服务注册",
+        "type": "string",
+        "sensitive": false
+      }
+    ]
+  },
+  "prometheus": {
+    "label": "Prometheus 采集配置",
+    "serviceId": "prometheus",
+    "services": [
+      "prometheus"
+    ],
+    "format": "yaml",
+    "sensitive": false,
+    "fields": [
+      {
+        "key": "global.scrape_interval",
+        "label": "采集间隔",
+        "category": "采集",
+        "type": "string",
+        "pattern": "^[1-9][0-9]*(ms|s|m)$"
+      },
+      {
+        "key": "global.evaluation_interval",
+        "label": "规则计算间隔",
+        "category": "采集",
+        "type": "string",
+        "pattern": "^[1-9][0-9]*(ms|s|m)$"
+      },
+      {
+        "key": "scrape_configs",
+        "label": "已登记采集任务",
+        "category": "采集",
+        "type": "json"
+      }
+    ]
+  }
+}

@@ -15,6 +15,11 @@ export interface LoginResponse {
   refreshToken: string;
   tokenType: string;
   expiresAt: string;
+  sessionId?: string;
+  sessionStartedAt?: string;
+  sessionExpiresAt?: string;
+  idleExpiresAt?: string;
+  lastActivityAt?: string;
 }
 export interface CurrentUser {
   userId: number;
@@ -41,6 +46,10 @@ export interface Ticket {
   description: string;
   priority: TicketPriority;
   status: TicketStatus;
+  eventId?: string;
+  eventStage?: 'HANDLING' | 'VERIFYING' | 'CLOSED' | 'LEGACY_ARCHIVED';
+  eventClosed?: boolean;
+  eventLegacyArchived?: boolean;
   creatorId: number;
   assigneeId?: number;
   affectedCiCode?: string;
@@ -102,6 +111,8 @@ export interface AiReference {
   sourceUrl?: string;
   sourceUpdatedAt?: string;
   sourceRetrievedAt?: string;
+  evidenceBundleId?: string;
+  evidenceId?: string;
   headingPath?: string;
   pageStart?: number;
   pageEnd?: number;

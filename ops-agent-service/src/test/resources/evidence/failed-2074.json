@@ -1,0 +1,1004 @@
+[
+  {
+    "id": "6e41e77f-da7f-43a6-9f6e-3ac7676e3cb7",
+    "createdAt": "2026-09-07T14:19:59.242000+00:00",
+    "state": {
+      "ticketId": 2074,
+      "incidentId": "c7e4230c-6bd2-4432-80ff-8e98491de092",
+      "targetCode": "ops-demo-order-service",
+      "deadline": "2026-09-07T14:34:59.172064900Z",
+      "tokens": 27575,
+      "turns": 3,
+      "toolCount": 7,
+      "toolIntent": {
+        "id": "diagnose:3:0",
+        "providerCallId": "call_00_emTFe8lgv8CZyOSAJiLJ9045",
+        "name": "ticket_add_analysis",
+        "arguments": {
+          "evidence": "observability_evidence bundle=722effbb-3e0d-44b1-83d1-274c3685a5b0; demo_target_inspect (appliedRevision/expectedRevision=6d5f3a..., redisPort=6380, business.httpStatus=503, reasonCode=REDIS_CONNECT_FAILED, consecutiveSuccesses=0, observedAt=2026-09-07T14:20:30Z); recent_changes change runtime-4690: redisPort 6379→6380, revision 0538...→6d5f3a..., occurredAt 2026-09-07T14:19:02Z, source=TARGET_RUNTIME RUNTIME_CONFIGURATION_APPLIED",
+          "recommendation": "审批并执行 demo_config_restore，将订单服务 Redis 连接配置恢复到基线（redisPort 回 6379、基线 revision），随后重新实测业务 HTTP 探针与组件指标，待连续成功后再推进结单。",
+          "summary": "工单 2074 隔离事件订单服务业务 503，reasonCode=REDIS_CONNECT_FAILED。14:19:02 的一次运行时配置变更将 redisPort 由 6379 改为 6380（revision 0538→6d5f3a），与业务 Redis 连接失败强相关。目标当前 applied=6d5f3a、redisPort=6380。证据链表明 Redis 连接端口偏离基线导致连接失败。",
+          "candidateCauses": "1.RUNTIME 配置变更将 redisPort 由 6379 改为 6380，业务仍按旧配置/错误端口连接 Redis，导致 REDIS_CONNECT_FAILED（强证据）。2.Sentinel 存在被阻断量（blockedTotal=229），若随之变更可能叠加流控，但业务 reasonCode 为连接失败而非流控受限，作为次要候选。",
+          "knownFacts": "业务 HTTP=503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0；现 redisPort=6380；recent_changes 显示变更 runtime-4690 于 14:19:02Z 将 redisPort 6379→6380；快照 observedAt=14:20:30Z 晚于变更；config revision 0538→6d5f3a。",
+          "evidenceGaps": "变更发生时刻与故障时间接近，需确认 6380 端口是否存在可用的 Redis 监听、应用实际连接目标及 sentinel 规则是否同步被本变更改动；恢复后是否回归基线。",
+          "conclusionLevel": "SUPPORTED"
+        }
+      },
+      "pendingCalls": [
+        {
+          "id": "diagnose:3:0",
+          "providerCallId": "call_00_emTFe8lgv8CZyOSAJiLJ9045",
+          "name": "ticket_add_analysis",
+          "arguments": {
+            "evidence": "observability_evidence bundle=722effbb-3e0d-44b1-83d1-274c3685a5b0; demo_target_inspect (appliedRevision/expectedRevision=6d5f3a..., redisPort=6380, business.httpStatus=503, reasonCode=REDIS_CONNECT_FAILED, consecutiveSuccesses=0, observedAt=2026-09-07T14:20:30Z); recent_changes change runtime-4690: redisPort 6379→6380, revision 0538...→6d5f3a..., occurredAt 2026-09-07T14:19:02Z, source=TARGET_RUNTIME RUNTIME_CONFIGURATION_APPLIED",
+            "recommendation": "审批并执行 demo_config_restore，将订单服务 Redis 连接配置恢复到基线（redisPort 回 6379、基线 revision），随后重新实测业务 HTTP 探针与组件指标，待连续成功后再推进结单。",
+            "summary": "工单 2074 隔离事件订单服务业务 503，reasonCode=REDIS_CONNECT_FAILED。14:19:02 的一次运行时配置变更将 redisPort 由 6379 改为 6380（revision 0538→6d5f3a），与业务 Redis 连接失败强相关。目标当前 applied=6d5f3a、redisPort=6380。证据链表明 Redis 连接端口偏离基线导致连接失败。",
+            "candidateCauses": "1.RUNTIME 配置变更将 redisPort 由 6379 改为 6380，业务仍按旧配置/错误端口连接 Redis，导致 REDIS_CONNECT_FAILED（强证据）。2.Sentinel 存在被阻断量（blockedTotal=229），若随之变更可能叠加流控，但业务 reasonCode 为连接失败而非流控受限，作为次要候选。",
+            "knownFacts": "业务 HTTP=503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0；现 redisPort=6380；recent_changes 显示变更 runtime-4690 于 14:19:02Z 将 redisPort 6379→6380；快照 observedAt=14:20:30Z 晚于变更；config revision 0538→6d5f3a。",
+            "evidenceGaps": "变更发生时刻与故障时间接近，需确认 6380 端口是否存在可用的 Redis 监听、应用实际连接目标及 sentinel 规则是否同步被本变更改动；恢复后是否回归基线。",
+            "conclusionLevel": "SUPPORTED"
+          }
+        }
+      ],
+      "observations": {
+        "diagnose:1:2": {
+          "targetCode": "ops-demo-order-service",
+          "scope": "ISOLATED_DEMO",
+          "incidentId": "c7e4230c-6bd2-4432-80ff-8e98491de092",
+          "status": "FAULT_ACTIVE",
+          "redisPort": 6380,
+          "business": {
+            "httpStatus": 503,
+            "reasonCode": "REDIS_CONNECT_FAILED",
+            "consecutiveSuccesses": 0,
+            "observedAt": "2026-09-07T14:20:30.749806100Z"
+          },
+          "configuration": {
+            "sentinelQps": 5,
+            "sentinelResource": "ops-demo-order-query",
+            "revision": "6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d",
+            "redisPort": 6380
+          },
+          "expectedRevision": "6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d",
+          "observedAt": "2026-09-07T14:20:30.751332200Z"
+        },
+        "diagnose:1:3": {
+          "incidentId": "c7e4230c-6bd2-4432-80ff-8e98491de092",
+          "targetCode": "ops-demo-order-service",
+          "current": true,
+          "changes": [
+            {
+              "id": "runtime-4690",
+              "targetCode": "ops-demo-order-service",
+              "kind": "RUNTIME_CONFIGURATION_APPLIED",
+              "occurredAt": "2026-09-07T14:19:02.130Z",
+              "observedAt": "2026-09-07T14:19:02.135Z",
+              "status": "OBSERVED",
+              "source": "TARGET_RUNTIME",
+              "before": {
+                "sentinelQps": 5,
+                "sentinelResource": "ops-demo-order-query",
+                "revision": "0538020e5c941418b82eac1db9a1e7f18870f744159cf22dafc66726762afc0e",
+                "redisPort": 6379
+              },
+              "after": {
+                "sentinelQps": 5,
+                "sentinelResource": "ops-demo-order-query",
+                "revision": "6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d",
+                "redisPort": 6380
+              },
+              "causality": "NOT_ESTABLISHED"
+            }
+          ],
+          "observedAt": "2026-09-07T14:20:33.762075Z"
+        },
+        "diagnose:1:4": {
+          "evidenceBundleId": "722effbb-3e0d-44b1-83d1-274c3685a5b0",
+          "service": "ops-demo-order-service",
+          "environment": "DEMO",
+          "ticketId": 2074,
+          "collectedAt": "2026-09-07T14:20:36.732337800Z",
+          "entries": [
+            {
+              "id": "evidence:observation:97d85e45-59ca-4e99-bbbe-46c2f980cfa5",
+              "source": "OBSERVABILITY",
+              "observedAt": null,
+              "quality": "NOT_CONFIGURED",
+              "data": {
+                "ciCode": "ops-demo-order-service",
+                "environment": "DEMO",
+                "businessProbe": 0.0,
+                "healthReasonCode": "BUSINESS_PROBE_FAILED"
+              }
+            },
+            {
+              "id": "evidence:inspections:ca8fa12b-9425-49da-a48e-96d2c3cf0695",
+              "source": "INSPECTION_HISTORY",
+              "observedAt": "2026-09-07T14:07:26.350Z",
+              "quality": "READY",
+              "data": {}
+            },
+            {
+              "id": "evidence:changes:2b32a742-296b-4661-b21d-548ce321c409",
+              "source": "CONFIGURATION_AUDIT",
+              "observedAt": null,
+              "quality": "NO_DATA",
+              "data": {}
+            },
+            {
+              "id": "evidence:incidents:c2278116-241c-4594-9466-748a1fe6d2bb",
+              "source": "DEMO_INCIDENT_HISTORY",
+              "observedAt": "2026-09-07T14:19:01.685Z",
+              "quality": "READY",
+              "data": {}
+            },
+            {
+              "id": "evidence:instances:75b68781-40f4-4ca2-812a-a0216dcc2ac5",
+              "source": "TRACE_RESOURCE",
+              "observedAt": null,
+              "quality": "NO_DATA",
+              "data": {}
+            },
+            {
+              "id": "evidence:history:02ee3701-1891-45ec-bc82-39dc78c3a2ec",
+              "source": "TOPOLOGY_HISTORY",
+              "observedAt": "2026-09-07T14:19:55.662Z",
+              "quality": "READY",
+              "data": {}
+            },
+            {
+              "id": "evidence:traces:c0d04eff-c94c-403a-bed5-8eec1d732dea",
+              "source": "TEMPO",
+              "observedAt": null,
+              "quality": "NO_DATA",
+              "data": {}
+            },
+            {
+              "id": "evidence:ticket:0ddb82cf-5f13-4422-92d4-a0f8aee55dfa",
+              "source": "TICKET_WORKSPACE",
+              "observedAt": null,
+              "quality": "READY",
+              "data": {}
+            }
+          ]
+        }
+      },
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_00_sLrfHoOb5G0DZ7BfeEi83127",
+              "type": "function",
+              "function": {
+                "name": "ticket_get",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_01_tNcllxAi3O4M80wYkh8Y8726",
+              "type": "function",
+              "function": {
+                "name": "ticket_history",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_02_jLYNVw9FsYWXS635EY7r7465",
+              "type": "function",
+              "function": {
+                "name": "demo_target_inspect",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_03_jezcsKKMilhqm4y9cpd68858",
+              "type": "function",
+              "function": {
+                "name": "recent_changes",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_04_QGOdV1Js1rbv3TyGiZhb2400",
+              "type": "function",
+              "function": {
+                "name": "observability_evidence",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_00_sLrfHoOb5G0DZ7BfeEi83127",
+          "content": "工具=ticket_get；字段有省略，原文 observations/diagnose:1:0。\nid=2074\nstatus=CREATED\npriority=HIGH\nversion=0\nincidentId=c7e4230c-6bd2-4432-80ff-8e98491de092\naffectedCiCode=ops-demo-order-service\nsourceType=ISOLATED_DRILL\nenvironment=ISOLATED\nticketNo=ALT-20260907-3EF434AB\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_01_tNcllxAi3O4M80wYkh8Y8726",
+          "content": "工具=ticket_history；字段有省略，原文 observations/diagnose:1:1。\n历史记录总数=1\nhistory[0].operationType=ALERT_CREATE\nhistory[0].toStatus=CREATED\nhistory[0].createTime=2026-09-07T22:19:31\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_02_jLYNVw9FsYWXS635EY7r7465",
+          "content": "工具=demo_target_inspect；字段有省略，原文 observations/diagnose:1:2。\nexpectedRevision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d\nappliedRevision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d\nincidentId=c7e4230c-6bd2-4432-80ff-8e98491de092\nstatus=FAULT_ACTIVE\nconfigurationStatus=APPLIED\nredisPort=6380\nrecoverySource=\nbusiness.httpStatus=503\nbusiness.reasonCode=REDIS_CONNECT_FAILED\nbusiness.consecutiveSuccesses=0\nbusiness.observedAt=2026-09-07T14:20:30.749806100Z\nsentinel.qps=5\nsentinel.blockedTotal=229.0\nsentinel.passedTotal=1835.0\nsentinel.resource=ops-demo-order-query\ntargetCode=ops-demo-order-service\nobservedAt=2026-09-07T14:20:30.751332200Z\nconfiguration.redisPort=6380\nconfiguration.sentinelQps=5\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_03_jezcsKKMilhqm4y9cpd68858",
+          "content": "工具=recent_changes；字段有省略，原文 observations/diagnose:1:3。\nincidentId=c7e4230c-6bd2-4432-80ff-8e98491de092\ntargetCode=ops-demo-order-service\ncurrent=true\n变更与故障的时间关联尚不等于根因；需结合业务探针和组件指标核验。\nchanges[0].id=runtime-4690\nchanges[0].kind=RUNTIME_CONFIGURATION_APPLIED\nchanges[0].source=TARGET_RUNTIME\nchanges[0].status=OBSERVED\nchanges[0].occurredAt=2026-09-07T14:19:02.130Z\nchanges[0].observedAt=2026-09-07T14:19:02.135Z\nchanges[0].before.redisPort=6379\nchanges[0].before.sentinelQps=5\nchanges[0].before.revision=0538020e5c941418b82eac1db9a1e7f18870f744159cf22dafc66726762afc0e\nchanges[0].after.redisPort=6380\nchanges[0].after.sentinelQps=5\nchanges[0].after.revision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_04_QGOdV1Js1rbv3TyGiZhb2400",
+          "content": "工具=observability_evidence；字段有省略，原文 observations/diagnose:1:4。\nevidenceBundleId=722effbb-3e0d-44b1-83d1-274c3685a5b0\nservice=ops-demo-order-service\nenvironment=DEMO\ntimeRange=30m\ncollectedAt=2026-09-07T14:20:36.732337800Z\nquality=PARTIAL\n证据缺口=[\"OBSERVATION_NOT_CONFIGURED\",\"TRACE_NOT_CONFIGURED\"]\n[evidence:observation:97d85e45-59ca-4e99-bbbe-46c2f980cfa5] OBSERVABILITY @null NOT_CONFIGURED 健康=CRITICAL；范围=BUSINESS_PROBE；采集=NOT_CONFIGURED；原因=TARGET_NOT_CONFIGURED；RPS=UNKNOWN；错误率%=UNKNOWN；P95ms=UNKNOWN；业务探针=0.0\n[evidence:inspections:ca8fa12b-9425-49da-a48e-96d2c3cf0695] INSPECTION_HISTORY @2026-09-07T14:07:26.350Z READY 运行执行状态与检查结果分别记录；首条结果=PASS\n[evidence:changes:2b32a742-296b-4661-b21d-548ce321c409] CONFIGURATION_AUDIT @null NO_DATA 可见配置变更=0；最新状态=NO_DATA；发布记录本身不能证明目标实例已生效\n[evidence:incidents:c2278116-241c-4594-9466-748a1fe6d2bb] DEMO_INCIDENT_HISTORY @2026-09-07T14:19:01.685Z READY 当前账号可见的隔离演练记录=5；最新状态=FAULT_ACTIVE\n[evidence:instances:75b68781-40f4-4ca2-812a-a0216dcc2ac5] TRACE_RESOURCE @null NO_DATA Trace资源实例=0；无新Trace不等于实例停止，Docker环境不构造Pod\n[evidence:history:02ee3701-1891-45ec-bc82-39dc78c3a2ec] TOPOLOGY_HISTORY @2026-09-07T14:19:55.662Z READY 本窗口实际持久化快照=30；缺口未用当前状态补造\n[evidence [已截断]\n"
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_00_oEorZ5QIWkqsLerxw7q05969",
+              "type": "function",
+              "function": {
+                "name": "knowledge_search",
+                "arguments": "{\"query\": \"订单服务 Redis 连接失败 redisPort 端口变更连接基线恢复 REDIS_CONNECT_FAILED\"}"
+              }
+            },
+            {
+              "id": "call_01_4iztSx0arzNZlLDcuf2v3661",
+              "type": "function",
+              "function": {
+                "name": "knowledge_search",
+                "arguments": "{\"query\": \"Redis连接配置基线恢复 demo_config_restore revision\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_00_emTFe8lgv8CZyOSAJiLJ9045",
+              "type": "function",
+              "function": {
+                "name": "ticket_add_analysis",
+                "arguments": "{\"evidence\": \"observability_evidence bundle=722effbb-3e0d-44b1-83d1-274c3685a5b0; demo_target_inspect (appliedRevision/expectedRevision=6d5f3a..., redisPort=6380, business.httpStatus=503, reasonCode=REDIS_CONNECT_FAILED, consecutiveSuccesses=0, observedAt=2026-09-07T14:20:30Z); recent_changes change runtime-4690: redisPort 6379→6380, revision 0538...→6d5f3a..., occurredAt 2026-09-07T14:19:02Z, source=TARGET_RUNTIME RUNTIME_CONFIGURATION_APPLIED\", \"recommendation\": \"审批并执行 demo_config_restore，将订单服务 Redis 连接配置恢复到基线（redisPort 回 6379、基线 revision），随后重新实测业务 HTTP 探针与组件指标，待连续成功后再推进结单。\", \"summary\": \"工单 2074 隔离事件订单服务业务 503，reasonCode=REDIS_CONNECT_FAILED。14:19:02 的一次运行时配置变更将 redisPort 由 6379 改为 6380（revision 0538→6d5f3a），与业务 Redis 连接失败强相关。目标当前 applied=6d5f3a、redisPort=6380。证据链表明 Redis 连接端口偏离基线导致连接失败。\", \"candidateCauses\": \"1.RUNTIME 配置变更将 redisPort 由 6379 改为 6380，业务仍按旧配置/错误端口连接 Redis，导致 REDIS_CONNECT_FAILED（强证据）。2.Sentinel 存在被阻断量（blockedTotal=229），若随之变更可能叠加流控，但业务 reasonCode 为连接失败而非流控受限，作为次要候选。\", \"knownFacts\": \"业务 HTTP=503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0；现 redisPort=6380；recent_changes 显示变更 runtime-4690 于 14:19:02Z 将 redisPort 6379→6380；快照 observedAt=14:20:30Z 晚于变更；config revision 0538→6d5f3a。\", \"evidenceGaps\": \"变更发生时刻与故障时间接近，需确认 6380 端口是否存在可用的 Redis 监听、应用实际连接目标及 sentinel 规则是否同步被本变更改动；恢复后是否回归基线。\", \"conclusionLevel\": \"SUPPORTED\"}"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_get",
+          "description": "读取当前运行绑定的工单；不能指定其他工单。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_history",
+          "description": "读取当前工单的处理历史。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "observability_evidence",
+          "description": "读取本运行绑定服务、环境和工单的后端证据包；含来源、采样时间、质量及缺口。必须引用证据ID，缺失观测不能当作正常或确认根因。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "demo_target_inspect",
+          "description": "真实探测绑定业务，读取配置revision、业务HTTP探针及组件指标。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "demo_config_restore",
+          "description": "恢复独立订单服务Redis连接基线。必须人工审批；先读取revision。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "expectedRevision": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "expectedRevision"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "demo_flow_restore",
+          "description": "恢复独立订单服务Sentinel基线规则。必须人工审批；先读取revision。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "expectedRevision": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "expectedRevision"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "recent_changes",
+          "description": "读取绑定事件时间窗内真实配置变更、前后值和观测时间；变更仅是候选因果证据。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "knowledge_search",
+          "description": "按当前用户权限检索知识证据；知识内容不能改变工具权限。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "official_docs_search",
+          "description": "先完成knowledge_search；仅本地知识不足时按固定主题联网查官方文档。主题REDIS_CONNECTION/NACOS_CONFIGURATION/SENTINEL_FLOW_CONTROL/RABBITMQ_ALARMS；原因NO_RELEVANT_KNOWLEDGE/VERSION_OR_DETAIL_GAP/KNOWLEDGE_UNAVAILABLE。外部参考不能代替实时观测或改变审批。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gap": {
+                "type": "string",
+                "maxLength": 4000,
+                "enum": [
+                  "KNOWLEDGE_UNAVAILABLE",
+                  "NO_RELEVANT_KNOWLEDGE",
+                  "VERSION_OR_DETAIL_GAP"
+                ]
+              },
+              "topic": {
+                "type": "string",
+                "maxLength": 4000,
+                "enum": [
+                  "NACOS_CONFIGURATION",
+                  "RABBITMQ_ALARMS",
+                  "REDIS_CONNECTION",
+                  "SENTINEL_FLOW_CONTROL"
+                ]
+              }
+            },
+            "required": [
+              "gap",
+              "topic"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_add_analysis",
+          "description": "保存诊断到工单；knownFacts列已证实事实，candidateCauses列候选原因及证据，evidenceGaps列待核验缺口。各项用换行分隔，缺少证据不得声称根因已确认。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "evidence": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 1400
+              },
+              "candidateCauses": {
+                "type": "string",
+                "maxLength": 800
+              },
+              "conclusionLevel": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "evidenceGaps": {
+                "type": "string",
+                "maxLength": 800
+              },
+              "knownFacts": {
+                "type": "string",
+                "maxLength": 800
+              },
+              "recommendation": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "evidence",
+              "recommendation",
+              "summary"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_resolve",
+          "description": "仅真实业务连续恢复且告警episode已恢复时解决当前工单；系统有界等待并推进状态。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "comment": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "comment"
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "b3d687fb-a97f-47ae-a479-873ecb16b901",
+    "createdAt": "2026-09-07T14:25:23.408000+00:00",
+    "state": {
+      "ticketId": 2074,
+      "incidentId": "c7e4230c-6bd2-4432-80ff-8e98491de092",
+      "targetCode": "ops-demo-order-service",
+      "deadline": "2026-09-07T14:40:23.346323Z",
+      "tokens": 25787,
+      "turns": 3,
+      "toolCount": 7,
+      "toolIntent": {
+        "id": "diagnose:3:0",
+        "providerCallId": "call_00_3eqmyc6yCzZAqs6Iawxm6132",
+        "name": "ticket_add_analysis",
+        "arguments": {
+          "conclusionLevel": "SUPPORTED",
+          "knownFacts": "业务探针当前 HTTP 503，reasonCode=REDIS_CONNECT_FAILED，consecutiveSuccesses=0（observedAt=2026-09-07T14:25:55Z）。\n配置变更 runtime-4690（RUNTIME_CONFIGURATION_APPLIED，occurredAt=2026-09-07T14:19:02Z）将 redisPort 由 6379 改为 6380（before.revision=0538..→after）。\ndemo_target_inspect 当前配置 appliedRevision=expectedRevision=6d5f3a6148175c…，redisPort=6380 已 APPLIED。\n故障时间与 redis 端口变更时间紧密接近。",
+          "candidateCauses": "独立订单服务被下发将 redisPort 指向 6380 的配置，而 Redis 实际监听 6379，导致客户端 REDIS_CONNECT_FAILED，业务接口 503。【主候选，时间关联紧密且字段直接吻合】",
+          "evidenceGaps": "未见 Redis 服务端端口监听清单以确认 6380 不可用（可作为只读进一步核验项）；但 redisPort 变更与 REDIS_CONNECT_FAILED 字段直接对应。",
+          "evidence": "demo_target_inspect（incidentId=c7e4230c…, status=FAULT_ACTIVE, httpStatus=503, REDIS_CONNECT_FAILED, redisPort=6380, revision=6d5f3a…）；recent_changes runtime-4690（redisPort 6379→6380, occurredAt=14:19:02Z）；observability_evidence bundleId=3d9d71fd…",
+          "recommendation": "恢复独立订单服务 Redis 连接基线，将 redisPort 回置为 6379（config_restore，需要人工审批，目标 revision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d）。恢复后重新探测业务探针确认 200。",
+          "summary": "隔离事件 c7e4230c 触发的订单服务故障根因证据支持为：配置 runtime-4690 将 redisPort 从 6379 误改为 6380，与实际 Redis 监听端口不符，导致服务 REDIS_CONNECT_FAILED、业务 HTTP 503。建议通过 config_restore 恢复 Redis 连接基线（redisPort 回 6379），需人工审批。"
+        }
+      },
+      "pendingCalls": [
+        {
+          "id": "diagnose:3:0",
+          "providerCallId": "call_00_3eqmyc6yCzZAqs6Iawxm6132",
+          "name": "ticket_add_analysis",
+          "arguments": {
+            "conclusionLevel": "SUPPORTED",
+            "knownFacts": "业务探针当前 HTTP 503，reasonCode=REDIS_CONNECT_FAILED，consecutiveSuccesses=0（observedAt=2026-09-07T14:25:55Z）。\n配置变更 runtime-4690（RUNTIME_CONFIGURATION_APPLIED，occurredAt=2026-09-07T14:19:02Z）将 redisPort 由 6379 改为 6380（before.revision=0538..→after）。\ndemo_target_inspect 当前配置 appliedRevision=expectedRevision=6d5f3a6148175c…，redisPort=6380 已 APPLIED。\n故障时间与 redis 端口变更时间紧密接近。",
+            "candidateCauses": "独立订单服务被下发将 redisPort 指向 6380 的配置，而 Redis 实际监听 6379，导致客户端 REDIS_CONNECT_FAILED，业务接口 503。【主候选，时间关联紧密且字段直接吻合】",
+            "evidenceGaps": "未见 Redis 服务端端口监听清单以确认 6380 不可用（可作为只读进一步核验项）；但 redisPort 变更与 REDIS_CONNECT_FAILED 字段直接对应。",
+            "evidence": "demo_target_inspect（incidentId=c7e4230c…, status=FAULT_ACTIVE, httpStatus=503, REDIS_CONNECT_FAILED, redisPort=6380, revision=6d5f3a…）；recent_changes runtime-4690（redisPort 6379→6380, occurredAt=14:19:02Z）；observability_evidence bundleId=3d9d71fd…",
+            "recommendation": "恢复独立订单服务 Redis 连接基线，将 redisPort 回置为 6379（config_restore，需要人工审批，目标 revision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d）。恢复后重新探测业务探针确认 200。",
+            "summary": "隔离事件 c7e4230c 触发的订单服务故障根因证据支持为：配置 runtime-4690 将 redisPort 从 6379 误改为 6380，与实际 Redis 监听端口不符，导致服务 REDIS_CONNECT_FAILED、业务 HTTP 503。建议通过 config_restore 恢复 Redis 连接基线（redisPort 回 6379），需人工审批。"
+          }
+        }
+      ],
+      "observations": {
+        "diagnose:1:2": {
+          "targetCode": "ops-demo-order-service",
+          "scope": "ISOLATED_DEMO",
+          "incidentId": "c7e4230c-6bd2-4432-80ff-8e98491de092",
+          "status": "FAULT_ACTIVE",
+          "redisPort": 6380,
+          "business": {
+            "httpStatus": 503,
+            "reasonCode": "REDIS_CONNECT_FAILED",
+            "consecutiveSuccesses": 0,
+            "observedAt": "2026-09-07T14:25:55.867216Z"
+          },
+          "configuration": {
+            "sentinelQps": 5,
+            "sentinelResource": "ops-demo-order-query",
+            "revision": "6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d",
+            "redisPort": 6380
+          },
+          "expectedRevision": "6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d",
+          "observedAt": "2026-09-07T14:25:55.868780800Z"
+        },
+        "diagnose:1:3": {
+          "incidentId": "c7e4230c-6bd2-4432-80ff-8e98491de092",
+          "targetCode": "ops-demo-order-service",
+          "current": true,
+          "changes": [
+            {
+              "id": "runtime-4690",
+              "targetCode": "ops-demo-order-service",
+              "kind": "RUNTIME_CONFIGURATION_APPLIED",
+              "occurredAt": "2026-09-07T14:19:02.130Z",
+              "observedAt": "2026-09-07T14:19:02.135Z",
+              "status": "OBSERVED",
+              "source": "TARGET_RUNTIME",
+              "before": {
+                "sentinelQps": 5,
+                "sentinelResource": "ops-demo-order-query",
+                "revision": "0538020e5c941418b82eac1db9a1e7f18870f744159cf22dafc66726762afc0e",
+                "redisPort": 6379
+              },
+              "after": {
+                "sentinelQps": 5,
+                "sentinelResource": "ops-demo-order-query",
+                "revision": "6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d",
+                "redisPort": 6380
+              },
+              "causality": "NOT_ESTABLISHED"
+            }
+          ],
+          "observedAt": "2026-09-07T14:25:58.813343900Z"
+        },
+        "diagnose:1:4": {
+          "evidenceBundleId": "3d9d71fd-c85e-4873-b33d-09231e057763",
+          "service": "ops-demo-order-service",
+          "environment": "DEMO",
+          "ticketId": 2074,
+          "collectedAt": "2026-09-07T14:26:01.762572600Z",
+          "entries": [
+            {
+              "id": "evidence:observation:b767b5cd-7c70-4030-9abc-ee5b74bc88b4",
+              "source": "OBSERVABILITY",
+              "observedAt": null,
+              "quality": "NOT_CONFIGURED",
+              "data": {
+                "ciCode": "ops-demo-order-service",
+                "environment": "DEMO",
+                "businessProbe": 0.0,
+                "healthReasonCode": "BUSINESS_PROBE_FAILED"
+              }
+            },
+            {
+              "id": "evidence:inspections:f5cee1fb-5ca6-488f-aaaf-efb5eedc5a35",
+              "source": "INSPECTION_HISTORY",
+              "observedAt": "2026-09-07T14:22:26.755Z",
+              "quality": "READY",
+              "data": {}
+            },
+            {
+              "id": "evidence:changes:a9804ffc-48a7-437f-a475-ffb18910e2e0",
+              "source": "CONFIGURATION_AUDIT",
+              "observedAt": null,
+              "quality": "NO_DATA",
+              "data": {}
+            },
+            {
+              "id": "evidence:incidents:ae8e94ee-6ae0-42cf-b8de-ced1e53b27d3",
+              "source": "DEMO_INCIDENT_HISTORY",
+              "observedAt": "2026-09-07T14:19:01.685Z",
+              "quality": "READY",
+              "data": {}
+            },
+            {
+              "id": "evidence:instances:fa6c4a93-1d6f-4259-a74f-f73b07d38efb",
+              "source": "TRACE_RESOURCE",
+              "observedAt": null,
+              "quality": "NO_DATA",
+              "data": {}
+            },
+            {
+              "id": "evidence:history:e7e10e57-28e4-4621-80bd-ef373c4f0f0f",
+              "source": "TOPOLOGY_HISTORY",
+              "observedAt": "2026-09-07T14:25:55.658Z",
+              "quality": "READY",
+              "data": {}
+            },
+            {
+              "id": "evidence:traces:983a6488-ebe4-45a1-afd0-e3e2a3cae1ae",
+              "source": "TEMPO",
+              "observedAt": null,
+              "quality": "NO_DATA",
+              "data": {}
+            },
+            {
+              "id": "evidence:ticket:c55412bd-4b39-40f0-848b-05be6523142a",
+              "source": "TICKET_WORKSPACE",
+              "observedAt": null,
+              "quality": "READY",
+              "data": {}
+            }
+          ]
+        }
+      },
+      "messages": [
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_00_pkeLrcvVDgXtnb8Jucl21358",
+              "type": "function",
+              "function": {
+                "name": "ticket_get",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_01_B2jaEvxCA65b4AA2fqLX4121",
+              "type": "function",
+              "function": {
+                "name": "ticket_history",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_02_yomKpDPd1L67Mphn2bk47083",
+              "type": "function",
+              "function": {
+                "name": "demo_target_inspect",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_03_FyLnliQsHjZhMmH0TwiY1438",
+              "type": "function",
+              "function": {
+                "name": "recent_changes",
+                "arguments": "{}"
+              }
+            },
+            {
+              "id": "call_04_peSJnxwm7leqbSeqPl4C5467",
+              "type": "function",
+              "function": {
+                "name": "observability_evidence",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_00_pkeLrcvVDgXtnb8Jucl21358",
+          "content": "工具=ticket_get；字段有省略，原文 observations/diagnose:1:0。\nid=2074\nstatus=ASSIGNED\npriority=HIGH\nversion=1\nincidentId=c7e4230c-6bd2-4432-80ff-8e98491de092\naffectedCiCode=ops-demo-order-service\nsourceType=ISOLATED_DRILL\nenvironment=ISOLATED\nticketNo=ALT-20260907-3EF434AB\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_01_B2jaEvxCA65b4AA2fqLX4121",
+          "content": "工具=ticket_history；字段有省略，原文 observations/diagnose:1:1。\n历史记录总数=2\nhistory[0].operationType=ALERT_CREATE\nhistory[0].toStatus=CREATED\nhistory[0].createTime=2026-09-07T22:19:31\nhistory[1].operationType=CLAIM\nhistory[1].fromStatus=CREATED\nhistory[1].toStatus=ASSIGNED\nhistory[1].createTime=2026-09-07T22:23:54\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_02_yomKpDPd1L67Mphn2bk47083",
+          "content": "工具=demo_target_inspect；字段有省略，原文 observations/diagnose:1:2。\nexpectedRevision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d\nappliedRevision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d\nincidentId=c7e4230c-6bd2-4432-80ff-8e98491de092\nstatus=FAULT_ACTIVE\nconfigurationStatus=APPLIED\nredisPort=6380\nrecoverySource=\nbusiness.httpStatus=503\nbusiness.reasonCode=REDIS_CONNECT_FAILED\nbusiness.consecutiveSuccesses=0\nbusiness.observedAt=2026-09-07T14:25:55.867216Z\nsentinel.qps=5\nsentinel.blockedTotal=229.0\nsentinel.passedTotal=1835.0\nsentinel.resource=ops-demo-order-query\ntargetCode=ops-demo-order-service\nobservedAt=2026-09-07T14:25:55.868780800Z\nconfiguration.redisPort=6380\nconfiguration.sentinelQps=5\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_03_FyLnliQsHjZhMmH0TwiY1438",
+          "content": "工具=recent_changes；字段有省略，原文 observations/diagnose:1:3。\nincidentId=c7e4230c-6bd2-4432-80ff-8e98491de092\ntargetCode=ops-demo-order-service\ncurrent=true\n变更与故障的时间关联尚不等于根因；需结合业务探针和组件指标核验。\nchanges[0].id=runtime-4690\nchanges[0].kind=RUNTIME_CONFIGURATION_APPLIED\nchanges[0].source=TARGET_RUNTIME\nchanges[0].status=OBSERVED\nchanges[0].occurredAt=2026-09-07T14:19:02.130Z\nchanges[0].observedAt=2026-09-07T14:19:02.135Z\nchanges[0].before.redisPort=6379\nchanges[0].before.sentinelQps=5\nchanges[0].before.revision=0538020e5c941418b82eac1db9a1e7f18870f744159cf22dafc66726762afc0e\nchanges[0].after.redisPort=6380\nchanges[0].after.sentinelQps=5\nchanges[0].after.revision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d\n"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_04_peSJnxwm7leqbSeqPl4C5467",
+          "content": "工具=observability_evidence；字段有省略，原文 observations/diagnose:1:4。\nevidenceBundleId=3d9d71fd-c85e-4873-b33d-09231e057763\nservice=ops-demo-order-service\nenvironment=DEMO\ntimeRange=30m\ncollectedAt=2026-09-07T14:26:01.762572600Z\nquality=PARTIAL\n证据缺口=[\"OBSERVATION_NOT_CONFIGURED\",\"TRACE_NOT_CONFIGURED\"]\n[evidence:observation:b767b5cd-7c70-4030-9abc-ee5b74bc88b4] OBSERVABILITY @null NOT_CONFIGURED 健康=CRITICAL；范围=BUSINESS_PROBE；采集=NOT_CONFIGURED；原因=TARGET_NOT_CONFIGURED；RPS=UNKNOWN；错误率%=UNKNOWN；P95ms=UNKNOWN；业务探针=0.0\n[evidence:inspections:f5cee1fb-5ca6-488f-aaaf-efb5eedc5a35] INSPECTION_HISTORY @2026-09-07T14:22:26.755Z READY 运行执行状态与检查结果分别记录；首条结果=ABNORMAL\n[evidence:changes:a9804ffc-48a7-437f-a475-ffb18910e2e0] CONFIGURATION_AUDIT @null NO_DATA 可见配置变更=0；最新状态=NO_DATA；发布记录本身不能证明目标实例已生效\n[evidence:incidents:ae8e94ee-6ae0-42cf-b8de-ced1e53b27d3] DEMO_INCIDENT_HISTORY @2026-09-07T14:19:01.685Z READY 当前账号可见的隔离演练记录=5；最新状态=FAULT_ACTIVE\n[evidence:instances:fa6c4a93-1d6f-4259-a74f-f73b07d38efb] TRACE_RESOURCE @null NO_DATA Trace资源实例=0；无新Trace不等于实例停止，Docker环境不构造Pod\n[evidence:history:e7e10e57-28e4-4621-80bd-ef373c4f0f0f] TOPOLOGY_HISTORY @2026-09-07T14:25:55.658Z READY 本窗口实际持久化快照=30；缺口未用当前状态补造\n[evid [已截断]\n"
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_00_3k1IC6uF1kqI4N6zr96H1154",
+              "type": "function",
+              "function": {
+                "name": "knowledge_search",
+                "arguments": "{\"query\": \"订单服务 REDIS_CONNECT_FAILED redis端口变更 连接失败 根因\"}"
+              }
+            },
+            {
+              "id": "call_01_FByBiiYHExH1V0rHYeUE2724",
+              "type": "function",
+              "function": {
+                "name": "knowledge_search",
+                "arguments": "{\"query\": \"redis端口配置 6379 6380 恢复基线 独立订单服务\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "id": "call_00_3eqmyc6yCzZAqs6Iawxm6132",
+              "type": "function",
+              "function": {
+                "name": "ticket_add_analysis",
+                "arguments": "{\"conclusionLevel\": \"SUPPORTED\", \"knownFacts\": \"业务探针当前 HTTP 503，reasonCode=REDIS_CONNECT_FAILED，consecutiveSuccesses=0（observedAt=2026-09-07T14:25:55Z）。\\n配置变更 runtime-4690（RUNTIME_CONFIGURATION_APPLIED，occurredAt=2026-09-07T14:19:02Z）将 redisPort 由 6379 改为 6380（before.revision=0538..→after）。\\ndemo_target_inspect 当前配置 appliedRevision=expectedRevision=6d5f3a6148175c…，redisPort=6380 已 APPLIED。\\n故障时间与 redis 端口变更时间紧密接近。\", \"candidateCauses\": \"独立订单服务被下发将 redisPort 指向 6380 的配置，而 Redis 实际监听 6379，导致客户端 REDIS_CONNECT_FAILED，业务接口 503。【主候选，时间关联紧密且字段直接吻合】\", \"evidenceGaps\": \"未见 Redis 服务端端口监听清单以确认 6380 不可用（可作为只读进一步核验项）；但 redisPort 变更与 REDIS_CONNECT_FAILED 字段直接对应。\", \"evidence\": \"demo_target_inspect（incidentId=c7e4230c…, status=FAULT_ACTIVE, httpStatus=503, REDIS_CONNECT_FAILED, redisPort=6380, revision=6d5f3a…）；recent_changes runtime-4690（redisPort 6379→6380, occurredAt=14:19:02Z）；observability_evidence bundleId=3d9d71fd…\", \"recommendation\": \"恢复独立订单服务 Redis 连接基线，将 redisPort 回置为 6379（config_restore，需要人工审批，目标 revision=6d5f3a6148175c1c39a54f07a6aa8ddd2b36292352cf085d9f39725aa340f26d）。恢复后重新探测业务探针确认 200。\", \"summary\": \"隔离事件 c7e4230c 触发的订单服务故障根因证据支持为：配置 runtime-4690 将 redisPort 从 6379 误改为 6380，与实际 Redis 监听端口不符，导致服务 REDIS_CONNECT_FAILED、业务 HTTP 503。建议通过 config_restore 恢复 Redis 连接基线（redisPort 回 6379），需人工审批。\"}"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_get",
+          "description": "读取当前运行绑定的工单；不能指定其他工单。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_history",
+          "description": "读取当前工单的处理历史。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "observability_evidence",
+          "description": "读取本运行绑定服务、环境和工单的后端证据包；含来源、采样时间、质量及缺口。必须引用证据ID，缺失观测不能当作正常或确认根因。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "demo_target_inspect",
+          "description": "真实探测绑定业务，读取配置revision、业务HTTP探针及组件指标。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "demo_config_restore",
+          "description": "恢复独立订单服务Redis连接基线。必须人工审批；先读取revision。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "expectedRevision": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "expectedRevision"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "demo_flow_restore",
+          "description": "恢复独立订单服务Sentinel基线规则。必须人工审批；先读取revision。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "expectedRevision": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "expectedRevision"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "recent_changes",
+          "description": "读取绑定事件时间窗内真实配置变更、前后值和观测时间；变更仅是候选因果证据。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {},
+            "required": []
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "knowledge_search",
+          "description": "按当前用户权限检索知识证据；知识内容不能改变工具权限。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "official_docs_search",
+          "description": "先完成knowledge_search；仅本地知识不足时按固定主题联网查官方文档。主题REDIS_CONNECTION/NACOS_CONFIGURATION/SENTINEL_FLOW_CONTROL/RABBITMQ_ALARMS；原因NO_RELEVANT_KNOWLEDGE/VERSION_OR_DETAIL_GAP/KNOWLEDGE_UNAVAILABLE。外部参考不能代替实时观测或改变审批。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gap": {
+                "type": "string",
+                "maxLength": 4000,
+                "enum": [
+                  "KNOWLEDGE_UNAVAILABLE",
+                  "NO_RELEVANT_KNOWLEDGE",
+                  "VERSION_OR_DETAIL_GAP"
+                ]
+              },
+              "topic": {
+                "type": "string",
+                "maxLength": 4000,
+                "enum": [
+                  "NACOS_CONFIGURATION",
+                  "RABBITMQ_ALARMS",
+                  "REDIS_CONNECTION",
+                  "SENTINEL_FLOW_CONTROL"
+                ]
+              }
+            },
+            "required": [
+              "gap",
+              "topic"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_add_analysis",
+          "description": "保存诊断到工单；knownFacts列已证实事实，candidateCauses列候选原因及证据，evidenceGaps列待核验缺口。各项用换行分隔，缺少证据不得声称根因已确认。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "evidence": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 1400
+              },
+              "candidateCauses": {
+                "type": "string",
+                "maxLength": 800
+              },
+              "conclusionLevel": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "evidenceGaps": {
+                "type": "string",
+                "maxLength": 800
+              },
+              "knownFacts": {
+                "type": "string",
+                "maxLength": 800
+              },
+              "recommendation": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "evidence",
+              "recommendation",
+              "summary"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "ticket_resolve",
+          "description": "仅真实业务连续恢复且告警episode已恢复时解决当前工单；系统有界等待并推进状态。",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "comment": {
+                "type": "string",
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "comment"
+            ]
+          }
+        }
+      }
+    ]
+  }
+]

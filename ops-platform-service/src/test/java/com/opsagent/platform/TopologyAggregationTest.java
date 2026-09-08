@@ -1,6 +1,7 @@
 package com.opsagent.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -64,7 +65,7 @@ class TopologyAggregationTest {
     @Test
     void unreachableThirdPartiesReturnDegradedSnapshotsInsteadOfThrowing() {
         var actualProm = new PrometheusAdapter(json);
-        var actualAlerts = new AlertmanagerAdapter(json);
+        var actualAlerts = new AlertmanagerAdapter(json, mock(AlertTargetResolver.class));
         ReflectionTestUtils.setField(actualProm, "baseUrl", "http://127.0.0.1:1");
         ReflectionTestUtils.setField(actualAlerts, "baseUrl", "http://127.0.0.1:1");
         assertThat(actualProm.collect("15m").healthy()).isFalse();
@@ -154,6 +155,60 @@ class TopologyAggregationTest {
         var tree = json.valueToTree(service().topology("PROD", "15m", "CONFIGURED"));
         assertThat(tree.path("nodes").path(0).path("health").asText()).isEqualTo("UNKNOWN");
         assertThat(tree.path("nodes").path(0).path("activeAlertCount").asInt()).isZero();
+    }
+
+    @Test
+    void longRunningActiveAlertUsesLatestConfirmationInsteadOfItsStartAsHealthFreshness() {
+        setup(true, true);
+        Instant checkedAt = Instant.now();
+        String startedAt = checkedAt.minusSeconds(3600).toString();
+        when(alerts.collect())
+                .thenReturn(
+                        new AlertmanagerAdapter.Snapshot(
+                                true,
+                                "confirmed active",
+                                checkedAt,
+                                List.of(
+                                        new AlertmanagerAdapter.Alert(
+                                                "long-running",
+                                                "BusinessFailure",
+                                                "CRITICAL",
+                                                "failure",
+                                                startedAt,
+                                                "ops-rag-service",
+                                                "opsagent-rag",
+                                                "FIRING",
+                                                "PROD",
+                                                "",
+                                                ""))));
+        var tree = json.valueToTree(service().topology("PROD", "15m", "CONFIGURED"));
+        assertThat(tree.path("nodes").path(0).path("health").asText()).isEqualTo("CRITICAL");
+        assertThat(tree.path("nodes").path(0).path("observedAt"))
+                .isEqualTo(json.valueToTree(checkedAt));
+        assertThat(tree.path("activeAlerts").path(0).path("startsAt").asText())
+                .isEqualTo(startedAt);
+    }
+
+    @Test
+    void layoutCannotMixOtherEnvironmentOrDuplicateAndNonFiniteCoordinates() {
+        setup(true, true);
+        for (var positions :
+                List.of(
+                        List.of(new ObservabilityDtos.Position("redis", 1, 1)),
+                        List.of(
+                                new ObservabilityDtos.Position("ops-rag-service", 1, 1),
+                                new ObservabilityDtos.Position("ops-rag-service", 2, 2)),
+                        List.of(
+                                new ObservabilityDtos.Position(
+                                        "ops-rag-service", Double.NaN, 1)))) {
+            assertThatThrownBy(
+                            () ->
+                                    service()
+                                            .savePersonalLayout(
+                                                    new ObservabilityDtos.Layout(
+                                                            "PROD", positions)))
+                    .isInstanceOf(com.opsagent.common.core.BusinessException.class);
+        }
     }
 
     private TopologyAggregationService service() {

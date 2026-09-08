@@ -1,10 +1,14 @@
 package com.opsagent.rag;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+
+import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.core.QueryEmbeddingBudget;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -45,7 +49,10 @@ class RagServiceTest {
                         "Redis手册.md");
         when(knowledge.search("Redis 主节点挂了以后第一步做什么？", 30, null))
                 .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(row), "trace"));
-        LlmRequest request = new LlmRequest("system", "user", 100);
+        LlmRequest request =
+                new LlmRequest("system", "user", 100)
+                        .withPriorReservedTokens(
+                                QueryEmbeddingBudget.reserve("Redis 主节点挂了以后第一步做什么？"));
         when(promptBuilder.build(
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.any(ContextAssembler.AssembledContext.class)))
@@ -200,6 +207,8 @@ class RagServiceTest {
         assertThat(plan.request().systemPrompt()).contains("不是外部事实证据", "本次知识上下文");
         assertThat(plan.request().userPrompt()).contains("<conversation_history>", "旧答案");
         assertThat(plan.sources()).isEmpty();
+        assertThat(plan.request().priorReservedTokens())
+                .isEqualTo(QueryEmbeddingBudget.reserve(question));
     }
 
     @ParameterizedTest
@@ -238,7 +247,9 @@ class RagServiceTest {
                                                 "磁盘手册.md")),
                                 "trace"));
         if (configured) {
-            LlmRequest request = new LlmRequest("system", "user", 100);
+            LlmRequest request =
+                    new LlmRequest("system", "user", 100)
+                            .withPriorReservedTokens(QueryEmbeddingBudget.reserve(question));
             when(promptBuilder.build(
                             org.mockito.ArgumentMatchers.anyString(),
                             org.mockito.ArgumentMatchers.any(
@@ -269,11 +280,51 @@ class RagServiceTest {
             assertThat(answer.answer()).contains(explanation, "未经 AI 生成", "[S1]");
             assertThat(answer.outputTokens()).isZero();
             if (!configured) {
-                verifyNoInteractions(promptBuilder, invocation);
+                verifyNoInteractions(promptBuilder);
+                org.mockito.Mockito.verify(invocation)
+                        .recordRetrievalBudget(question, QueryEmbeddingBudget.reserve(question));
+                assertThat(answer.metadata().budgetChargedTokens())
+                        .isEqualTo(QueryEmbeddingBudget.reserve(question));
+                assertThat(answer.metadata().budgetUsageKnown()).isFalse();
             }
         } finally {
             metrics.close();
         }
+    }
+
+    @Test
+    void rejectsOversizedEmbeddingBeforeCallingKnowledgeAndDoesNotChargeSqlScopes() {
+        var knowledge = mock(KnowledgeClient.class);
+        var invocation = mock(LlmInvocationService.class);
+        var properties = new RagProperties();
+        var metrics = new SimpleMeterRegistry();
+        var ai = new AiProperties();
+        ai.setEnabled(false);
+        var service =
+                new RagService(
+                        knowledge,
+                        properties,
+                        ai,
+                        mock(PromptBuilder.class),
+                        invocation,
+                        new CitationValidator(),
+                        rerankService(properties, metrics),
+                        new ContextAssembler(properties, metrics),
+                        metrics,
+                        mock(CmdbAnswerService.class),
+                        mock(OperationsAnswerService.class));
+        String question = "甲".repeat(1500);
+        assertThatThrownBy(() -> service.prepareStream(question, 5, null, (String) null))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("尚未发送");
+        verifyNoInteractions(knowledge, invocation);
+        when(knowledge.search(question, 30, 9L))
+                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(), "test"));
+        var scoped = service.prepareStream(question, 5, 9L, (String) null);
+        assertThat(scoped.immediate().metadata().budgetChargedTokens()).isZero();
+        org.mockito.Mockito.verify(knowledge).search(question, 30, 9L);
+        verifyNoInteractions(invocation);
+        metrics.close();
     }
 
     private void configureModel(AiProperties ai) {

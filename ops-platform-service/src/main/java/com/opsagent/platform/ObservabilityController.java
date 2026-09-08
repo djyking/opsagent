@@ -1,9 +1,11 @@
 package com.opsagent.platform;
 
 import com.opsagent.common.core.ApiResponse;
+
 import jakarta.validation.Valid;
 
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,21 +29,23 @@ class ObservabilityController {
     private final TopologyAggregationService topology;
     private final ObservabilityInspectionService inspections;
 
-    ObservabilityController(TopologyAggregationService topology, ObservabilityInspectionService inspections) {
+    ObservabilityController(
+            TopologyAggregationService topology, ObservabilityInspectionService inspections) {
         this.topology = topology;
         this.inspections = inspections;
     }
 
     @GetMapping({"/topology", "/wallboard"})
-    ApiResponse<Map<String, Object>> topology(@RequestParam(defaultValue = "ALL") String environment,
+    ApiResponse<Map<String, Object>> topology(
+            @RequestParam(defaultValue = "ALL") String environment,
             @RequestParam(defaultValue = "15m") String timeRange,
             @RequestParam(defaultValue = "CONFIGURED") String mode) {
         return ApiResponse.success(topology.topology(environment, timeRange, mode));
     }
 
     @GetMapping("/services/{ciCode}")
-    ApiResponse<Map<String, Object>> service(@PathVariable String ciCode,
-            @RequestParam(defaultValue = "15m") String timeRange) {
+    ApiResponse<Map<String, Object>> service(
+            @PathVariable String ciCode, @RequestParam(defaultValue = "15m") String timeRange) {
         return ApiResponse.success(topology.detail(ciCode, timeRange));
     }
 
@@ -52,8 +56,29 @@ class ObservabilityController {
         return ApiResponse.success();
     }
 
+    @GetMapping("/topology/layout")
+    ApiResponse<Map<String, Object>> currentLayout(
+            @RequestParam(defaultValue = "ALL") String environment) {
+        return ApiResponse.success(topology.currentLayout(environment));
+    }
+
+    @PutMapping("/topology/layout/personal")
+    @PreAuthorize("isAuthenticated()")
+    ApiResponse<Void> personalLayout(@Valid @RequestBody ObservabilityDtos.Layout request) {
+        topology.savePersonalLayout(request);
+        return ApiResponse.success();
+    }
+
+    @DeleteMapping("/topology/layout/personal")
+    @PreAuthorize("isAuthenticated()")
+    ApiResponse<Void> resetPersonalLayout(@RequestParam String environment) {
+        topology.resetPersonalLayout(environment);
+        return ApiResponse.success();
+    }
+
     @GetMapping("/inspections")
-    ApiResponse<Map<String, Object>> inspections(@RequestParam(defaultValue = "ALL") String environment) {
+    ApiResponse<Map<String, Object>> inspections(
+            @RequestParam(defaultValue = "ALL") String environment) {
         return ApiResponse.success(inspections.overview(environment));
     }
 

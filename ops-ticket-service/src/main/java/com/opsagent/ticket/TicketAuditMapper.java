@@ -36,30 +36,24 @@ public interface TicketAuditMapper {
     int comment(long ticketId, long userId, String content);
 
     @Insert(
-            "INSERT INTO ticket_assignment(ticket_id,assignee_id,assigned_by,assignment_type,create_time)"
-                    + " VALUES(#{ticketId},#{assigneeId},#{assignedBy},#{type},NOW())")
+            "INSERT INTO"
+                + " ticket_assignment(ticket_id,assignee_id,assigned_by,assignment_type,create_time)"
+                + " VALUES(#{ticketId},#{assigneeId},#{assignedBy},#{type},NOW())")
     int assignment(long ticketId, long assigneeId, long assignedBy, String type);
 
     @Insert(
-            "INSERT INTO ticket_operation_log(ticket_id,operator_id,operation,request_id,detail_json,create_time)"
-                    + " VALUES(#{ticketId},#{operatorId},#{operation},#{requestId},#{detail},NOW())")
+            "INSERT INTO"
+                + " ticket_operation_log(ticket_id,operator_id,operation,request_id,detail_json,create_time)"
+                + " VALUES(#{ticketId},#{operatorId},#{operation},#{requestId},#{detail},NOW())")
     int operation(
-            long ticketId,
-            long operatorId,
-            String operation,
-            String requestId,
-            String detail);
+            long ticketId, long operatorId, String operation, String requestId, String detail);
 
     @Insert(
             "INSERT INTO ticket_work_record(ticket_id,record_type,content,evidence,create_by,"
                     + "create_time) VALUES(#{ticketId},#{recordType},#{content},#{evidence},"
                     + "#{createBy},NOW())")
     int workRecord(
-            long ticketId,
-            String recordType,
-            String content,
-            String evidence,
-            long createBy);
+            long ticketId, String recordType, String content, String evidence, long createBy);
 
     @Select(
             "SELECT id,ticket_id ticketId,user_id userId,content,create_time createTime FROM"
@@ -83,6 +77,13 @@ public interface TicketAuditMapper {
                     + " createBy,create_time createTime FROM ticket_work_record"
                     + " WHERE ticket_id=#{ticketId} ORDER BY id")
     List<WorkRecord> workRecords(long ticketId);
+
+    @Select(
+            "<script>SELECT id,ticket_id ticketId,record_type recordType,content,evidence,create_by"
+                + " createBy,create_time createTime FROM ticket_work_record WHERE record_type LIKE"
+                + " 'EVENT_%' AND ticket_id IN <foreach collection='ids' item='id' open='('"
+                + " separator=',' close=')'>#{id}</foreach> ORDER BY id</script>")
+    List<WorkRecord> eventRecords(@Param("ids") List<Long> ids);
 
     /**
      * 工单状态流转历史数据。

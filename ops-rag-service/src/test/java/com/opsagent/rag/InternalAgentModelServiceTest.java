@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -97,7 +98,8 @@ class InternalAgentModelServiceTest {
         server.enqueue(new MockResponse().setResponseCode(503));
         assertThatThrownBy(() -> service.turn(request("lost-response"), actor(7)))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("MODEL_HTTP_503").hasMessageContaining("新的隔离演练");
+                .hasMessageContaining("MODEL_HTTP_503")
+                .hasMessageContaining("新的隔离演练");
         assertThatThrownBy(
                         () ->
                                 service(new InternalAgentStore(jdbc, mapper))
@@ -124,10 +126,14 @@ class InternalAgentModelServiceTest {
         assertThat(result.outcome()).isEqualTo("TOOL_CALLS");
         assertThat(result.attempts()).isEqualTo(2);
         assertThat(result.usageKnown()).isFalse();
-        int reservation = new NativeToolModelClient(properties, new AiHttpExecutor(), mapper).reservation(request);
+        int reservation =
+                new NativeToolModelClient(properties, new AiHttpExecutor(), mapper)
+                        .reservation(request);
         assertThat(result.budgetTokens()).isEqualTo(reservation + 14);
-        assertThat(server.takeRequest().getBody().readUtf8()).isEqualTo(server.takeRequest().getBody().readUtf8());
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM rag_agent_model_turn", Integer.class)).isEqualTo(1);
+        assertThat(server.takeRequest().getBody().readUtf8())
+                .isEqualTo(server.takeRequest().getBody().readUtf8());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM rag_agent_model_turn", Integer.class))
+                .isEqualTo(1);
         assertThat(service.turn(request, actor(7))).isEqualTo(result);
         assertThat(server.getRequestCount()).isEqualTo(2);
         verify(budget, times(2)).acquire();
@@ -140,14 +146,18 @@ class InternalAgentModelServiceTest {
         for (int status : List.of(400, 401, 403, 422)) {
             server.enqueue(new MockResponse().setResponseCode(status));
             assertThatThrownBy(() -> service.turn(request("rejected-" + status), actor(7)))
-                    .hasMessageContaining("MODEL_HTTP_" + status).hasMessageContaining("检查");
+                    .hasMessageContaining("MODEL_HTTP_" + status)
+                    .hasMessageContaining("检查");
         }
         server.enqueue(NativeToolModelClientTest.json("not-json"));
         assertThatThrownBy(() -> service.turn(request("invalid-json"), actor(7)))
                 .hasMessageContaining("MODEL_RESPONSE_INVALID");
-        server.enqueue(NativeToolModelClientTest.json("{\"error\":{\"message\":\"private vendor message\"}}"));
+        server.enqueue(
+                NativeToolModelClientTest.json(
+                        "{\"error\":{\"message\":\"private vendor message\"}}"));
         assertThatThrownBy(() -> service.turn(request("protocol-not-http-502"), actor(7)))
-                .hasMessageContaining("MODEL_RESPONSE_INVALID").hasMessageNotContaining("private vendor message");
+                .hasMessageContaining("MODEL_RESPONSE_INVALID")
+                .hasMessageNotContaining("private vendor message");
         assertThat(server.getRequestCount()).isEqualTo(6);
     }
 
@@ -156,8 +166,10 @@ class InternalAgentModelServiceTest {
         store.capability("deepseek", properties.settings("deepseek"), "VERIFIED");
         server.enqueue(NativeToolModelClientTest.toolResponse("length", "{\"ticketId\":"));
         assertThat(service.turn(request("truncated"), actor(7)).outcome()).isEqualTo("INCOMPLETE");
-        server.enqueue(NativeToolModelClientTest.json("{\"choices\":[{\"finish_reason\":\"content_filter\","
-                + "\"message\":{\"refusal\":\"refused\"}}]}"));
+        server.enqueue(
+                NativeToolModelClientTest.json(
+                        "{\"choices\":[{\"finish_reason\":\"content_filter\","
+                                + "\"message\":{\"refusal\":\"refused\"}}]}"));
         assertThat(service.turn(request("refused"), actor(7)).outcome()).isEqualTo("REFUSED");
         assertThat(server.getRequestCount()).isEqualTo(2);
     }
@@ -176,7 +188,9 @@ class InternalAgentModelServiceTest {
     void neverRetriesProviderAfterReceiptPersistenceFailure() {
         store.capability("deepseek", properties.settings("deepseek"), "VERIFIED");
         var broken = spy(store);
-        doThrow(new IllegalStateException("write failed")).when(broken).complete(anyString(), any());
+        doThrow(new IllegalStateException("write failed"))
+                .when(broken)
+                .complete(anyString(), any());
         server.enqueue(NativeToolModelClientTest.toolResponse("tool_calls", "{\"ticketId\":7}"));
         assertThatThrownBy(() -> service(broken).turn(request("receipt-down"), actor(7)))
                 .hasMessageContaining("MODEL_RECEIPT_FAILED");
@@ -188,43 +202,166 @@ class InternalAgentModelServiceTest {
     @Test
     void refusesSecondProviderRequestWhenDailyBudgetOrRemainingTokensDoNotPermitIt() {
         store.capability("deepseek", properties.settings("deepseek"), "VERIFIED");
-        when(budget.acquire()).thenReturn(() -> {}).thenThrow(
-                new BusinessException(com.opsagent.common.core.ErrorCode.VALIDATION, "今日额度已用完"));
+        when(budget.acquire())
+                .thenReturn(() -> {})
+                .thenThrow(
+                        new BusinessException(
+                                com.opsagent.common.core.ErrorCode.VALIDATION, "今日额度已用完"));
         server.enqueue(new MockResponse().setResponseCode(503));
         assertThatThrownBy(() -> service.turn(request("daily-budget"), actor(7)))
                 .hasMessageContaining("MODEL_BUDGET_REJECTED");
         assertThat(server.getRequestCount()).isEqualTo(1);
         doReturn((AiBudgetGuard.Permit) () -> {}).when(budget).acquire();
         var normal = request("token-budget");
-        int cost = new NativeToolModelClient(properties, new AiHttpExecutor(), mapper).reservation(normal);
-        var limited = new InternalAgentDtos.TurnRequest(normal.callId(), normal.provider(), normal.model(),
-                normal.messages(), normal.tools(), normal.maxOutputTokens(), cost + 1);
+        int cost =
+                new NativeToolModelClient(properties, new AiHttpExecutor(), mapper)
+                        .reservation(normal);
+        var limited =
+                new InternalAgentDtos.TurnRequest(
+                        normal.callId(),
+                        normal.provider(),
+                        normal.model(),
+                        normal.messages(),
+                        normal.tools(),
+                        normal.maxOutputTokens(),
+                        cost + 1);
         server.enqueue(new MockResponse().setResponseCode(503));
-        assertThatThrownBy(() -> service.turn(limited, actor(7))).hasMessageContaining("MODEL_HTTP_503");
+        assertThatThrownBy(() -> service.turn(limited, actor(7)))
+                .hasMessageContaining("MODEL_HTTP_503");
         assertThat(server.getRequestCount()).isEqualTo(2);
     }
 
     @Test
     void interruptedAdmissionNeverSendsAnOutboundRequest() {
         store.capability("deepseek", properties.settings("deepseek"), "VERIFIED");
-        when(budget.acquire()).thenAnswer(invocation -> {
-            Thread.currentThread().interrupt();
-            return (AiBudgetGuard.Permit) () -> {};
-        });
+        when(budget.acquire())
+                .thenAnswer(
+                        invocation -> {
+                            Thread.currentThread().interrupt();
+                            return (AiBudgetGuard.Permit) () -> {};
+                        });
         try {
             assertThatThrownBy(() -> service.turn(request("admission-interrupted"), actor(7)))
                     .hasMessageContaining("MODEL_CANCELLED");
             assertThat(server.getRequestCount()).isZero();
-        } finally { Thread.interrupted(); }
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void configuredDecisionTimeoutReachesTransportAndRespectsTheRunLease() throws Exception {
+        store.capability("deepseek", properties.settings("deepseek"), "VERIFIED");
+        properties.setTimeoutSeconds(90);
+        var http = mock(AiHttpExecutor.class);
+        when(http.postBounded(anyString(), anyString(), anyString(), anyString(), anyMap(), any()))
+                .thenReturn(
+                        mapper.readTree(
+                                "{\"choices\":[{\"finish_reason\":\"stop\","
+                                    + "\"message\":{\"content\":\"ready\"}}],\"usage\":{\"prompt_tokens\":10,"
+                                    + "\"completion_tokens\":4,\"total_tokens\":14}}"));
+        var bounded =
+                new InternalAgentModelService(
+                        properties,
+                        new NativeToolModelClient(properties, http, mapper),
+                        store,
+                        budget,
+                        usage,
+                        new SimpleMeterRegistry(),
+                        mapper);
+        var longLease =
+                new InternalActorTokens.Context(
+                        7, "user", List.of("USER"), "run-1", "", Instant.now().plusSeconds(900));
+        bounded.turn(request("configured-timeout"), longLease);
+        var timeout = org.mockito.ArgumentCaptor.forClass(Duration.class);
+        verify(http)
+                .postBounded(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyMap(),
+                        timeout.capture());
+        assertThat(timeout.getValue())
+                .isGreaterThan(Duration.ofSeconds(89))
+                .isLessThanOrEqualTo(Duration.ofSeconds(90));
+
+        clearInvocations(http);
+        var nearDeadline =
+                new InternalActorTokens.Context(
+                        7, "user", List.of("USER"), "run-1", "", Instant.now().plusSeconds(7));
+        bounded.turn(request("near-run-deadline"), nearDeadline);
+        verify(http)
+                .postBounded(
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyString(),
+                        anyMap(),
+                        timeout.capture());
+        assertThat(timeout.getValue())
+                .isGreaterThan(Duration.ZERO)
+                .isLessThanOrEqualTo(Duration.ofSeconds(5));
+
+        clearInvocations(http);
+        var expired =
+                new InternalActorTokens.Context(
+                        7, "user", List.of("USER"), "run-1", "", Instant.now().plusSeconds(1));
+        assertThatThrownBy(() -> bounded.turn(request("no-run-time"), expired))
+                .hasMessageContaining("MODEL_TIMEOUT");
+        verifyNoInteractions(http);
+    }
+
+    @Test
+    void unknownTimeoutAndNetworkOutcomesStopAfterOneAttemptAndCannotReplay() {
+        store.capability("deepseek", properties.settings("deepseek"), "VERIFIED");
+        for (var kind :
+                List.of(
+                        AiProviderException.FailureKind.TIMEOUT,
+                        AiProviderException.FailureKind.NETWORK)) {
+            var http = mock(AiHttpExecutor.class);
+            when(http.postBounded(
+                            anyString(), anyString(), anyString(), anyString(), anyMap(), any()))
+                    .thenThrow(new AiProviderException("deepseek", 0, "unknown", null, kind));
+            var bounded =
+                    new InternalAgentModelService(
+                            properties,
+                            new NativeToolModelClient(properties, http, mapper),
+                            store,
+                            budget,
+                            usage,
+                            new SimpleMeterRegistry(),
+                            mapper);
+            var request = request("unknown-" + kind);
+            String diagnostic =
+                    kind == AiProviderException.FailureKind.TIMEOUT
+                            ? "MODEL_TIMEOUT"
+                            : "MODEL_NETWORK_ERROR";
+            assertThatThrownBy(() -> bounded.turn(request, actor(7)))
+                    .hasMessageContaining(diagnostic);
+            assertThatThrownBy(() -> bounded.turn(request, actor(7)))
+                    .hasMessageContaining(diagnostic);
+            verify(http, times(1))
+                    .postBounded(
+                            anyString(), anyString(), anyString(), anyString(), anyMap(), any());
+        }
+        var ledger = new InternalAgentUsageService(jdbc, mapper).usage("run-1", actor(7));
+        assertThat(ledger.path("unknownUsageAttempts").asInt()).isEqualTo(2);
+        assertThat(ledger.path("knownUsageAttempts").asInt()).isZero();
+        assertThat(ledger.path("pendingCalls").asInt()).isZero();
+        assertThat(ledger.path("coverage").asText()).isEqualTo("COMPLETE");
     }
 
     @Test
     void oversizedProviderUsageCannotOverflowTheRetryBudgetCharge() {
         store.capability("deepseek", properties.settings("deepseek"), "VERIFIED");
         server.enqueue(new MockResponse().setResponseCode(503));
-        server.enqueue(NativeToolModelClientTest.json("{\"choices\":[{\"finish_reason\":\"stop\","
-                + "\"message\":{\"content\":\"结果\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":4,"
-                + "\"total_tokens\":2147483647}}"));
+        server.enqueue(
+                NativeToolModelClientTest.json(
+                        """
+                        {"choices":[{"finish_reason":"stop","message":{"content":"结果"}}],
+                         "usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":2147483647}}
+                        """));
         var request = request("usage-overflow");
         var result = service.turn(request, actor(7));
         assertThat(result.budgetTokens()).isEqualTo(request.remainingTokens());

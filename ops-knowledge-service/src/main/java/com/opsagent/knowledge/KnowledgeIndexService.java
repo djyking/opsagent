@@ -73,10 +73,7 @@ public class KnowledgeIndexService {
     }
 
     private int indexDocument(
-            long documentId,
-            String targetIndex,
-            String targetCollection,
-            boolean updateStatus) {
+            long documentId, String targetIndex, String targetCollection, boolean updateStatus) {
         if (!embeddingEnabled()) {
             throw new IllegalStateException("Embedding Provider 尚未配置");
         }
@@ -86,9 +83,7 @@ public class KnowledgeIndexService {
         }
         List<Map<String, Object>> chunks = repository.chunks(documentId);
         String documentTitle = text(document, "original_name", "originalName");
-        List<String> texts = chunks.stream()
-                .map(row -> embeddingText(row, documentTitle))
-                .toList();
+        List<String> texts = chunks.stream().map(row -> embeddingText(row, documentTitle)).toList();
         if (texts.isEmpty()) {
             throw new IllegalStateException("文档没有可索引切片");
         }
@@ -99,15 +94,16 @@ public class KnowledgeIndexService {
         Map<Long, String> failures = new LinkedHashMap<>();
         for (List<Integer> batch : batches(chunks, texts)) {
             try {
-                EmbeddingBatchResult result = embeddingClient.embedBatch(
-                        batch.stream().map(texts::get).toList());
+                EmbeddingBatchResult result =
+                        embeddingClient.embedBatch(batch.stream().map(texts::get).toList());
                 validateEmbeddingResult(result, batch.size());
                 for (int index = 0; index < batch.size(); index++) {
                     vectors.put(batch.get(index), result.vectors().get(index));
                 }
             } catch (RuntimeException exception) {
                 for (Integer index : batch) {
-                    failures.put(number(chunks.get(index), "id").longValue(), safeMessage(exception));
+                    failures.put(
+                            number(chunks.get(index), "id").longValue(), safeMessage(exception));
                 }
             }
         }
@@ -126,7 +122,9 @@ public class KnowledgeIndexService {
             int documentVersion = number(document, "version").intValue();
             source.put("documentVersion", documentVersion);
             source.put("version", documentVersion);
-            source.put("knowledgeBaseId", number(document, "knowledge_base_id", "knowledgeBaseId").longValue());
+            source.put(
+                    "knowledgeBaseId",
+                    number(document, "knowledge_base_id", "knowledgeBaseId").longValue());
             source.put("chunkIndex", chunkIndex);
             source.put("content", text(chunk, "content"));
             source.put("documentName", text(document, "original_name", "originalName"));
@@ -139,7 +137,9 @@ public class KnowledgeIndexService {
             source.put("containsCode", metadata.getOrDefault("containsCode", false));
             source.put("containsTable", metadata.getOrDefault("containsTable", false));
             source.put("sourceFormat", metadata.getOrDefault("sourceFormat", ""));
-            source.put("chunkStrategyVersion", metadata.getOrDefault("chunkStrategyVersion", "legacy"));
+            source.put(
+                    "chunkStrategyVersion",
+                    metadata.getOrDefault("chunkStrategyVersion", "legacy"));
             source.put("contentHash", text(document, "content_hash", "contentHash"));
             source.put("createTime", text(document, "create_time", "createTime"));
             source.put("updateTime", text(document, "update_time", "updateTime"));
@@ -148,12 +148,14 @@ public class KnowledgeIndexService {
             source.put("createBy", number(document, "create_by", "createBy").longValue());
             source.put("embeddingModel", embeddingClient.model());
             source.put("embeddingDimensions", embeddingClient.dimensions());
-            keywordDocuments.add(new ElasticsearchVectorStore.IndexDocument(
-                    documentId + ":" + documentVersion + ":" + chunkIndex,
-                    chunkId,
-                    source));
-            vectorPoints.add(new QdrantVectorStore.IndexPoint(
-                    chunkId, vectors.get(index), new LinkedHashMap<>(source)));
+            keywordDocuments.add(
+                    new ElasticsearchVectorStore.IndexDocument(
+                            documentId + ":" + documentVersion + ":" + chunkIndex,
+                            chunkId,
+                            source));
+            vectorPoints.add(
+                    new QdrantVectorStore.IndexPoint(
+                            chunkId, vectors.get(index), new LinkedHashMap<>(source)));
         }
         List<Long> indexedChunkIds = new ArrayList<>();
         int bulkSize = Math.max(1, properties.getBulkSize());
@@ -165,20 +167,24 @@ public class KnowledgeIndexService {
             ElasticsearchVectorStore.BulkIndexResult keywordResult;
             QdrantVectorStore.BulkUpsertResult vectorResult;
             try {
-                keywordResult = targetIndex == null
-                        ? vectorStore.bulkIndex(batch)
-                        : vectorStore.bulkIndex(targetIndex, batch);
+                keywordResult =
+                        targetIndex == null
+                                ? vectorStore.bulkIndex(batch)
+                                : vectorStore.bulkIndex(targetIndex, batch);
             } catch (RuntimeException exception) {
-                keywordResult = new ElasticsearchVectorStore.BulkIndexResult(
-                        List.of(), batchFailures(batch, "Elasticsearch", exception));
+                keywordResult =
+                        new ElasticsearchVectorStore.BulkIndexResult(
+                                List.of(), batchFailures(batch, "Elasticsearch", exception));
             }
             try {
-                vectorResult = targetCollection == null
-                        ? qdrantStore.bulkUpsert(pointBatch)
-                        : qdrantStore.bulkUpsert(targetCollection, pointBatch);
+                vectorResult =
+                        targetCollection == null
+                                ? qdrantStore.bulkUpsert(pointBatch)
+                                : qdrantStore.bulkUpsert(targetCollection, pointBatch);
             } catch (RuntimeException exception) {
-                vectorResult = new QdrantVectorStore.BulkUpsertResult(
-                        List.of(), pointFailures(pointBatch, "Qdrant", exception));
+                vectorResult =
+                        new QdrantVectorStore.BulkUpsertResult(
+                                List.of(), pointFailures(pointBatch, "Qdrant", exception));
             }
             failures.putAll(keywordResult.failures());
             failures.putAll(vectorResult.failures());
@@ -206,21 +212,22 @@ public class KnowledgeIndexService {
         if (query.isBlank()) {
             throw new IllegalArgumentException("检索问题不能为空");
         }
-        RetrievalRequest request = new RetrievalRequest(
-                query,
-                rawRequest.knowledgeBaseId(),
-                rawRequest.documentId(),
-                rawRequest.ticketId(),
-                rawRequest.serviceId(),
-                rawRequest.allowedKnowledgeBaseIds(),
-                rawRequest.administratorPreview(),
-                rawRequest.userId(),
-                rawRequest.administrator(),
-                rawRequest.resultSize());
+        RetrievalRequest request =
+                new RetrievalRequest(
+                        query,
+                        rawRequest.knowledgeBaseId(),
+                        rawRequest.documentId(),
+                        rawRequest.ticketId(),
+                        rawRequest.serviceId(),
+                        rawRequest.allowedKnowledgeBaseIds(),
+                        rawRequest.administratorPreview(),
+                        rawRequest.userId(),
+                        rawRequest.administrator(),
+                        rawRequest.resultSize());
         Map<String, Long> durations = new LinkedHashMap<>();
         long started = System.nanoTime();
-        List<RetrievalHit> bm25 = vectorStore.bm25Search(
-                query, request, Math.max(1, properties.getBm25TopK()));
+        List<RetrievalHit> bm25 =
+                vectorStore.bm25Search(query, request, Math.max(1, properties.getBm25TopK()));
         recordStage("bm25", started, bm25.size(), durations);
 
         List<RetrievalHit> vector = List.of();
@@ -231,8 +238,9 @@ public class KnowledgeIndexService {
                 List<Double> queryVector = embeddingClient.embed(List.of(query)).get(0);
                 recordStage("embedding", embeddingStarted, 1, durations);
                 long vectorStarted = System.nanoTime();
-                vector = qdrantStore.vectorSearch(
-                        queryVector, request, Math.max(1, properties.getVectorTopK()));
+                vector =
+                        qdrantStore.vectorSearch(
+                                queryVector, request, Math.max(1, properties.getVectorTopK()));
                 recordStage("vector", vectorStarted, vector.size(), durations);
             } catch (RuntimeException exception) {
                 degraded = "EMBEDDING_OR_VECTOR_UNAVAILABLE";
@@ -262,8 +270,10 @@ public class KnowledgeIndexService {
 
     List<Map<String, Object>> candidateRows(HybridSearchResult result) {
         return result.candidates().stream()
-                .map(candidate -> mapper.convertValue(
-                        candidate, new TypeReference<Map<String, Object>>() {}))
+                .map(
+                        candidate ->
+                                mapper.convertValue(
+                                        candidate, new TypeReference<Map<String, Object>>() {}))
                 .toList();
     }
 
@@ -292,8 +302,11 @@ public class KnowledgeIndexService {
                 "vectorPointCount", qdrantStore.pointCount());
     }
 
-    Map<String, Object> consistencySnapshot(Set<Long> expectedDocuments, Set<String> expectedChunks,
-            Set<Long> liveDocuments, Set<String> liveChunks) {
+    Map<String, Object> consistencySnapshot(
+            Set<Long> expectedDocuments,
+            Set<String> expectedChunks,
+            Set<Long> liveDocuments,
+            Set<String> liveChunks) {
         String physicalIndex = vectorStore.physicalIndex();
         qdrantStore.ensureCollection();
         String physicalCollection = qdrantStore.physicalCollection();
@@ -313,15 +326,23 @@ public class KnowledgeIndexService {
         result.put("publishedIndexedDocumentCount", publishedIndexed.size());
         result.put("vectorPointCount", points.size());
         result.put("publishedVectorPointCount", publishedPoints.size());
-        result.put("missingEsDocumentCount",
+        result.put(
+                "missingEsDocumentCount",
                 expectedDocuments.stream().filter(id -> !publishedIndexed.contains(id)).count());
-        result.put("orphanEsDocumentCount", indexed.stream().filter(id -> !liveDocuments.contains(id)).count());
-        result.put("missingQdrantPointCount",
+        result.put(
+                "orphanEsDocumentCount",
+                indexed.stream().filter(id -> !liveDocuments.contains(id)).count());
+        result.put(
+                "missingQdrantPointCount",
                 expectedChunks.stream().filter(id -> !publishedPoints.contains(id)).count());
-        result.put("orphanQdrantPointCount", points.stream().filter(id -> !liveChunks.contains(id)).count());
+        result.put(
+                "orphanQdrantPointCount",
+                points.stream().filter(id -> !liveChunks.contains(id)).count());
         result.put("checkMode", "DOCUMENT_AND_POINT_IDS");
         result.put("checkedAt", java.time.Instant.now().toString());
-        result.put("checkNote", "缺失按已发布知识及索引发布标记核对；孤儿指已无有效源记录的 ID。合法草稿预索引不算孤儿，也不进入全局问答。此检查不评估向量质量，发布或重建完成后可复查。");
+        result.put(
+                "checkNote",
+                "缺失按已发布知识及索引发布标记核对；孤儿指已无有效源记录的 ID。合法草稿预索引不算孤儿，也不进入全局问答。此检查不评估向量质量，发布或重建完成后可复查。");
         return result;
     }
 
@@ -334,8 +355,10 @@ public class KnowledgeIndexService {
         int window = Math.max(1, properties.getRrfWindow());
         addRank(candidates, bm25, RetrievalChannel.BM25, window);
         addRank(candidates, vector, RetrievalChannel.VECTOR, window);
-        int outputSize = Math.min(
-                Math.max(1, request.resultSize()), Math.max(1, properties.getHybridCandidates()));
+        int outputSize =
+                Math.min(
+                        Math.max(1, request.resultSize()),
+                        Math.max(1, properties.getHybridCandidates()));
         String mode = vector.isEmpty() ? "BM25" : "HYBRID_RRF";
         return candidates.values().stream()
                 .sorted((left, right) -> Double.compare(right.rrfScore, left.rrfScore))
@@ -349,13 +372,18 @@ public class KnowledgeIndexService {
             List<RetrievalHit> hits,
             RetrievalChannel channel,
             int window) {
-        int maximum = Math.min(window, hits.size());
-        for (int index = 0; index < maximum; index++) {
-            RetrievalHit hit = hits.get(index);
-            Candidate candidate = candidates.computeIfAbsent(
-                    hit.id(), ignored -> new Candidate(hit.source()));
-            candidate.channels.add(channel);
-            candidate.rrfScore += 1.0D / (properties.getRrfRankConstant() + index + 1.0D);
+        int rank = 0;
+        for (RetrievalHit hit : hits) {
+            if (rank >= window) break;
+            String identity = canonicalIdentity(hit.source());
+            if (identity == null) continue;
+            Candidate candidate =
+                    candidates.computeIfAbsent(identity, ignored -> new Candidate(hit.source()));
+            // ES uses document:version:index; Qdrant uses chunkId. Neither physical ID is the
+            // shared identity.
+            if (!candidate.channels.add(channel)) continue;
+            rank++;
+            candidate.rrfScore += 1.0D / (properties.getRrfRankConstant() + rank);
             if (channel == RetrievalChannel.BM25) {
                 candidate.bm25Score = hit.score();
             } else {
@@ -364,10 +392,39 @@ public class KnowledgeIndexService {
         }
     }
 
+    private String canonicalIdentity(Map<String, Object> source) {
+        if (source == null) return null;
+        long document = positiveIdentity(source.get("documentId"));
+        long chunk = positiveIdentity(source.get("chunkId"));
+        if (document == 0 || chunk == 0) return null;
+        Long version = null;
+        for (String key : List.of("documentVersion", "version")) {
+            if (!source.containsKey(key)) continue;
+            long value = positiveIdentity(source.get(key));
+            if (value == 0 || (version != null && version != value)) return null;
+            version = value;
+        }
+        // A legacy unknown version must not silently merge with a known, potentially changed
+        // version.
+        return document + ":" + chunk + ":" + (version == null ? "unknown" : version);
+    }
+
+    private long positiveIdentity(Object value) {
+        if (!(value instanceof Byte
+                || value instanceof Short
+                || value instanceof Integer
+                || value instanceof Long
+                || value instanceof java.math.BigInteger)) return 0;
+        try {
+            long number = new java.math.BigInteger(value.toString()).longValueExact();
+            return number > 0 ? number : 0;
+        } catch (ArithmeticException | NumberFormatException invalid) {
+            return 0;
+        }
+    }
+
     private List<Long> ranks(List<RetrievalHit> hits) {
-        return hits.stream()
-                .map(hit -> number(hit.source(), "chunkId").longValue())
-                .toList();
+        return hits.stream().map(hit -> number(hit.source(), "chunkId").longValue()).toList();
     }
 
     private Map<String, Object> debugFilters(RetrievalRequest request) {
@@ -381,10 +438,7 @@ public class KnowledgeIndexService {
     }
 
     private void recordStage(
-            String stage,
-            long started,
-            int candidateCount,
-            Map<String, Long> durations) {
+            String stage, long started, int candidateCount, Map<String, Long> durations) {
         Duration duration = Duration.ofNanos(System.nanoTime() - started);
         durations.put(stage, duration.toMillis());
         metrics.timer("rag.retrieval.duration", "stage", stage).record(duration);
@@ -400,9 +454,7 @@ public class KnowledgeIndexService {
         return null;
     }
 
-    private List<List<Integer>> batches(
-            List<Map<String, Object>> chunks,
-            List<String> texts) {
+    private List<List<Integer>> batches(List<Map<String, Object>> chunks, List<String> texts) {
         int maximumSize = Math.max(1, properties.getEmbeddingBatchSize());
         int maximumTokens = Math.max(1, properties.getEmbeddingBatchMaxTokens());
         List<List<Integer>> result = new ArrayList<>();
@@ -432,14 +484,17 @@ public class KnowledgeIndexService {
         if (!embeddingClient.model().equals(result.model())
                 || result.dimensions() != properties.getDimensions()
                 || result.vectors().size() != expectedSize
-                || result.vectors().stream().anyMatch(vector -> vector.size() != properties.getDimensions())) {
+                || result.vectors().stream()
+                        .anyMatch(vector -> vector.size() != properties.getDimensions())) {
             throw new IllegalStateException("Embedding 返回模型、数量或维度不正确");
         }
     }
 
     private String safeMessage(RuntimeException exception) {
         String message = exception.getMessage();
-        return message == null || message.isBlank() ? exception.getClass().getSimpleName() : message;
+        return message == null || message.isBlank()
+                ? exception.getClass().getSimpleName()
+                : message;
     }
 
     private Map<Long, String> batchFailures(
@@ -447,18 +502,15 @@ public class KnowledgeIndexService {
             String store,
             RuntimeException exception) {
         Map<Long, String> result = new LinkedHashMap<>();
-        documents.forEach(document -> result.put(
-                document.chunkId(), store + ": " + safeMessage(exception)));
+        documents.forEach(
+                document -> result.put(document.chunkId(), store + ": " + safeMessage(exception)));
         return result;
     }
 
     private Map<Long, String> pointFailures(
-            List<QdrantVectorStore.IndexPoint> points,
-            String store,
-            RuntimeException exception) {
+            List<QdrantVectorStore.IndexPoint> points, String store, RuntimeException exception) {
         Map<Long, String> result = new LinkedHashMap<>();
-        points.forEach(point -> result.put(
-                point.chunkId(), store + ": " + safeMessage(exception)));
+        points.forEach(point -> result.put(point.chunkId(), store + ": " + safeMessage(exception)));
         return result;
     }
 
@@ -478,15 +530,14 @@ public class KnowledgeIndexService {
     private String embeddingText(Map<String, Object> chunk, String documentTitle) {
         Map<String, Object> metadata = metadata(chunk);
         Object pathValue = metadata.get("headingPath");
-        String heading = pathValue instanceof List<?> path && !path.isEmpty()
-                ? path.stream()
-                        .map(Object::toString)
-                        .reduce((left, right) -> left + " > " + right)
-                        .orElse(documentTitle)
-                : documentTitle;
-        return "文档：" + documentTitle
-                + "\n章节：" + heading
-                + "\n\n正文：\n" + text(chunk, "content");
+        String heading =
+                pathValue instanceof List<?> path && !path.isEmpty()
+                        ? path.stream()
+                                .map(Object::toString)
+                                .reduce((left, right) -> left + " > " + right)
+                                .orElse(documentTitle)
+                        : documentTitle;
+        return "文档：" + documentTitle + "\n章节：" + heading + "\n\n正文：\n" + text(chunk, "content");
     }
 
     private Map<String, Object> metadata(Map<String, Object> chunk) {
@@ -544,7 +595,10 @@ public class KnowledgeIndexService {
 
         private String heading(Object value) {
             if (value instanceof List<?> list) {
-                return list.stream().map(Object::toString).reduce((a, b) -> a + " > " + b).orElse("");
+                return list.stream()
+                        .map(Object::toString)
+                        .reduce((a, b) -> a + " > " + b)
+                        .orElse("");
             }
             return value == null ? "" : value.toString();
         }

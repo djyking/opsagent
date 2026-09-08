@@ -1,0 +1,41 @@
+/* Reviewed event/alert list hierarchy. Only the feedback pages use these accents. */
+.ticket-list-page, .alert-page { --event-blue:#1761ed; }
+.ticket-list-page .oa-list-surface, .alert-page .oa-list-surface { border:1px solid #e0e9fa; border-radius:12px; box-shadow:none; }
+.ticket-list-page .oa-filter-bar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:15px 18px; }
+.ticket-list-page .oa-filter-bar > select { width:auto; min-width:140px; flex:1 1 140px; max-width:205px; }
+.ticket-list-page .event-advanced-filters { margin-left:auto; }
+.event-advanced-filters > summary { list-style:none; cursor:pointer; color:#436eaf; font-size:12px; padding:8px 11px; border:1px solid #dce7fa; border-radius:6px; }
+.event-advanced-filter-body { display:flex; flex-wrap:wrap; gap:10px; padding:12px 0 0; }.event-advanced-filter-body .search-box { min-width:220px; flex:1; }.event-advanced-filter-body > select { width:auto; min-width:140px; }
+.ticket-list-page .event-advanced-filters[open] { order:10; flex:1 0 100%; margin-left:0; }.ticket-list-page .event-advanced-filters[open] > summary { display:inline-flex; }
+.ticket-list-page .event-queue-summary { border-radius:10px; padding:15px 22px; border:1px solid #e1eafe; }
+.ticket-list-page .event-queue-summary > button:first-child strong { color:var(--event-blue); }
+.ticket-list-page .ticket-table { min-width:1100px; }
+.ticket-list-page .ticket-table th { background:#f6f9ff; color:#597095; font-size:12px; font-weight:500; padding:13px 14px; }
+.ticket-list-page .ticket-table th:first-child { width:26%; }
+.ticket-list-page .ticket-table td { padding:15px 14px; height:78px; }
+.ticket-list-page .ticket-table td:last-child { white-space:nowrap; }
+.ticket-list-page .ticket-table .table-title { max-width:290px; gap:6px; }
+.ticket-list-page .ticket-table .table-title strong { color:var(--event-blue); font-size:13px; line-height:1.6; font-weight:600; }
+.ticket-list-page .ticket-table .table-title span { font-family:var(--oa-font-sans); color:#667c9e; font-size:12px; }
+.ticket-list-page .ticket-table-row:hover,.ticket-list-page .ticket-table-row:focus-within { background:#f2f6ff; box-shadow:inset 3px 0 var(--event-blue); }
+.event-service-tag { display:inline-flex; align-items:center; gap:5px; max-width:170px; font-size:11px; padding:5px 7px; color:#486ba3; border:1px solid #dae5fb; border-radius:5px; background:#f8faff; overflow-wrap:anywhere; }.event-service-tag svg { flex-shrink:0; }.event-service-missing { color:#98a5b8; font-size:12px; }
+.event-priority-chip { display:inline-flex; align-items:center; border:1px solid #dce7f8; padding:4px 8px; border-radius:5px; color:#587599; background:#f5f8ff; font-size:12px; }
+.event-priority-chip[data-priority=URGENT] { background:#fff4f3; border-color:#fbdcda; color:#dc4d48; }.event-priority-chip[data-priority=HIGH] { background:#fff7ee; border-color:#ffe5c7; color:#d9812d; }
+.ticket-list-page .ticket-assignment { display:flex; align-items:center; gap:7px; white-space:nowrap; }
+.ticket-list-page .ticket-assignment > strong { font-size:12px; font-weight:400; }
+.event-assignee-avatar { display:grid; place-items:center; flex-shrink:0; width:27px; height:27px; border-radius:50%; background:#eaf1ff; color:#2d6ce4; font-size:12px; }.event-assignee-avatar.empty { background:#f2f5fa; color:#9aa8bc; }
+.ticket-list-page .event-state-label { background:#ecf3ff; color:#2169e8; }
+.ticket-list-page .event-state-label[data-stage=VERIFYING], .ticket-list-page .event-state-label[data-stage=READY_TO_CLOSE], .ticket-list-page .event-state-label[data-stage=CLOSED], .ticket-list-page .event-state-label[data-stage=LEGACY_ARCHIVED] { background:#f2f5fa; color:#71849f; }
+.ticket-list-page .event-stage-chip[data-stage=VERIFYING] { color:#208b69; background:#edf9f3; }.ticket-list-page .event-stage-chip[data-stage=CLOSED],.ticket-list-page .event-stage-chip[data-stage=LEGACY_ARCHIVED] { color:#7c8ca5; background:#f3f5f8; }
+.ticket-list-page .event-enter { border:1px solid #cadcfc; border-radius:5px; padding:7px 9px; color:var(--event-blue); background:#fff; }
+.ticket-list-page .event-enter:hover { background:var(--event-blue); border-color:var(--event-blue); color:#fff; }
+.ticket-list-page .event-sla { color:var(--event-blue); font-weight:500; font-size:12px; }.ticket-list-page .event-sla[data-tone=danger] { color:#cf6257; }.ticket-list-page .event-sla[data-tone=muted] { color:#8393aa; }.ticket-list-page .event-sla small { font-weight:400; }
+.alert-page .segmented-control { background:var(--oa-bg-subtle); padding:4px; gap:4px; border-radius:var(--oa-radius-control); }
+.alert-page .segmented-control button { border-radius:var(--oa-radius-xs); background:transparent; padding:7px 16px; color:var(--oa-text-secondary); }
+.alert-page .segmented-control button.active { background:var(--oa-primary-soft); color:var(--event-blue); box-shadow:none; }
+.alert-page .alert-table { min-width:850px; }.alert-page .alert-table th { background:#f7f9fe; color:#506b94; padding:14px 20px; }.alert-page .alert-table td { height:78px; padding:16px 20px; }.alert-page .alert-table .table-title strong { color:var(--event-blue); font-size:13px; }.alert-page .alert-table .table-title span { color:#7186a4; font-family:var(--oa-font-sans); font-size:12px; }
+.alert-severity-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 7px; border:1px solid #dce6f7; border-radius:5px; color:#55789e; background:#f8fbff; font-size:12px; }.alert-severity-chip[data-severity=CRITICAL] { border-color:#f4c9c7; color:#d85b53; background:#fff8f7; }.alert-severity-chip[data-severity=WARNING] { border-color:#f4d8b7; color:#d48b37; background:#fffaf2; }
+.alert-page .alert-detail-action,.alert-event-link { display:inline-flex; align-items:center; gap:6px; color:var(--event-blue); font-size:12px; background:none; }
+.alert-page .alert-associated-event { border-radius:7px; background:#f6f9ff; border-color:#dce7fe; font-size:13px; }
+.alert-page .alert-associated-event .button.primary { background:var(--event-blue); border-color:var(--event-blue); box-shadow:none; }
+@media(max-width:760px) { .ticket-list-page .event-queue-summary { padding:13px; }.ticket-list-page .ticket-table td { height:72px; } }

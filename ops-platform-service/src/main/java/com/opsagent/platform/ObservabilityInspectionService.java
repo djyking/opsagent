@@ -89,6 +89,7 @@ class ObservabilityInspectionService {
                             "checkId", "HEALTH_CHECK:" + node.get("environment") + ":" + code));
             item.put("name", node.get("ciName") + "运行检查");
             item.put("currentHealth", node.get("health"));
+            item.put("currentNode", node);
             item.put("observation", node.get("observation"));
             item.put("status", latest.getOrDefault("status", "NOT_RUN"));
             item.put("lastCheckedAt", latest.get("lastCheckedAt"));

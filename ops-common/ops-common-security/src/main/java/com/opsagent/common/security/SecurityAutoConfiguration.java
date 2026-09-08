@@ -32,6 +32,30 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 public class SecurityAutoConfiguration {
     @Bean
+    RuntimeConfigurationSnapshot runtimeConfigurationSnapshot(
+            org.springframework.core.env.ConfigurableEnvironment environment) {
+        return new RuntimeConfigurationSnapshot(environment);
+    }
+
+    @Bean
+    RuntimeConfigurationController runtimeConfigurationController(
+            RuntimeConfigurationSnapshot snapshots) {
+        return new RuntimeConfigurationController(snapshots);
+    }
+
+    @Bean
+    RuntimeConfigurationEvidence runtimeConfigurationEvidence(
+            org.springframework.core.env.ConfigurableEnvironment environment) {
+        return new RuntimeConfigurationEvidence(environment);
+    }
+
+    @Bean
+    RuntimeConfigurationEvidenceController runtimeConfigurationEvidenceController(
+            RuntimeConfigurationEvidence evidence) {
+        return new RuntimeConfigurationEvidenceController(evidence);
+    }
+
+    @Bean
     @ConditionalOnMissingBean(MethodSecurityExceptionHandler.class)
     MethodSecurityExceptionHandler methodSecurityExceptionHandler() {
         return new MethodSecurityExceptionHandler();

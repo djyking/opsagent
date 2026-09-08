@@ -219,6 +219,27 @@ class NodeHealthService {
                     "BUSINESS_EVIDENCE_MISSING",
                     "BUSINESS");
         }
+        String infrastructureIssue = InfrastructureObservationContract.issue(job, metrics);
+        if (!infrastructureIssue.isBlank()) {
+            String status =
+                    switch (infrastructureIssue) {
+                        case "INFRA_READ_VERIFIED", "HOST_RESOURCE_OBSERVED" -> "HEALTHY";
+                        case "INFRA_CHECK_FAILED", "ELASTIC_CLUSTER_RED" -> "CRITICAL";
+                        case "ELASTIC_CLUSTER_YELLOW",
+                                "DOWNSTREAM_SCRAPE_FAILED",
+                                "HOST_RESOURCE_PRESSURE" ->
+                                "DEGRADED";
+                        default -> "UNKNOWN";
+                    };
+            return new Health(
+                    status,
+                    InfrastructureObservationContract.message(infrastructureIssue),
+                    healthy,
+                    count,
+                    observed,
+                    infrastructureIssue,
+                    "NATIVE_METRICS");
+        }
         String scope =
                 metrics.get("rps") instanceof Number
                         ? "REQUEST_WINDOW"

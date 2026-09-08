@@ -77,7 +77,7 @@ class InspectionExecutionRepository {
                             Objects.requireNonNull(
                                     jdbc.queryForObject(
                                             "SELECT * FROM observability_inspection_plan WHERE"
-                                                + " plan_key=? FOR UPDATE",
+                                                    + " plan_key=? FOR UPDATE",
                                             this::plan,
                                             PLAN));
                     Instant due = plan.nextRunAt();
@@ -220,6 +220,9 @@ class InspectionExecutionRepository {
         Map<String, Object> evidence = new LinkedHashMap<>();
         for (String key :
                 List.of(
+                        "ciCode",
+                        "environment",
+                        "identity",
                         "health",
                         "metrics",
                         "observedAt",
@@ -228,6 +231,9 @@ class InspectionExecutionRepository {
                         "observation",
                         "observationState",
                         "healthScope",
+                        "healthReasonCode",
+                        "metricEvidence",
+                        "evidenceRefs",
                         "metricDetails",
                         "businessObservedAt")) {
             if (node.containsKey(key)) evidence.put(key, node.get(key));
@@ -280,9 +286,9 @@ class InspectionExecutionRepository {
     void recoverExpired(Instant now) {
         jdbc.update(
                 "UPDATE observability_inspection_execution SET"
-                    + " execution_status='TIMED_OUT',result='UNKNOWN',"
-                    + "reason_code='LEASE_EXPIRED',summary=?,finished_at=?"
-                    + " WHERE execution_status='RUNNING' AND lease_until<=?",
+                        + " execution_status='TIMED_OUT',result='UNKNOWN',"
+                        + "reason_code='LEASE_EXPIRED',summary=?,finished_at=?"
+                        + " WHERE execution_status='RUNNING' AND lease_until<=?",
                 explanation("LEASE_EXPIRED"),
                 ts(now),
                 ts(now));

@@ -25,8 +25,8 @@ public class AiUsageRepository {
         try {
             jdbc.update(
                     "INSERT INTO ai_usage_log(trace_id,user_id,provider,model,question_hash,"
-                            + "input_tokens,output_tokens,latency_ms,success,error_code,create_time)"
-                            + " VALUES(?,?,?,?,?,?,?,?,?,?,NOW())",
+                        + "input_tokens,output_tokens,latency_ms,success,error_code,create_time)"
+                        + " VALUES(?,?,?,?,?,?,?,?,?,?,NOW())",
                     usage.traceId(),
                     usage.userId(),
                     usage.provider(),
@@ -39,6 +39,25 @@ public class AiUsageRepository {
                     usage.errorCode());
         } catch (DataAccessException exception) {
             LOG.warn("AI 用量审计写入失败，provider={}，不影响本次回答", usage.provider());
+        }
+    }
+
+    void saveBudget(String traceId, long userId, String questionHash, AssistantTokenBudget budget) {
+        try {
+            jdbc.update(
+                    "INSERT INTO"
+                        + " ai_operation_budget_log(trace_id,user_id,question_hash,budget_limit,"
+                        + "charged_tokens,usage_known,request_attempts,create_time)"
+                        + " VALUES(?,?,?,?,?,?,?,NOW())",
+                    traceId,
+                    userId,
+                    questionHash,
+                    AssistantTokenBudget.LIMIT,
+                    budget.charged(),
+                    budget.usageKnown(),
+                    budget.attempts());
+        } catch (DataAccessException exception) {
+            LOG.warn("问答预算审计写入失败；本次额度门禁仍然生效");
         }
     }
 

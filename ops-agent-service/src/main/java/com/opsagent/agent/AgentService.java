@@ -24,6 +24,18 @@ class AgentService {
     private final AgentStore store;
     private final AgentClients clients;
 
+    @org.springframework.beans.factory.annotation.Value("${ops.agent.run-token-budget:100000}")
+    private int runTokenBudget = 100000;
+
+    private int tokenLimit() {
+        if (runTokenBudget == 0) return 0;
+        return Math.max(1000, Math.min(runTokenBudget, 100000));
+    }
+
+    private String tokenBudgetMode() {
+        return tokenLimit() == 0 ? "UNLIMITED" : "LIMITED";
+    }
+
     AgentService(AgentStore store, AgentClients clients) {
         this.store = store;
         this.clients = clients;
@@ -62,6 +74,9 @@ class AgentService {
                 || !event.path("environment").asText().equals("ISOLATED")
                 || event.path("incidentId").asText().isBlank())
             throw AgentJson.invalid("非隔离演练事件不自动执行");
+        String bound =
+                store.incidentRun("isolated-recovery", owner, event.path("incidentId").asText());
+        if (bound != null) return bound;
         Context actor =
                 clients.refresh(
                         new Context(
@@ -124,7 +139,10 @@ class AgentService {
         if (model == null) throw AgentJson.invalid("该模型尚未通过原生工具能力验证");
         ObjectNode snapshot =
                 AgentJson.object()
-                        .put("toolRegistryVersion", "isolated-tools-v3")
+                        .put("toolRegistryVersion", "isolated-tools-v4-evidence-refs")
+                        .put("evidenceRegistryVersion", AgentEvidenceRegistry.VERSION)
+                        .put("tokenBudgetMode", tokenBudgetMode())
+                        .put("tokenBudget", tokenLimit())
                         .put("policyVersion", "isolated-owner-approval-v1");
         snapshot.set("graph", store.version(definition));
         snapshot.set("model", model);
@@ -142,6 +160,8 @@ class AgentService {
                         .put("turns", 0)
                         .put("toolCount", 0)
                         .put("tokens", 0)
+                        .put("tokenBudget", tokenLimit())
+                        .put("tokenBudgetMode", tokenBudgetMode())
                         .put("ticketResolved", false);
         state.set("actor", clients.actorJson(actor));
         return store.create(definition, trigger, actor.userId(), snapshot, state);
@@ -181,6 +201,34 @@ class AgentService {
                 store.runs(page, size, actor.userId(), all, ticketId, incidentId),
                 "total",
                 store.count(actor.userId(), all, ticketId, incidentId));
+    }
+
+    JsonNode usage(String id) {
+        own(id);
+        AgentStore.Run run = store.get(id);
+        ObjectNode result = AgentJson.object().put("runId", id);
+        result.set("budget", AgentRunUsage.budget(run.state()));
+        result.set("embedding", AgentRunUsage.embedding(run.state()));
+        try {
+            Context actor =
+                    clients.current(SecurityUsers.current(), run.state().path("runId").asText(id));
+            result.set(
+                    "model",
+                    clients.call(
+                            "rag",
+                            "/internal/ai/runs/" + actor.runId() + "/usage",
+                            "GET",
+                            null,
+                            actor));
+        } catch (RuntimeException unavailable) {
+            result.set(
+                    "model",
+                    AgentJson.object()
+                            .put("availability", "UNAVAILABLE")
+                            .put("unknownCountIsLowerBound", true)
+                            .put("coverage", "UNAVAILABLE"));
+        }
+        return result;
     }
 
     Map<String, Object> pendingApprovals(int limit) {
@@ -243,7 +291,9 @@ class AgentService {
                 "maxToolCalls",
                 18,
                 "maxTotalTokens",
-                32000,
+                tokenLimit(),
+                "tokenBudgetMode",
+                tokenBudgetMode(),
                 "maximumMinutes",
                 15,
                 "maxConcurrentRuns",

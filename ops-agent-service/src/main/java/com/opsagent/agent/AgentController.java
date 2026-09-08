@@ -138,6 +138,11 @@ class AgentController {
         return ApiResponse.success(store.events(id, after));
     }
 
+    @GetMapping("/runs/{id}/usage")
+    ApiResponse<JsonNode> usage(@PathVariable String id) {
+        return ApiResponse.success(service.usage(id));
+    }
+
     @PostMapping("/runs/{id}/cancel")
     ApiResponse<Void> cancel(@PathVariable String id) {
         service.own(id);

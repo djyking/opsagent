@@ -4,6 +4,7 @@ import { ragAnswerLabel } from '@/api/rag-stream';
 import { useRagConversations } from '@/composables/useRagConversations';
 import AnswerContent from '@/components/AnswerContent.vue';
 import RagSources from '@/components/RagSources.vue';
+import RagBudgetEvidence from '@/components/RagBudgetEvidence.vue';
 import PageHeader from '@/components/PageHeader.vue';
 import BaseModal from '@/components/BaseModal.vue';
 import { useAiAssistantStore } from '@/stores/ai-assistant';
@@ -49,6 +50,7 @@ const suggestions = ['检查当前服务健康与内存趋势', 'Nacos 当前注
               <div class="answer-status"><span :class="{ pulse: busy && turn.status === 'PROCESSING' }"><Bot :size="18" /></span><div><strong>{{ turnLabel(turn) }}</strong><small v-if="turn.result"><Clock3 :size="13" />{{ ragAnswerLabel(turn.result) }} · {{ turn.result.latencyMs }} ms</small></div><div v-if="turn.answer && turn.status !== 'PROCESSING'" class="rag-answer-actions"><button class="icon-button" aria-label="复制回答" @click="copyAnswer(turn)"><Copy :size="15" /></button><button class="icon-button" aria-label="重新提问" :disabled="busy" @click="ask(turn.question)"><RotateCw :size="15" /></button></div></div>
               <AnswerContent v-if="turn.answer" :content="turn.answer" />
               <div v-else-if="turn.status === 'PROCESSING'" class="answer-skeleton"><i /><i /><i /></div>
+              <RagBudgetEvidence v-if="turn.result" :result="turn.result" />
               <p v-if="turn.errorMessage" class="rag-incomplete" role="status">{{ turn.errorMessage }}</p>
               <button v-if="turn.result?.references.length" class="rag-show-sources" @click="selectedTurnId = turn.id; contextOpen = true"><BookOpen :size="14" />查看本条回答的 {{ turn.result.references.length }} 条来源</button>
             </div>

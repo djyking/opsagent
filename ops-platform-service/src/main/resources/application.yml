@@ -38,6 +38,13 @@ spring:
       transport:
         dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
 ops:
+  configuration:
+    runtime-targets:
+      ops-auth-service: ${OPS_AUTH_INTERNAL_URL:http://localhost:8101}
+      ops-ticket-service: ${OPS_TICKET_INTERNAL_URL:http://localhost:8102}
+      ops-knowledge-service: ${OPS_KNOWLEDGE_INTERNAL_URL:http://localhost:8103}
+      ops-rag-service: ${OPS_RAG_INTERNAL_URL:http://localhost:8104}
+      ops-agent-service: ${OPS_AGENT_INTERNAL_URL:http://localhost:8106}
   agent:
     internal-secret: ${OPS_AGENT_INTERNAL_SECRET:}
     auth-url: ${OPS_AUTH_INTERNAL_URL:http://localhost:8101}

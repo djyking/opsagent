@@ -57,9 +57,28 @@ public class PlatformMqConfiguration {
     }
 
     @Bean
+    Queue platformSlaNotificationQueue() {
+        return new Queue(
+                "opsagent.platform.sla.notifications",
+                true,
+                false,
+                false,
+                Map.of(
+                        "x-dead-letter-exchange",
+                        MqNames.PLATFORM_AUDIT_DLX,
+                        "x-dead-letter-routing-key",
+                        MqNames.PLATFORM_AUDIT_DEAD_ROUTING_KEY));
+    }
+
+    @Bean
+    Binding platformSlaNotificationBinding(
+            Queue platformSlaNotificationQueue, TopicExchange ticketExchange) {
+        return BindingBuilder.bind(platformSlaNotificationQueue).to(ticketExchange).with("sla.#");
+    }
+
+    @Bean
     Binding platformAuditDeadLetterBinding(
-            Queue platformAuditDeadLetterQueue,
-            DirectExchange platformAuditDeadLetterExchange) {
+            Queue platformAuditDeadLetterQueue, DirectExchange platformAuditDeadLetterExchange) {
         return BindingBuilder.bind(platformAuditDeadLetterQueue)
                 .to(platformAuditDeadLetterExchange)
                 .with(MqNames.PLATFORM_AUDIT_DEAD_ROUTING_KEY);

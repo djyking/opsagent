@@ -9,9 +9,22 @@ export interface PendingApproval extends Approval { runStatus: string; ownerId: 
   nodeId: string; nodeLabel: string; runDeadline: string; pauseRequested: boolean }
 export interface ModelFailure { code: string; reason: string; canResume: boolean; retryable: boolean;
   recoveryAction: 'NEW_RUN' | 'CHECK_CONFIGURATION' }
+export type RunTokenBudgetMode = 'UNLIMITED' | 'LIMITED';
+export interface AutomationLimits extends Record<string, unknown> {
+  tokenBudgetMode?: RunTokenBudgetMode; maxTotalTokens?: number; maxModelTurns?: number; maxToolCalls?: number;
+}
+export interface RunUsage {
+  budget: { mode: RunTokenBudgetMode; limitTokens: number | null; chargedTokens: number; remainingTokens?: number | null };
+  model: { availability: 'AVAILABLE' | 'UNAVAILABLE'; coverage?: 'COMPLETE' | 'PARTIAL' | 'UNAVAILABLE';
+    knownInputTokens?: number; knownOutputTokens?: number; knownTotalTokens?: number; knownUsageAttempts?: number;
+    unknownUsageAttempts?: number; unknownCountIsLowerBound?: boolean; pendingCalls?: number;
+    providers?: { provider: string; knownInputTokens: number; knownOutputTokens: number; knownTotalTokens: number;
+      knownUsageAttempts: number; unknownUsageAttempts: number }[] };
+  embedding: { reservedTokens: number; reservationCount: number; actualTokens?: number | null; actualUsageKnown: boolean };
+}
 export interface RunDetail { id: string; ownerId: number; status: string; nodeId: string; createdAt: string; pauseRequested?: boolean;
   snapshot: { graph: Graph; model: Model; hash: string }; approvals: Approval[];
-  state: { ticketId: number; incidentId: string; turns: number; toolCount: number; tokens: number; summary?: string;
+  state: { ticketId: number; incidentId: string; turns: number; toolCount: number; tokens: number; tokenBudget?: number; tokenBudgetMode?: RunTokenBudgetMode; summary?: string;
     deadline: string; message?: string; modelFailure?: ModelFailure; ticketResolved: boolean;
     recoveryVerification?: { resolved?: boolean; toStatus?: string; reason?: string };
     outputs?: Record<string, unknown>; observations?: Record<string, unknown> } }
@@ -30,7 +43,7 @@ const base = '/api/automation';
 export const automationApi = {
   models: () => request<{ models: Model[] }>({ url: `${base}/models` }),
   probe: (provider: string) => request<Model>({ method: 'POST', url: `${base}/models/${encodeURIComponent(provider.toUpperCase())}/probe` }),
-  tools: () => request<{ tools: { function: { name: string; description: string; parameters: unknown } }[]; limits: Record<string, unknown>; approvalRequired: string[] }>({ url: `${base}/tools` }),
+  tools: () => request<{ tools: { function: { name: string; description: string; parameters: unknown } }[]; limits: AutomationLimits; approvalRequired: string[] }>({ url: `${base}/tools` }),
   definitions: () => request<Definition[]>({ url: `${base}/definitions` }),
   definition: (id: string) => request<Definition>({ url: `${base}/definitions/${id}` }),
   save: (id: string, name: string, revision: number, graph: Graph) => request({ method: 'PUT', url: `${base}/definitions/${id}`, data: { name, revision, graph } }),
@@ -38,6 +51,7 @@ export const automationApi = {
   publish: (id: string, revision: number) => request({ method: 'POST', url: `${base}/definitions/${id}/publish`, data: { revision } }),
   runs: (page = 1, filters: RunFilters = {}) => request<{ items: RunRow[]; total: number }>({ url: `${base}/runs`, params: { page, size: 10, ...filters } }),
   run: (id: string) => request<RunDetail>({ url: `${base}/runs/${id}` }),
+  usage: (id: string) => request<RunUsage>({ url: `${base}/runs/${encodeURIComponent(id)}/usage` }),
   events: (id: string, after = 0) => request<RunEvent[]>({ url: `${base}/runs/${id}/events`, params: { after } }),
   create: (ticketId: number, definitionId: string, provider: string, requestId: string) => request<{ id: string }>({ method: 'POST', url: `${base}/runs`, data: { ticketId, definitionId, provider, requestId } }),
   cancel: (id: string) => request({ method: 'POST', url: `${base}/runs/${id}/cancel` }),
@@ -48,6 +62,6 @@ export const automationApi = {
   target: (targetCode = 'ops-demo-order-service') => request<Target>({ url: '/api/platform/operations/demo/target', params: { targetCode } }),
   scenarios: (targetCode = 'ops-demo-order-service') => request<{ incidents: Incident[] }>({ url: '/api/platform/operations/demo/scenarios', params: { targetCode } }),
   start: (scenarioCode: string) => request<Incident>({ method: 'POST', url: '/api/platform/operations/demo/scenarios', data: { scenarioCode, ttlSeconds: 900 } }),
-  restore: (target: Target) => request<RestoreResult>({ method: 'POST', url: '/api/platform/operations/demo/actions', data: { incidentId: target.incidentId,
-    expectedRevision: target.expectedRevision, action: ({ NACOS_REDIS_CONFIG_DRIFT: 'RESTORE_CONFIGURATION', SENTINEL_RULE_REGRESSION: 'RESTORE_FLOW_RULE', RABBITMQ_CONSUMER_PAUSED: 'RESTORE_QUEUE_CONSUMER' } as Record<string, string>)[target.scenarioCode || ''], idempotencyKey: `manual-${crypto.randomUUID()}` } }),
+  restore: (target: Target, idempotencyKey = `manual-${crypto.randomUUID()}`) => request<RestoreResult>({ method: 'POST', url: '/api/platform/operations/demo/actions', data: { incidentId: target.incidentId,
+    expectedRevision: target.expectedRevision, action: ({ NACOS_REDIS_CONFIG_DRIFT: 'RESTORE_CONFIGURATION', SENTINEL_RULE_REGRESSION: 'RESTORE_FLOW_RULE', RABBITMQ_CONSUMER_PAUSED: 'RESTORE_QUEUE_CONSUMER' } as Record<string, string>)[target.scenarioCode || ''], idempotencyKey } }),
 };

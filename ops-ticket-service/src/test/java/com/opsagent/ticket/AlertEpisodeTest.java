@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -34,6 +35,7 @@ class AlertEpisodeTest {
     private AlertmanagerService service;
     private TicketService tickets;
     private TicketAuditMapper audit;
+    private AlertTargetClient targets;
 
     @BeforeEach
     void setup() {
@@ -55,6 +57,15 @@ class AlertEpisodeTest {
         session = new SqlSessionFactoryBuilder().build(config).openSession(true);
         tickets = mock(TicketService.class);
         audit = mock(TicketAuditMapper.class);
+        targets = mock(AlertTargetClient.class);
+        when(targets.resolve(any(), anyString()))
+                .thenAnswer(
+                        call ->
+                                new AlertTargetClient.Resolution(
+                                        "MATCHED",
+                                        ((JsonNode) call.getArgument(0)).path("service").asText(),
+                                        "PROD",
+                                        "matched"));
         var resolver = mock(AlertProvenanceResolver.class);
         when(resolver.resolve(anyString(), any(), anyString()))
                 .thenReturn(TicketService.AlertProvenance.core());
@@ -76,6 +87,7 @@ class AlertEpisodeTest {
                         new SimpleMeterRegistry(),
                         session.getMapper(AlertEpisodeMapper.class),
                         resolver,
+                        targets,
                         true,
                         "test-token");
     }
@@ -130,6 +142,65 @@ class AlertEpisodeTest {
     }
 
     @Test
+    void newEpisodeUsesCanonicalIdentityAndResolvedDeliveryDoesNotRebindIt() {
+        doReturn(
+                        new AlertTargetClient.Resolution(
+                                "MATCHED", "ops-agent-service", "PROD", "matched"))
+                .when(targets)
+                .resolve(any(), anyString());
+        var firing = alert("firing", "2026-09-01T01:00:00Z", null);
+        ((ObjectNode) firing.path("labels"))
+                .put("service", "opsagent-agent")
+                .put("ci_code", "ops-agent-service");
+        service.process(firing);
+        verify(tickets)
+                .createFromAlert(
+                        anyString(),
+                        contains("opsagent-agent"),
+                        anyString(),
+                        eq("ops-agent-service"),
+                        anyString(),
+                        argThat(origin -> "PROD".equals(origin.environment())));
+        assertThat(jdbc.queryForObject("SELECT service_code FROM monitor_alert", String.class))
+                .isEqualTo("ops-agent-service");
+        clearInvocations(targets);
+        var resolved = alert("resolved", "2026-09-01T01:00:00Z", "2026-09-01T01:05:00Z");
+        ((ObjectNode) resolved.path("labels")).put("ci_code", "unknown-now");
+        service.process(resolved);
+        service.process(resolved);
+        verifyNoInteractions(targets);
+        assertThat(jdbc.queryForObject("SELECT service_code FROM monitor_alert", String.class))
+                .isEqualTo("ops-agent-service");
+    }
+
+    @Test
+    void unresolvedNewEpisodeRetainsOriginalEvidenceAndSpecificBindingDiagnostic() {
+        doReturn(new AlertTargetClient.Resolution("ENVIRONMENT_MISMATCH", "", "", "告警环境与 CMDB 不一致"))
+                .when(targets)
+                .resolve(any(), anyString());
+        service.process(alert("firing", "2026-09-01T01:00:00Z", null));
+        verify(tickets)
+                .createFromAlert(
+                        anyString(),
+                        contains("ops-demo-order-service"),
+                        anyString(),
+                        eq(""),
+                        anyString(),
+                        argThat(origin -> "".equals(origin.environment()) && !origin.isolated()));
+        verify(audit)
+                .workRecord(
+                        anyLong(),
+                        eq("ALERT_BINDING_PENDING"),
+                        eq("告警环境与 CMDB 不一致"),
+                        contains("ENVIRONMENT_MISMATCH"),
+                        eq(0L));
+        assertThat(jdbc.queryForObject("SELECT labels_json FROM monitor_alert", String.class))
+                .contains("ops-demo-order-service");
+        assertThat(jdbc.queryForObject("SELECT service_code FROM monitor_alert", String.class))
+                .isEmpty();
+    }
+
+    @Test
     void invalidTimesAreRejectedInsteadOfFabricatedAsCurrentTime() {
         assertThatThrownBy(() -> service.process(alert("firing", "bad-time", null)))
                 .hasMessageContaining("startsAt");
@@ -146,14 +217,14 @@ class AlertEpisodeTest {
                 """);
         jdbc.update(
                 "INSERT INTO ticket"
-                    + " VALUES(1,'OWN','CREATED',-10,0,0),(2,'OTHER','CREATED',-11,0,0),"
-                    + "(3,'SHOWCASE','CREATED',2,1,0),(4,'ARCHIVED','CREATED',-10,0,1)");
+                        + " VALUES(1,'OWN','CREATED',-10,0,0),(2,'OTHER','CREATED',-11,0,0),"
+                        + "(3,'SHOWCASE','CREATED',2,1,0),(4,'ARCHIVED','CREATED',-10,0,1)");
         for (int id = 1; id <= 4; id++) {
             jdbc.update(
                     """
-                    INSERT INTO monitor_alert(fingerprint,ticket_id,current_status,first_seen_time,last_seen_time)
-                    VALUES(?,?,'firing',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-                    """,
+INSERT INTO monitor_alert(fingerprint,ticket_id,current_status,first_seen_time,last_seen_time)
+VALUES(?,?,'firing',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+""",
                     "visible-" + id,
                     id);
         }

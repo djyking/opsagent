@@ -7,16 +7,17 @@ import com.opsagent.common.security.InternalActorTokens;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
-import org.slf4j.MDC;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.time.Duration;
 
 /**
  * 集中使用现有 AI 密钥、额度和用量审计，原生模型步受能力验证和持久化去重控制。
@@ -27,7 +28,6 @@ import java.time.Duration;
 @Service
 class InternalAgentModelService {
     private static final Logger LOG = LoggerFactory.getLogger(InternalAgentModelService.class);
-    private static final long DECISION_LIMIT_NANOS = TimeUnit.SECONDS.toNanos(55);
     private final AiProperties properties;
     private final NativeToolModelClient model;
     private final InternalAgentStore store;
@@ -74,7 +74,7 @@ class InternalAgentModelService {
                                 name,
                                 "description",
                                 "Return the supplied nonce for protocol verification; no tool is"
-                                    + " executed.",
+                                        + " executed.",
                                 "parameters",
                                 Map.of(
                                         "type",
@@ -154,11 +154,19 @@ class InternalAgentModelService {
             throw InternalAgentModelFailure.exception(failure.getMessage());
         }
         long started = System.nanoTime();
+        // Every attempt shares the configured decision deadline and the existing run/actor lease.
+        // Leave a small interval for the durable receipt to reach the caller before lease expiry.
+        long decisionLimit =
+                Math.min(
+                        TimeUnit.SECONDS.toNanos(
+                                Math.max(3, Math.min(properties.getTimeoutSeconds(), 120))),
+                        Duration.between(Instant.now(), actor.validUntil()).toNanos()
+                                - TimeUnit.SECONDS.toNanos(2));
         int reservation = model.reservation(request);
         int unknownReservation = 0;
         for (int attempt = 1; attempt <= 2; attempt++) {
             long attemptStarted = System.nanoTime();
-            long remaining = DECISION_LIMIT_NANOS - (attemptStarted - started);
+            long remaining = decisionLimit - (attemptStarted - started);
             if (remaining <= 0 || Thread.currentThread().isInterrupted()) {
                 String code = remaining <= 0 ? "MODEL_TIMEOUT" : "MODEL_CANCELLED";
                 store.failed(request.callId(), attempt > 1, code);
@@ -167,30 +175,49 @@ class InternalAgentModelService {
             InternalAgentDtos.TurnResponse result;
             boolean submitted = false;
             try (var permit = budget.acquire()) {
-                // One outbound attempt has an absolute body-inclusive timeout. The second shares this deadline.
-                remaining = DECISION_LIMIT_NANOS - (System.nanoTime() - started);
+                // One outbound attempt has an absolute body-inclusive timeout. The second shares
+                // this deadline.
+                remaining = decisionLimit - (System.nanoTime() - started);
                 if (remaining <= 0 || Thread.currentThread().isInterrupted()) {
-                    throw new AiProviderException(request.provider(), 0, "模型准入后已到期或中断", null,
-                            remaining <= 0 ? AiProviderException.FailureKind.TIMEOUT
+                    throw new AiProviderException(
+                            request.provider(),
+                            0,
+                            "模型准入后已到期或中断",
+                            null,
+                            remaining <= 0
+                                    ? AiProviderException.FailureKind.TIMEOUT
                                     : AiProviderException.FailureKind.CANCELLED);
                 }
+                store.beginAttempt(request.callId(), attempt, request.provider(), reservation);
                 submitted = true;
-                long attemptLimit = TimeUnit.SECONDS.toNanos(Math.max(3, Math.min(properties.getTimeoutSeconds(), 30)));
-                result = model.call(request, null,
-                        Duration.ofNanos(Math.min(remaining, attemptLimit)));
+                result = model.call(request, null, Duration.ofNanos(remaining));
             } catch (AiProviderException failure) {
                 String code = InternalAgentModelFailure.code(failure);
+                if (submitted) finishAttemptSafely(request.callId(), attempt, null, code);
                 auditSafely(request, actor, null, code, elapsed(attemptStarted));
-                LOG.warn("Agent model attempt failed: call={}, provider={}, attempt={}, kind={}, http={}, elapsedMs={}",
-                        InternalAgentStore.hash(request.callId()), request.provider(), attempt,
-                        failure.kind(), failure.statusCode(), elapsed(attemptStarted));
-                boolean retry = attempt == 1 && InternalAgentModelFailure.transientFailure(failure)
-                        && !Thread.currentThread().isInterrupted() && 2L * reservation <= request.remainingTokens()
-                        && System.nanoTime() - started < DECISION_LIMIT_NANOS - TimeUnit.SECONDS.toNanos(1);
+                LOG.warn(
+                        "Agent model attempt failed: call={}, provider={}, attempt={}, kind={},"
+                                + " http={}, elapsedMs={}, transport={}, responseStarted={}",
+                        InternalAgentStore.hash(request.callId()),
+                        request.provider(),
+                        attempt,
+                        failure.kind(),
+                        failure.statusCode(),
+                        elapsed(attemptStarted),
+                        failure.diagnosticCode(),
+                        failure.responseStarted());
+                boolean retry =
+                        attempt == 1
+                                && InternalAgentModelFailure.transientFailure(failure)
+                                && !Thread.currentThread().isInterrupted()
+                                && 2L * reservation <= request.remainingTokens()
+                                && System.nanoTime() - started
+                                        < decisionLimit - TimeUnit.SECONDS.toNanos(1);
                 if (retry) {
                     unknownReservation = reservation;
-                    try { Thread.sleep(250); }
-                    catch (InterruptedException interrupted) {
+                    try {
+                        Thread.sleep(250);
+                    } catch (InterruptedException interrupted) {
                         Thread.currentThread().interrupt();
                         store.failed(request.callId(), true, "MODEL_CANCELLED");
                         throw InternalAgentModelFailure.exception("MODEL_CANCELLED");
@@ -201,37 +228,88 @@ class InternalAgentModelService {
                 throw InternalAgentModelFailure.exception(code);
             } catch (RuntimeException failure) {
                 String code = submitted ? "MODEL_RESPONSE_INVALID" : "MODEL_BUDGET_REJECTED";
+                if (submitted) finishAttemptSafely(request.callId(), attempt, null, code);
                 store.failed(request.callId(), submitted || attempt > 1, code);
                 auditSafely(request, actor, null, code, elapsed(attemptStarted));
-                LOG.warn("Agent model admission/protocol failed: call={}, attempt={}, code={}, type={}",
-                        InternalAgentStore.hash(request.callId()), attempt, code, failure.getClass().getSimpleName());
+                LOG.warn(
+                        "Agent model admission/protocol failed: call={}, attempt={}, code={},"
+                                + " type={}",
+                        InternalAgentStore.hash(request.callId()),
+                        attempt,
+                        code,
+                        failure.getClass().getSimpleName());
                 throw InternalAgentModelFailure.exception(code);
             }
-            long estimated = (long) unknownReservation + (result.usageKnown() ? result.totalTokens() : reservation);
+            finishAttemptSafely(
+                    request.callId(),
+                    attempt,
+                    result,
+                    result.usageKnown() ? null : "USAGE_UNKNOWN");
+            long estimated =
+                    (long) unknownReservation
+                            + (result.usageKnown() ? result.totalTokens() : reservation);
             int charged = (int) Math.min(request.remainingTokens(), Math.max(estimated, 1L));
-            var receipt = new InternalAgentDtos.TurnResponse(result.outcome(), result.assistantMessage(),
-                    result.inputTokens(), result.outputTokens(), result.totalTokens(),
-                    unknownReservation == 0 && result.usageKnown(), result.provider(), result.model(),
-                    result.finishReason(), elapsed(started), charged, attempt);
-            // Never retry the provider after it returned: persistence and audit are different failure boundaries.
-            try { store.complete(request.callId(), receipt); }
-            catch (RuntimeException failure) {
+            var receipt =
+                    new InternalAgentDtos.TurnResponse(
+                            result.outcome(),
+                            result.assistantMessage(),
+                            result.inputTokens(),
+                            result.outputTokens(),
+                            result.totalTokens(),
+                            unknownReservation == 0 && result.usageKnown(),
+                            result.provider(),
+                            result.model(),
+                            result.finishReason(),
+                            elapsed(started),
+                            charged,
+                            attempt);
+            // Never retry the provider after it returned: persistence and audit are different
+            // failure boundaries.
+            try {
+                store.complete(request.callId(), receipt);
+            } catch (RuntimeException failure) {
                 store.failed(request.callId(), true, "MODEL_RECEIPT_FAILED");
-                auditSafely(request, actor, result, "MODEL_RECEIPT_FAILED", elapsed(attemptStarted));
+                auditSafely(
+                        request, actor, result, "MODEL_RECEIPT_FAILED", elapsed(attemptStarted));
                 throw InternalAgentModelFailure.exception("MODEL_RECEIPT_FAILED");
             }
-            auditSafely(request, actor, result, result.usageKnown() ? null : "USAGE_UNKNOWN", elapsed(attemptStarted));
+            auditSafely(
+                    request,
+                    actor,
+                    result,
+                    result.usageKnown() ? null : "USAGE_UNKNOWN",
+                    elapsed(attemptStarted));
             return receipt;
         }
         throw new IllegalStateException("模型尝试次数超出上限");
     }
 
-    private void auditSafely(InternalAgentDtos.TurnRequest request, InternalActorTokens.Context actor,
-            InternalAgentDtos.TurnResponse result, String error, long elapsed) {
-        try { audit(request, actor, result, error, elapsed); }
-        catch (RuntimeException failure) {
-            LOG.warn("Agent model audit unavailable: call={}, type={}",
-                    InternalAgentStore.hash(request.callId()), failure.getClass().getSimpleName());
+    private void auditSafely(
+            InternalAgentDtos.TurnRequest request,
+            InternalActorTokens.Context actor,
+            InternalAgentDtos.TurnResponse result,
+            String error,
+            long elapsed) {
+        try {
+            audit(request, actor, result, error, elapsed);
+        } catch (RuntimeException failure) {
+            LOG.warn(
+                    "Agent model audit unavailable: call={}, type={}",
+                    InternalAgentStore.hash(request.callId()),
+                    failure.getClass().getSimpleName());
+        }
+    }
+
+    private void finishAttemptSafely(
+            String callId, int attempt, InternalAgentDtos.TurnResponse result, String error) {
+        try {
+            store.finishAttempt(callId, attempt, result, error);
+        } catch (RuntimeException unavailable) {
+            LOG.warn(
+                    "Agent attempt usage receipt unavailable: call={}, attempt={}, type={}",
+                    InternalAgentStore.hash(callId),
+                    attempt,
+                    unavailable.getClass().getSimpleName());
         }
     }
 

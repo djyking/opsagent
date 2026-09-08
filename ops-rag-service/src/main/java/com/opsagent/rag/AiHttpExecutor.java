@@ -3,6 +3,9 @@ package com.opsagent.rag;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -10,21 +13,22 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
-import java.time.Duration;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 执行带超时和有限重试的 AI HTTP 请求，且不记录密钥或供应商原始响应体。
@@ -34,68 +38,147 @@ import java.util.Map;
  */
 @Component
 public class AiHttpExecutor {
-    private final HttpClient boundedClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private static final Logger LOG = LoggerFactory.getLogger(AiHttpExecutor.class);
+    private final HttpClient boundedClient =
+            HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper boundedJson = new ObjectMapper();
 
-    /** Includes connection, headers and the complete response body in one deadline; performs no retry. */
-    JsonNode postBounded(String provider, String baseUrl, String path, String apiKey,
-            Map<String, Object> body, Duration timeout) {
+    /**
+     * Includes connection, headers and the complete response body in one deadline; performs no
+     * retry.
+     */
+    JsonNode postBounded(
+            String provider,
+            String baseUrl,
+            String path,
+            String apiKey,
+            Map<String, Object> body,
+            Duration timeout) {
         String payload;
-        try { payload = boundedJson.writeValueAsString(body); }
-        catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
-            throw new AiProviderException(provider, 0, "模型请求格式无效", null,
-                    AiProviderException.FailureKind.PROTOCOL);
+        try {
+            payload = boundedJson.writeValueAsString(body);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            throw new AiProviderException(
+                    provider, 0, "模型请求格式无效", null, AiProviderException.FailureKind.PROTOCOL);
         }
-        long millis = Math.max(1, Math.min(timeout.toMillis(), 55_000));
-        var request = HttpRequest.newBuilder(URI.create(normalize(baseUrl) + path))
-                .timeout(Duration.ofMillis(millis)).header("Authorization", "Bearer " + apiKey)
-                .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
-                .POST(HttpRequest.BodyPublishers.ofString(payload)).build();
-        var pending = boundedClient.sendAsync(request, response -> new LimitedBodySubscriber());
+        long millis = Math.max(1, Math.min(timeout.toMillis(), 120_000));
+        var request =
+                HttpRequest.newBuilder(URI.create(normalize(baseUrl) + path))
+                        .timeout(Duration.ofMillis(millis))
+                        .header("Authorization", "Bearer " + apiKey)
+                        .header("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                        .POST(HttpRequest.BodyPublishers.ofString(payload))
+                        .build();
+        var responseStarted = new AtomicBoolean();
+        var pending =
+                boundedClient.sendAsync(
+                        request,
+                        response -> {
+                            responseStarted.set(true);
+                            return new LimitedBodySubscriber();
+                        });
         try {
             var response = pending.get(millis, TimeUnit.MILLISECONDS);
             if (response.statusCode() / 100 != 2) {
-                throw new AiProviderException(provider, response.statusCode(), "模型供应商拒绝或暂不可用", null,
+                throw new AiProviderException(
+                        provider,
+                        response.statusCode(),
+                        "模型供应商拒绝或暂不可用",
+                        null,
                         AiProviderException.FailureKind.HTTP);
             }
-            try { return boundedJson.readTree(response.body()); }
-            catch (java.io.IOException exception) {
-                throw new AiProviderException(provider, 0, "模型响应不是有效JSON", null,
+            try {
+                LOG.info(
+                        "AI bounded response received: provider={}, protocol={}, http={},"
+                                + " traceId={}",
+                        provider,
+                        response.version().name(),
+                        response.statusCode(),
+                        traceId());
+                return boundedJson.readTree(response.body());
+            } catch (java.io.IOException exception) {
+                throw new AiProviderException(
+                        provider,
+                        0,
+                        "模型响应不是有效JSON",
+                        null,
                         AiProviderException.FailureKind.PROTOCOL);
             }
         } catch (TimeoutException exception) {
             pending.cancel(true);
-            throw new AiProviderException(provider, 0, "模型响应超过本次时间限额", null,
-                    AiProviderException.FailureKind.TIMEOUT);
+            transportLog(provider, "REQUEST_DEADLINE", responseStarted.get(), exception);
+            throw new AiProviderException(
+                    provider,
+                    0,
+                    "模型响应超过本次时间限额",
+                    null,
+                    AiProviderException.FailureKind.TIMEOUT,
+                    "REQUEST_DEADLINE",
+                    responseStarted.get());
         } catch (InterruptedException exception) {
             pending.cancel(true);
             Thread.currentThread().interrupt();
-            throw new AiProviderException(provider, 0, "模型请求已中断", null,
-                    AiProviderException.FailureKind.CANCELLED);
+            transportLog(provider, "CANCELLED", responseStarted.get(), exception);
+            throw new AiProviderException(
+                    provider, 0, "模型请求已中断", null, AiProviderException.FailureKind.CANCELLED);
         } catch (ExecutionException exception) {
             Throwable cause = exception.getCause();
-            while (cause.getCause() != null && cause != cause.getCause()) cause = cause.getCause();
+            for (int depth = 0;
+                    depth < 32 && cause.getCause() != null && cause != cause.getCause();
+                    depth++) cause = cause.getCause();
             if (cause instanceof ResponseTooLarge) {
-                throw new AiProviderException(provider, 0, "模型响应超出大小限制", null,
-                        AiProviderException.FailureKind.PROTOCOL);
+                throw new AiProviderException(
+                        provider, 0, "模型响应超出大小限制", null, AiProviderException.FailureKind.PROTOCOL);
             }
-            boolean timedOut = cause instanceof java.net.http.HttpTimeoutException;
-            throw new AiProviderException(provider, 0, timedOut ? "模型连接或响应超时" : "模型网络连接失败", null,
-                    timedOut ? AiProviderException.FailureKind.TIMEOUT : AiProviderException.FailureKind.NETWORK);
+            String diagnostic = AiTransportDiagnostics.code(exception);
+            transportLog(provider, diagnostic, responseStarted.get(), exception);
+            boolean timedOut = diagnostic.endsWith("TIMEOUT");
+            throw new AiProviderException(
+                    provider,
+                    0,
+                    timedOut ? "模型连接或响应超时" : "模型网络连接失败",
+                    null,
+                    timedOut
+                            ? AiProviderException.FailureKind.TIMEOUT
+                            : AiProviderException.FailureKind.NETWORK,
+                    diagnostic,
+                    responseStarted.get());
         }
     }
 
-    /** @author heyu */
+    private void transportLog(
+            String provider, String diagnostic, boolean responseStarted, Throwable failure) {
+        LOG.warn(
+                "AI bounded transport failed: provider={}, transport={}, responseStarted={},"
+                        + " causeTypes={}, traceId={}",
+                provider,
+                diagnostic,
+                responseStarted,
+                AiTransportDiagnostics.causeTypes(failure),
+                traceId());
+    }
+
+    private String traceId() {
+        String trace = MDC.get("traceId");
+        return trace != null && trace.matches("[A-Za-z0-9_-]{1,64}") ? trace : "UNAVAILABLE";
+    }
+
+    /**
+     * @author heyu
+     */
     private static final class ResponseTooLarge extends RuntimeException {}
 
     /** Bounded while receiving, before buffering or JSON parsing. @author heyu */
-    private static final class LimitedBodySubscriber implements HttpResponse.BodySubscriber<byte[]> {
+    private static final class LimitedBodySubscriber
+            implements HttpResponse.BodySubscriber<byte[]> {
         private final CompletableFuture<byte[]> result = new CompletableFuture<>();
         private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         private Flow.Subscription subscription;
 
         @Override
-        public CompletionStage<byte[]> getBody() { return result; }
+        public CompletionStage<byte[]> getBody() {
+            return result;
+        }
 
         @Override
         public void onSubscribe(Flow.Subscription value) {
@@ -120,10 +203,14 @@ public class AiHttpExecutor {
         }
 
         @Override
-        public void onError(Throwable error) { result.completeExceptionally(error); }
+        public void onError(Throwable error) {
+            result.completeExceptionally(error);
+        }
 
         @Override
-        public void onComplete() { result.complete(bytes.toByteArray()); }
+        public void onComplete() {
+            result.complete(bytes.toByteArray());
+        }
     }
 
     JsonNode post(
@@ -137,14 +224,18 @@ public class AiHttpExecutor {
         RestClient client = client(timeoutSeconds);
         int attempts = Math.max(1, Math.min(maximumAttempts, 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
+            var reservation = AssistantTokenBudget.reserve(provider, body);
             try {
-                return client.post()
-                        .uri(normalize(baseUrl) + path)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .headers(headers -> headers.setBearerAuth(apiKey))
-                        .body(body)
-                        .retrieve()
-                        .body(JsonNode.class);
+                JsonNode response =
+                        client.post()
+                                .uri(normalize(baseUrl) + path)
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .headers(headers -> headers.setBearerAuth(apiKey))
+                                .body(reservation.body())
+                                .retrieve()
+                                .body(JsonNode.class);
+                reservation.finish(response == null ? null : response.path("usage"));
+                return response;
             } catch (RestClientResponseException exception) {
                 int status = exception.getStatusCode().value();
                 boolean retryable = status == 429 || status >= 500;
@@ -157,6 +248,8 @@ public class AiHttpExecutor {
                     throw new AiProviderException(provider, 0, "AI 服务响应超时，请稍后重试。", exception);
                 }
                 pause(attempt);
+            } finally {
+                reservation.finish(null);
             }
         }
         throw new AiProviderException(provider, 0, "AI 服务暂时不可用。", null);

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { Search, Plus, RotateCw, ArrowUpRight, TicketCheck, Eye, Siren, CalendarClock, TimerReset } from "@lucide/vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
+import { Search, Plus, RotateCw, ArrowUpRight, TicketCheck, Eye, Siren, CalendarClock, TimerReset, UserRound, Server, ArrowRight } from "@lucide/vue";
 import { itsmApi, ticketApi } from "@/api/modules";
+import { eventQueueApi, type QueueTicket, type QueueSummary } from '@/api/event-queue';
+import { queueStageLabel, queueState, queueSla, queueStage } from '@/utils/event-queue';
 import type { PageResponse, Ticket } from "@/types/api";
 import BaseModal from "@/components/BaseModal.vue";
 import DetailPanel from "@/components/DetailPanel.vue";
@@ -23,10 +25,18 @@ import { parseTicketDescription } from "@/utils/ticket-description";
 import { usePageFeedback } from "@/composables/usePageFeedback";
 import ActionButton from "@/components/feedback/ActionButton.vue";
 import { useAuthStore } from "@/stores/auth";
+import '@/styles/pages/phase3-event-lists.css';
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
-const page = ref<PageResponse<Ticket>>({
+const mineScope = computed(() => route.query.scope === 'mine');
+let listEpoch = 0;
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | undefined;
+onBeforeUnmount(() => { listEpoch++; clearInterval(clock); });
+const summary = ref<QueueSummary>();
+const summaryError = ref('');
+const page = ref<PageResponse<QueueTicket>>({
   records: [],
   total: 0,
   pageNum: 1,
@@ -43,7 +53,9 @@ function sourceTypeLabel(value: string) { return ({ ALERTMANAGER: "真实告警�
 const filters = reactive({
   keyword: "",
   status: "",
+  eventScope: 'OPEN',
   priority: "",
+  affectedCiCode: '', assigneeId: '', eventStage: '',
   pageNum: 1,
   pageSize: 10,
 });
@@ -55,18 +67,28 @@ const form = reactive({
   affectedCiCode: "",
 });
 async function load() {
+  const epoch = ++listEpoch;
   loading.value = true;
   error.value = "";
   try {
-    page.value = await ticketApi.page(
-      Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== "")),
-    );
+    const params = { ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '')), ...(mineScope.value ? { assigneeId: auth.user?.userId } : {}) };
+    const query = Object.fromEntries(Object.entries(params).map(([key, value]) => [key, String(value)]));
+    await router.replace({ query: { ...query, ...(mineScope.value ? { scope: 'mine' } : {}) } });
+    const results = await Promise.allSettled([eventQueueApi.page(params), eventQueueApi.summary(params)]);
+    if (epoch !== listEpoch) return;
+    if (results[0].status === 'fulfilled') page.value = results[0].value; else throw results[0].reason;
+    if (results[1].status === 'fulfilled') { summary.value = results[1].value; summaryError.value = ''; } else { summaryError.value = '队列汇总未更新'; }
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
+    if (epoch === listEpoch) error.value = e instanceof Error ? e.message : "加载失败";
   } finally {
-    loading.value = false;
+    if (epoch === listEpoch) loading.value = false;
   }
 }
+const actorKey = () => `${auth.user?.userId ?? ''}:${auth.user?.roles?.join(',') ?? ''}`;
+const scrollKey = () => `opsagent-event-queue-scroll:${actorKey()}:${JSON.stringify(filters)}:${mineScope.value}`;
+onBeforeRouteLeave(() => { try { sessionStorage.setItem(scrollKey(), String(window.scrollY)); } catch { /* Navigation remains available without session storage. */ } });
+watch(actorKey, () => { listEpoch++; page.value = { records: [], total: 0, pageNum: 1, pageSize: 10 }; summary.value = undefined; preview.value = undefined; showCreate.value = false; error.value = ''; cis.value = []; if (auth.user) { void load(); void loadCis(); } });
+async function loadCis() { const actor = actorKey(); try { const rows = await itsmApi.cis({ type: 'SERVICE' }); if (actor === actorKey()) cis.value = rows; } catch { /* Optional create selector cannot block the queue. */ } }
 async function create() {
   if (creating.value) return;
   creating.value = true;
@@ -86,12 +108,15 @@ function reset() {
   Object.assign(filters, {
     keyword: "",
     status: "",
+    eventScope: 'OPEN',
     priority: "",
+    affectedCiCode: '', assigneeId: '', eventStage: '',
     pageNum: 1,
     pageSize: 10,
   });
   load();
 }
+watch(mineScope, () => { filters.pageNum = 1; void load(); });
 watch(
   () => route.query.create,
   (v) => {
@@ -115,50 +140,33 @@ watch(
   },
 );
 onMounted(async () => {
+  clock = setInterval(() => { now.value = Date.now(); }, 30_000);
   filters.keyword = String(route.query.keyword || "");
   filters.status = String(route.query.status || "");
-  if (route.query.priority === "HIGH") filters.priority = "HIGH";
+  for (const key of ['priority', 'eventScope', 'affectedCiCode', 'assigneeId', 'eventStage'] as const) if (route.query[key]) filters[key] = String(route.query[key]);
+  filters.pageNum = Math.max(1, Number(route.query.pageNum) || 1);
   await Promise.all([
     load(),
-    itsmApi.cis({ type: "SERVICE" }).then((rows) => (cis.value = rows)),
+    loadCis(),
   ]);
+  await nextTick();
+  try { const saved = Number(sessionStorage.getItem(scrollKey())); if (Number.isFinite(saved)) window.scrollTo({ top: saved, behavior: 'instant' }); } catch { /* Queue remains usable without storage. */ }
 });
 </script>
 <template>
   <div class="stack-page ticket-list-page">
-    <PageHeader title="事件处置" description="围绕同一事件，连续查看证据、诊断、审批与业务恢复结果。">
+    <PageHeader title="事件处置" >
       <template #actions><button v-if="!auth.isDemo" class="button primary" @click="showCreate = true"><Plus :size="18" />报告问题</button></template>
       <template #tabs><nav class="ticket-detail-tabs" aria-label="事件与协作"><RouterLink to="/tickets" class="active" aria-current="page">事件队列</RouterLink><RouterLink to="/itsm/alerts"><Siren :size="16" />原始告警</RouterLink><RouterLink to="/itsm/sla"><TimerReset :size="16" />SLA 与时效</RouterLink><RouterLink to="/itsm/oncall"><CalendarClock :size="16" />值班协作</RouterLink></nav></template>
     </PageHeader>
+    <section class="panel event-queue-summary" aria-label="事件队列汇总"><button @click="filters.eventScope = 'OPEN'; filters.eventStage = ''; filters.pageNum = 1; load()">未关闭事件 <strong>{{ summary?.counts.open ?? '—' }}</strong></button><button @click="filters.eventScope = 'OPEN'; filters.eventStage = 'HANDLING'; filters.pageNum = 1; load()">事件处置 <strong>{{ summary?.counts.handling ?? '—' }}</strong></button><button @click="filters.eventScope = 'OPEN'; filters.eventStage = 'VERIFYING'; filters.pageNum = 1; load()">恢复验证 <strong>{{ summary?.counts.verifying ?? '—' }}</strong></button><RouterLink :to="mineScope ? '/tickets' : '/tickets?scope=mine'">{{ mineScope ? '查看全部可见事件' : '查看我负责的' }} →</RouterLink><small v-if="summaryError">{{ summaryError }}</small></section>
     <ListSurface class="ticket-list-surface">
-      <template #header><div><h3>需要跟进的事件</h3><p>沿用工单编号与责任流程，打开事件进入完整处置工作区</p></div><span class="panel-count">{{ page.total }} 项</span></template>
+
       <template #toolbar><FilterBar>
-      <div class="search-box">
-        <Search :size="18" /><input
-          v-model.trim="filters.keyword"
-          placeholder="搜索事件编号、标题或描述"
-          @keyup.enter="
-            filters.pageNum = 1;
-            load();
-          "
-        />
-      </div>
+      <select v-model="filters.eventScope" aria-label="事件关闭状态" @change="filters.pageNum = 1; load()"><option value="OPEN">未关闭事件</option><option value="CLOSED">已关闭事件</option><option value="ARCHIVED">历史档案</option><option value="">全部事件</option></select>
+      <select v-model="filters.affectedCiCode" aria-label="受影响服务" @change="filters.pageNum = 1; load()"><option value="">全部服务</option><option v-for="code in summary?.services || []" :key="code" :value="code">{{ code }}</option></select>
+      <select v-model="filters.assigneeId" aria-label="负责人" :disabled="mineScope" @change="filters.pageNum = 1; load()"><option value="">全部负责人</option><option v-for="person in summary?.assignees || []" :key="person.id" :value="String(person.id)">{{ person.name || `用户 #${person.id}` }}</option></select>
       <select
-        v-model="filters.status"
-        @change="
-          filters.pageNum = 1;
-          load();
-        "
-      >
-        <option value="">全部状态</option>
-        <option value="CREATED">待接单</option>
-        <option value="ASSIGNED">已接单</option>
-        <option value="PROCESSING">处理中</option>
-        <option value="SUSPENDED">已挂起</option>
-        <option value="WAITING_CONFIRM">待业务确认</option>
-        <option value="RESOLVED">待确认</option>
-        <option value="CLOSED">已关闭</option></select
-      ><select
         v-model="filters.priority"
         @change="
           filters.pageNum = 1;
@@ -173,6 +181,19 @@ onMounted(async () => {
       ><button class="button secondary" @click="reset">
         <RotateCw :size="16" />重置
       </button>
+      <button class="button secondary" :disabled="loading" @click="load"><RotateCw :size="16" />刷新</button>
+      <details class="event-advanced-filters" :open="!!filters.keyword || !!filters.eventStage"><summary>更多筛选{{ filters.keyword || filters.eventStage ? ' · 已启用' : '' }}</summary><div class="event-advanced-filter-body">      <div class="search-box">
+        <Search :size="18" /><input
+          v-model.trim="filters.keyword"
+          placeholder="搜索事件编号、标题或描述"
+          @keyup.enter="
+            filters.pageNum = 1;
+            load();
+          "
+        />
+      </div>
+      <select v-model="filters.eventStage" aria-label="当前环节" @change="filters.pageNum = 1; load()"><option value="">全部处理环节</option><option value="HANDLING">事件处置</option><option value="VERIFYING">恢复验证</option><option value="READY_TO_CLOSE">等待关闭</option></select>
+</div></details>
       </FilterBar></template>
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
 
@@ -182,10 +203,10 @@ onMounted(async () => {
         <div class="responsive-table" role="region" aria-label="事件列表" tabindex="0"><table class="ticket-table">
           <thead>
             <tr>
-              <th>事件 / 受影响服务</th>
+              <th>事件标题 / ID</th><th>受影响服务</th>
               <th>优先级</th>
-              <th>状态</th>
-              <th>创建人 / 处理人</th>
+              <th>事件状态</th><th>当前环节</th>
+              <th>负责人</th><th>SLA</th>
               <th>更新时间</th>
               <th></th>
             </tr>
@@ -202,20 +223,18 @@ onMounted(async () => {
               <td>
                 <RouterLink class="table-title table-title-button" :to="`/tickets/${ticket.id}`" @click.stop
                   ><strong>{{ ticket.title }}</strong
-                  ><span>{{ ticket.ticketNo }} · {{ ticket.affectedCiCode || '待关联服务' }}</span></RouterLink
+                  ><span>{{ ticket.eventId || `EVT-${ticket.id}` }}</span></RouterLink
                 >
               </td>
-              <td><PriorityIndicator :value="ticket.priority" /></td>
-              <td><StatusBadge :value="ticket.status" /></td>
-              <td>
-                <span class="ticket-assignment"><strong>{{ ticket.assigneeId ? "#" + ticket.assigneeId : "待分配" }}</strong><small>创建人 #{{ ticket.creatorId }}</small></span>
-              </td>
+              <td><span v-if="ticket.affectedCiCode" class="event-service-tag"><Server :size="13" />{{ ticket.affectedCiCode }}</span><span v-else class="event-service-missing">待关联服务</span></td><td><span class="event-priority-chip" :data-priority="ticket.priority" :title="ticket.priority">{{ ({ URGENT: 'P1', HIGH: 'P2', MEDIUM: 'P3', LOW: 'P4' } as Record<string, string>)[ticket.priority] || ticket.priority }}</span></td>
+              <td><span class="event-state-label" :data-stage="queueStage(ticket)">{{ queueState(ticket) }}</span></td><td><span class="event-stage-chip" :data-stage="queueStage(ticket)">{{ queueStageLabel(ticket) }}</span></td>
+              <td><span class="ticket-assignment"><span class="event-assignee-avatar" :class="{ empty: !ticket.assigneeId }"><UserRound v-if="!ticket.assigneeId" :size="14" /><template v-else>{{ (ticket.assigneeName || `#${ticket.assigneeId}`).slice(0, 1) }}</template></span><strong>{{ ticket.assigneeName || (ticket.assigneeId ? `用户 #${ticket.assigneeId}` : '待分配') }}</strong></span></td>
+              <td><span class="event-sla" :data-tone="queueSla(ticket, now).tone">{{ queueSla(ticket, now).label }}<small>{{ queueSla(ticket, now).detail }}</small></span></td>
               <td><time :title="formatDateTime(ticket.updateTime)">{{ formatRelativeTime(ticket.updateTime) }}</time></td>
               <td>
                 <button class="icon-button" title="快速查看事件摘要" @click.stop="preview = ticket"><Eye :size="17" /></button>
-                <RouterLink class="icon-button" :to="`/tickets/${ticket.id}`" title="进入事件处置工作区" @click.stop
-                  ><ArrowUpRight :size="17"
-                /></RouterLink>
+                <RouterLink class="event-enter" :to="`/tickets/${ticket.id}`" title="进入事件处置工作区" @click.stop
+                  >{{ ticket.eventClosed || ticket.eventLegacyArchived ? '查看事件' : '进入处置' }} <ArrowRight :size="15" /></RouterLink>
               </td>
             </tr>
           </tbody>

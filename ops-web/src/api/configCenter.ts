@@ -7,7 +7,9 @@ export interface ConfigCenterItem { id: string; name: string; serviceId: string;
 export interface ConfigurationProposal { proposalId: string; immutableDigest: string; configurationId: string; targetCode: string; catalogId: string; identity: ConfigurationIdentity; expectedRevision: string; before: Record<string, unknown>; desired: Record<string, unknown>; changes: {field: string; before: unknown; after: unknown}[]; action: string; rollbackVersionId?: number; createdAt: string; expiresAt: string; status: string; targetSnapshot: Record<string, unknown>; comment: string; ownerId: number }
 export interface ConfigurationProposalRequest { expectedRevision: string; requestId: string; comment: string; patch?: {op: 'replace'; path: string; value: unknown}[]; rollbackVersionId?: number }
 export interface ConfigCenterCatalog { status: string; items: ConfigCenterItem[]; message: string; observedAt: string }
-export interface ConfigCenterDetail { item: ConfigCenterItem; status: string; content: string; revision: string; message: string; observedAt: string }
+export interface ConfigurationKeyField { key: string; label: string; category: string; value: string; source: string; verification: 'RUNTIME_RESOLVED' | 'SOURCE_ONLY' }
+export interface ConfigurationOverview { status: string; serviceId: string; instanceId: string; observedAt: string | null; message: string; fields: ConfigurationKeyField[] }
+export interface ConfigCenterDetail { item: ConfigCenterItem; status: string; content: string; revision: string; message: string; observedAt: string; overview?: ConfigurationOverview }
 export interface ConfigCenterHistory { status: string; items: { id: number; actor: string; modifiedAt: string; operation: string }[]; message: string }
 export interface ConfigCenterDiff { status: string; versionId: number; currentContent: string; previousContent: string; message: string }
 const base = '/api/platform/config-center';

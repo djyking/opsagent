@@ -70,3 +70,8 @@
 }
 @media (max-width: 640px) { .topbar-breadcrumb { display: none; }.topbar-search { flex: 1; width: auto; }.topbar-spacer, .topbar-create-menu { display: none; } }
 @media (prefers-reduced-motion: reduce) { .app-sidebar, .main-area, .sidebar-group a { transition: none; } }
+/* Reviewed UI keeps one concise heading and gives the working surface more room. */
+.page-content { padding-top:18px; padding-inline:24px; }
+.oa-page-header h2 { font-size:24px; line-height:32px; }
+.oa-page-header p { font-size:13px; }
+@media(max-width:760px) { .page-content { padding:14px 14px 24px; } }

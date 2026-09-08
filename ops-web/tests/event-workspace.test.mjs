@@ -84,15 +84,24 @@ function fixture() {
   const imports = { vue: { ...vue, onMounted() {}, onBeforeUnmount() {} }, '@lucide/vue': icons,
     '@/api/automation': { automationApi: api }, '@/composables/useEventWorkspace': { useEventWorkspace: () => stateManager },
     '@/utils/event-workspace': presentation, '@/stores/auth': { useAuthStore: () => auth }, '@/stores/approval-inbox': { useApprovalInboxStore: () => inbox },
+    '@/utils/automation-presentation': evaluate(read('utils/automation-presentation.ts')),
     '@/api/http': { request: async () => { throw Error('Unexpected mutation'); } }, '@/styles/pages/event-workspace.css': {} };
-  for (const name of ['BaseModal', 'FormField', 'InlineError', 'LoadingState']) imports[`@/components/${name}.vue`] = Stub;
+  for (const name of ['BaseModal', 'FormField', 'InlineError', 'LoadingState', 'DetailPanel']) imports[`@/components/${name}.vue`] = Stub;
+  imports['./EventDependencyMap.vue'] = Stub;
+  for (const name of ['EventRecoveryBinding', 'EventManualRecovery', 'EventKnowledgeDraft']) imports[`./${name}.vue`] = Stub;
+  imports['./EventKnowledgeDraft.vue'] = { ...Stub, name: 'EventKnowledgeDraftTestChild' };
   imports['@/components/automation/ApprovalCard.vue'] = { props: ['approval'], setup: p => () => vue.h('article', p.approval.id) };
   const component = evaluate(script.content, imports).default;
   const render = evaluate(template.code, { vue }).render;
+  const inspectRender = evaluate(template.code, { vue: { ...vue, resolveComponent: name => name } }).render;
   const props = vue.reactive({ ticket: { id: 2064, title: '订单异常', version: 1, creatorId: 7 } });
   const scope = vue.effectScope();
   const state = scope.run(() => component.setup(props, { expose() {}, emit() {} }));
-  return { state, stateManager, auth, inbox, calls, setImpl(value) { impl = value; }, stop: () => scope.stop(), async html() {
+  return { state, stateManager, auth, inbox, calls, props, setImpl(value) { impl = value; }, stop: () => scope.stop(), draftKey() {
+    const context = vue.proxyRefs({ ...state, ...props });
+    const find = node => node?.type === state.EventKnowledgeDraft ? node.key : Array.isArray(node?.children) ? node.children.map(find).find(key => key !== undefined) : undefined;
+    return find(inspectRender(context, [], props, context, {}, {}));
+  }, async html() {
     const context = vue.proxyRefs({ ...state, ...props });
     const app = vue.createSSRApp({ render: () => render(context, [], props, context, {}, {}) });
     app.component('RouterLink', { props: ['to'], setup: (p, { slots }) => () => vue.h('a', { href: typeof p.to === 'string' ? p.to : p.to.path }, slots.default?.()) });
@@ -104,12 +113,13 @@ function fixture() {
   try {
     app.stateManager.data.value.pendingApprovalIds = ['approval-own', 'approval-other'];
     app.inbox.availableItems = [{ id: 'approval-own', revision: 1, ticketId: 2064 }, { id: 'approval-other', revision: 1, ticketId: 2065 }];
+    app.state.evidenceOpen.value = true; app.state.processOpen.value = true;
     const html = await app.html();
-    for (const text of ['已取得的事实', '诊断判断与证据缺口', '本事件关联的变更', '业务恢复尚未确认', '候选原因', '仍需核对', 'approval-own']) assert(html.includes(text));
+    for (const text of ['已取得的事实', '诊断判断与证据缺口', '本事件关联的变更', '候选原因', '仍需核对', 'approval-own']) assert(html.includes(text), text);
     assert(!html.includes('approval-other')); assert(!html.includes('<script>unsafe</script>')); assert(html.includes('&lt;script&gt;'));
     assert.match(html, /<details class="event-sources">/);
     app.stateManager.data.value.verification = { ...app.stateManager.data.value.verification, scope: 'HISTORICAL', status: 'HISTORICAL_RECOVERY', label: '历史恢复已记录' };
-    assert((await app.html()).includes('历史结论，不代表目标当前健康'));
+    assert.equal(presentation.currentlyVerified(app.stateManager.data.value), false);
   } finally { app.stop(); }
 }
 console.log('PASS actual event component rendering, cross-event approval isolation and escaped evidence');
@@ -128,8 +138,28 @@ console.log('PASS actual event component rendering, cross-event approval isolati
     assert.equal(app.state.createUnconfirmed.value, false);
     app.setImpl(async () => { throw Object.assign(Error('模型尚未通过验证'), { status: 400, code: 40000 }); });
     await app.state.createRun(); assert.equal(app.state.createUnconfirmed.value, false, 'Definite validation rejection permits correcting model/workflow');
-    app.state.createOpen.value = true; app.state.draft.value = 'private draft'; app.auth.user.userId = 8;
-    assert.equal(app.state.createOpen.value, false); assert.equal(app.state.draft.value, '');
+    app.state.createOpen.value = true; app.state.draftOpen.value = true;
+    assert.equal(app.draftKey(), '2064:7'); app.auth.user.userId = 8;
+    assert.equal(app.state.createOpen.value, false); assert.equal(app.state.draftOpen.value, false);
+    assert.equal(app.draftKey(), '2064:8', 'Account change replaces the draft component and its private editor state');
   } finally { app.stop(); }
 }
 console.log('PASS actual event start action duplicate exclusion, exact retry identity and identity-change cleanup');
+
+{
+  const app = fixture();
+  try {
+    const first = await app.html();
+    assert.equal((first.match(/<details class="event-fold"/g) || []).length, 3);
+    assert(!/<details class="event-fold" open/.test(first));
+    app.props.ticket.status = 'RESOLVED';
+    app.props.lifecycle = { eventId: 'EVT-2064', stage: 'VERIFYING', businessRequired: true, businessRule: '未豁免，需要确认', result: { content: '凭据已修复' }, allowedActions: ['TECH_PASS'], blockers: ['尚无技术确认'], history: [] };
+    assert((await app.html()).includes('等待业务确认'));
+    assert(!(await app.html()).includes('关闭事件</button>'));
+    app.props.lifecycle.stage = 'CLOSED'; app.props.lifecycle.allowedActions = [];
+    assert((await app.html()).includes('事件已关闭'));
+    app.props.lifecycle.stage = 'LEGACY_ARCHIVED';
+    assert((await app.html()).includes('没有补造技术验证'));
+  } finally { app.stop(); }
+}
+console.log('PASS reviewed hierarchy: three closed sections and independent verified, closed and historical states');

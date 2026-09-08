@@ -20,7 +20,7 @@ final class InternalAgentDtos {
     private InternalAgentDtos() {}
 
     /**
-     * 单个持久模型决策；最多一次受预算与总期限限制的瞬时故障重试，不执行工具。
+     * 单个持久模型决策；仅明确 HTTP 临时拒绝最多重试一次，共享预算与总期限，不执行工具。
      *
      * @author heyu
      * @since 2026/9/3
@@ -53,11 +53,30 @@ final class InternalAgentDtos {
             long latencyMs,
             Integer budgetTokens,
             int attempts) {
-        TurnResponse(String outcome, Map<String, Object> assistantMessage, Integer inputTokens,
-                Integer outputTokens, Integer totalTokens, boolean usageKnown, String provider,
-                String model, String finishReason, long latencyMs) {
-            this(outcome, assistantMessage, inputTokens, outputTokens, totalTokens, usageKnown,
-                    provider, model, finishReason, latencyMs, null, 1);
+        TurnResponse(
+                String outcome,
+                Map<String, Object> assistantMessage,
+                Integer inputTokens,
+                Integer outputTokens,
+                Integer totalTokens,
+                boolean usageKnown,
+                String provider,
+                String model,
+                String finishReason,
+                long latencyMs) {
+            this(
+                    outcome,
+                    assistantMessage,
+                    inputTokens,
+                    outputTokens,
+                    totalTokens,
+                    usageKnown,
+                    provider,
+                    model,
+                    finishReason,
+                    latencyMs,
+                    null,
+                    1);
         }
     }
 

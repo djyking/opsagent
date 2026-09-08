@@ -40,10 +40,13 @@ ops:
       - /api/auth/login
       - /api/auth/register
       - /api/auth/refresh
+      - /api/auth/logout
       - /actuator/health
       - /actuator/info
       - /actuator/prometheus
   auth:
+    session-idle-timeout: PT2H
+    session-max-lifetime: PT24H
     registration-enabled: ${OPS_AUTH_REGISTRATION_ENABLED:true}
     demo-enabled: ${OPS_AUTH_DEMO_ENABLED:false}
     captcha:

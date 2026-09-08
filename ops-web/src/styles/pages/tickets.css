@@ -435,3 +435,21 @@
 .technical-raw { border: 1px solid var(--oa-border-subtle); border-radius: var(--oa-radius-control); overflow: hidden; }
 .technical-raw summary { padding: 8px 12px; color: var(--oa-text-secondary); background: var(--oa-bg-subtle); font-size: var(--oa-font-size-xs); cursor: pointer; }
 .technical-raw pre { max-height: 240px; margin: 0; padding: 12px; overflow: auto; color: var(--oa-text-primary); background: var(--oa-bg-surface); font-size: var(--oa-font-size-xs); line-height: var(--oa-line-height-xs); }
+.ticket-state-secondary { display:block;margin-top:7px;font-size:11px;color:var(--oa-text-tertiary); }
+.ticket-list-page .event-state-label { color:var(--oa-primary);background:var(--oa-primary-soft);padding:3px 9px;border-radius:5px;font-size:12px;white-space:nowrap; }
+.event-queue-summary { display:flex; align-items:center; gap:0; padding:12px 18px; flex-wrap:wrap; }
+.event-queue-summary > button { display:flex; align-items:center; gap:18px; border:0; border-right:1px solid #e3ebf8; padding:4px 28px; background:none; color:#627ba1; }
+.event-queue-summary > button:first-child { padding-left:0; color:var(--oa-primary); }
+.event-queue-summary strong { font-size:25px; color:#203c66; }
+.event-queue-summary a { margin-left:auto; font-size:13px; color:var(--oa-primary); }
+.event-queue-summary small { width:100%; padding-top:6px; color:#a05c31; }
+.ticket-list-page .filter-bar { flex-wrap:wrap; gap:8px; }
+.ticket-list-page .filter-bar select { width:auto; min-width:118px; max-width:190px; }
+.ticket-list-page .filter-bar .search-box { flex:1 1 210px; }
+.event-stage-chip { font-size:12px; color:#6b59bb; background:#f4f1ff; border-radius:5px; padding:4px 7px; white-space:nowrap; }
+.event-sla { display:grid; gap:5px; min-width:112px; font-size:13px; color:var(--oa-primary); }
+.event-sla[data-tone=danger] { color:#c74e45; }.event-sla[data-tone=muted] { color:#7f8ca4; }.event-sla small { font-size:11px; color:#8192ac; }
+.event-enter { display:inline-flex; gap:5px; align-items:center; white-space:nowrap; color:var(--oa-primary); font-size:12px; }
+.ticket-list-page .ticket-table td,.ticket-list-page .ticket-table th { padding:14px 13px; }
+.ticket-list-page .ticket-table { min-width:850px; }.ticket-list-page .table-title strong { max-width:380px; }
+@media(max-width:760px) { .event-queue-summary { gap:9px; padding:12px; }.event-queue-summary > button { gap:8px; padding:0 10px; font-size:12px; }.event-queue-summary strong { font-size:20px; }.event-queue-summary a { width:100%; }.ticket-list-page .filter-bar select { max-width:100%; flex:1; } }

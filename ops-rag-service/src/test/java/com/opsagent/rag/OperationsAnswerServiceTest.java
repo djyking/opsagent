@@ -20,6 +20,56 @@ import java.util.List;
  * @since 2026/9/3
  */
 class OperationsAnswerServiceTest {
+    @Test
+    void globalAnomalyPresetReadsLiveContextAndVisibleAlertsInsteadOfKnowledge() {
+        var attention = mock(TicketAttentionClient.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                operations, "attention", attention);
+        String now = Instant.now().toString();
+        when(attention.activeAlerts("firing"))
+                .thenReturn(
+                        new KnowledgeClient.Envelope<>(
+                                0,
+                                "ok",
+                                List.of(
+                                        new TicketAttentionClient.Alert(
+                                                "BusinessUnavailable",
+                                                "ops-demo-order-service",
+                                                "P2",
+                                                "firing",
+                                                2083L,
+                                                "RESOLVED",
+                                                now)),
+                                "trace"));
+        when(platform.operations())
+                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", partialSnapshot(), "trace"));
+        var plan = operations.prepareIfApplicable("当前有哪些异常需要关注？", null, null, "openai");
+        assertThat(plan).isNotNull();
+        assertThat(plan.request().userPrompt())
+                .contains("BusinessUnavailable", "2083", "RESOLVED", now);
+        assertThat(plan.request().systemPrompt()).contains("旧告警不证明当前业务仍故障", "不要拿通用故障场景充数");
+        assertThat(plan.sources()).hasSize(4);
+        verify(attention).activeAlerts("firing");
+        for (String question : List.of("现在有什么问题", "最近有哪些故障", "当前有哪些风险"))
+            assertThat(operations.supports(question, null, null)).as(question).isTrue();
+        assertThat(operations.supports("异常检测的原理是什么", null, null)).isFalse();
+    }
+
+    @Test
+    void missingAlertSourceIsNotPresentedAsZeroAlerts() {
+        var attention = mock(TicketAttentionClient.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                operations, "attention", attention);
+        when(attention.activeAlerts("firing"))
+                .thenThrow(new IllegalStateException("secret=not-visible"));
+        when(platform.operations())
+                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", partialSnapshot(), "trace"));
+        var plan = operations.prepareIfApplicable("当前有哪些异常需要关注？", null, null, "openai");
+        assertThat(plan.fallback().answer())
+                .contains("告警读取未成功", "不能将缺失列表当作零告警")
+                .doesNotContain("not-visible");
+    }
+
     private final PlatformClient platform = mock(PlatformClient.class);
     private final AiProperties ai = AiProviderSelectionTest.configured();
     private final OperationsAnswerService operations = new OperationsAnswerService(platform, ai);
@@ -31,22 +81,22 @@ class OperationsAnswerServiceTest {
                 new ObjectMapper()
                         .readValue(
                                 """
-                                {"capturedAt":"%s","status":"ATTENTION","windowMinutes":30,
-                                 "password":"NEVER_SEND_THIS","configContent":"UNRESTRICTED_CONFIGURATION",
-                                 "targets":[{"service":"ops-rag-service","health":"UP","observedAt":"%s",
-                                            "token":"NEVER_SEND_THIS"}],
-                                 "metrics":[{"id":"heap","label":"堆内存","job":"rag","unit":"%%","currentValue":64.5,
-                                              "forecastValue":70.0,"slopePerMinute":0.2,"sampleCount":30,
-                                              "status":"RISK",
-                                              "method":"LINEAR","observedAt":"%s"}],
-                                 "nacos":{"status":"AVAILABLE","serviceCount":6,"healthyInstanceCount":6,
-                                           "configurationCount":7,
-                                           "config":"UNRESTRICTED_CONFIGURATION"},
-                                 "sentinel":{"status":"AVAILABLE","ruleSource":"runtime","passedTotal":12,
-                                             "blockedTotal":3,
-                                             "metricsObservedAt":"%s","rules":[{"resource":"ops-rag-ask",
-                                             "grade":"QPS","count":5}]}}
-                                """
+{"capturedAt":"%s","status":"ATTENTION","windowMinutes":30,
+ "password":"NEVER_SEND_THIS","configContent":"UNRESTRICTED_CONFIGURATION",
+ "targets":[{"service":"ops-rag-service","health":"UP","observedAt":"%s",
+            "token":"NEVER_SEND_THIS"}],
+ "metrics":[{"id":"heap","label":"堆内存","job":"rag","unit":"%%","currentValue":64.5,
+              "forecastValue":70.0,"slopePerMinute":0.2,"sampleCount":30,
+              "status":"RISK",
+              "method":"LINEAR","observedAt":"%s"}],
+ "nacos":{"status":"AVAILABLE","serviceCount":6,"healthyInstanceCount":6,
+           "configurationCount":7,
+           "config":"UNRESTRICTED_CONFIGURATION"},
+ "sentinel":{"status":"AVAILABLE","ruleSource":"runtime","passedTotal":12,
+             "blockedTotal":3,
+             "metricsObservedAt":"%s","rules":[{"resource":"ops-rag-ask",
+             "grade":"QPS","count":5}]}}
+"""
                                         .formatted(now, now, now, now),
                                 PlatformClient.OperationsContext.class);
         when(platform.operations())
@@ -194,19 +244,19 @@ class OperationsAnswerServiceTest {
                 new ObjectMapper()
                         .readValue(
                                 """
-                                {"capturedAt":"%s","status":"HEALTHY","windowMinutes":60,
-                                 "metrics":[{"id":"heap","label":"堆使用率","job":"rag","unit":"%%",
-                                              "currentValue":15.65,"forecastValue":null,"sampleCount":61,
-                                              "reason":"样本波动较大或存在采集空档","observedAt":"%s"},
-                                            {"id":"5xx","label":"5xx比例","job":"rag","unit":"%%",
-                                              "currentValue":0,"forecastValue":0,"sampleCount":61,
-                                              "reason":"拟合R²=1.00","observedAt":"%s"}],
-                                 "nacos":{"status":"AVAILABLE","serviceCount":6,"healthyInstanceCount":6,
-                                           "configurationCount":7},
-                                 "sentinel":{"status":"AVAILABLE","ruleSource":"Sentinel runtime FlowRuleManager",
-                                             "passedTotal":0,"blockedTotal":0,"metricsObservedAt":"%s",
-                                             "rules":[{"resource":"ops-rag-ask","grade":"QPS","count":5}]}}
-                                """
+{"capturedAt":"%s","status":"HEALTHY","windowMinutes":60,
+ "metrics":[{"id":"heap","label":"堆使用率","job":"rag","unit":"%%",
+              "currentValue":15.65,"forecastValue":null,"sampleCount":61,
+              "reason":"样本波动较大或存在采集空档","observedAt":"%s"},
+            {"id":"5xx","label":"5xx比例","job":"rag","unit":"%%",
+              "currentValue":0,"forecastValue":0,"sampleCount":61,
+              "reason":"拟合R²=1.00","observedAt":"%s"}],
+ "nacos":{"status":"AVAILABLE","serviceCount":6,"healthyInstanceCount":6,
+           "configurationCount":7},
+ "sentinel":{"status":"AVAILABLE","ruleSource":"Sentinel runtime FlowRuleManager",
+             "passedTotal":0,"blockedTotal":0,"metricsObservedAt":"%s",
+             "rules":[{"resource":"ops-rag-ask","grade":"QPS","count":5}]}}
+"""
                                         .formatted(now, now, now, now),
                                 PlatformClient.OperationsContext.class);
         when(platform.operations())

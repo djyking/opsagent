@@ -17,14 +17,14 @@ import java.util.Map;
 public interface AlertMapper {
     @Insert(
             """
-            INSERT IGNORE INTO monitor_alert(
-                fingerprint,alert_name,severity,service_code,current_status,
-                occurrence_count,first_seen_time,last_seen_time,resolved_time,
-                labels_json,annotations_json)
-            VALUES(#{fingerprint},#{alertName},#{severity},#{serviceCode},#{status},
-                   1,#{seenTime},#{seenTime},
-                   CASE WHEN #{status}='resolved' THEN #{seenTime} ELSE NULL END,#{labels},#{annotations})
-            """)
+INSERT IGNORE INTO monitor_alert(
+    fingerprint,alert_name,severity,service_code,current_status,
+    occurrence_count,first_seen_time,last_seen_time,resolved_time,
+    labels_json,annotations_json)
+VALUES(#{fingerprint},#{alertName},#{severity},#{serviceCode},#{status},
+       1,#{seenTime},#{seenTime},
+       CASE WHEN #{status}='resolved' THEN #{seenTime} ELSE NULL END,#{labels},#{annotations})
+""")
     int insert(
             String fingerprint,
             String alertName,
@@ -54,6 +54,9 @@ public interface AlertMapper {
             """)
     int linkTicket(
             long id, long ticketId, LocalDateTime seenTime, String labels, String annotations);
+
+    @Update("UPDATE monitor_alert SET service_code=#{targetCode} WHERE id=#{id}")
+    int bindService(long id, String targetCode);
 
     @Update(
             """

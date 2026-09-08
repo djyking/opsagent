@@ -37,6 +37,11 @@ class TopologyAggregationService {
                     Map.entry("ops-agent-service", "opsagent-agent"),
                     Map.entry("rabbitmq", "opsagent-rabbitmq"),
                     Map.entry("nacos", "opsagent-nacos"),
+                    Map.entry("mysql", "opsagent-mysql"),
+                    Map.entry("redis", "opsagent-redis"),
+                    Map.entry("elasticsearch", "opsagent-elasticsearch"),
+                    Map.entry("grafana", "opsagent-grafana"),
+                    Map.entry("sentinel", "opsagent-sentinel"),
                     Map.entry("qdrant", "opsagent-qdrant"),
                     Map.entry("prometheus", "opsagent-prometheus"),
                     Map.entry("alertmanager", "opsagent-alertmanager"),
@@ -137,6 +142,10 @@ class TopologyAggregationService {
         return result;
     }
 
+    Map<String, Object> recoveryNode(String code) {
+        return node(cmdb.ci(code), metrics("5m"), alerts(), Set.of(), "5m");
+    }
+
     Map<String, Object> detail(String code, String range) {
         Map<String, Object> ci = cmdb.ci(code);
         if (!Set.of("5m", "15m", "30m", "1h", "6h").contains(range)) {
@@ -170,8 +179,42 @@ class TopologyAggregationService {
 
     @Transactional
     void saveLayout(ObservabilityDtos.Layout request) {
+        validateLayout(request);
+        long actor = SecurityUsers.current().userId();
+        repository.layout(request, actor);
+        audit.addPlatform(
+                "TOPOLOGY",
+                request.environment(),
+                "TOPOLOGY_LAYOUT_SAVE",
+                actor,
+                "{\"nodeCount\":" + request.positions().size() + "}");
+    }
+
+    Map<String, Object> currentLayout(String environment) {
+        TraceEvidenceAdapter.environment(environment);
+        return repository.currentLayout(environment, SecurityUsers.current().userId());
+    }
+
+    @Transactional
+    void savePersonalLayout(ObservabilityDtos.Layout request) {
+        validateLayout(request);
+        repository.personalLayout(request, SecurityUsers.current().userId());
+    }
+
+    void resetPersonalLayout(String environment) {
+        TraceEvidenceAdapter.environment(environment);
+        repository.resetPersonalLayout(environment, SecurityUsers.current().userId());
+    }
+
+    private void validateLayout(ObservabilityDtos.Layout request) {
+        TraceEvidenceAdapter.environment(request.environment());
         Set<String> codes = new java.util.HashSet<>();
-        cmdb.cis(null, null).forEach(ci -> codes.add(String.valueOf(ci.get("ciCode"))));
+        cmdb.cis(null, null).stream()
+                .filter(
+                        ci ->
+                                "ALL".equals(request.environment())
+                                        || request.environment().equals(ci.get("environment")))
+                .forEach(ci -> codes.add(String.valueOf(ci.get("ciCode"))));
         Set<String> seen = new java.util.HashSet<>();
         for (var position : request.positions()) {
             if (!codes.contains(position.ciCode())
@@ -183,14 +226,6 @@ class TopologyAggregationService {
                 throw new BusinessException(ErrorCode.VALIDATION, "布局包含未知或重复节点或无效坐标");
             }
         }
-        long actor = SecurityUsers.current().userId();
-        repository.layout(request, actor);
-        audit.addPlatform(
-                "TOPOLOGY",
-                request.environment(),
-                "TOPOLOGY_LAYOUT_SAVE",
-                actor,
-                "{\"nodeCount\":" + request.positions().size() + "}");
     }
 
     synchronized PrometheusAdapter.Snapshot metrics(String range) {
@@ -279,14 +314,20 @@ class TopologyAggregationService {
                         "alertSilenced",
                         false));
         Instant healthAt =
-                Set.of("JVM_RUNTIME", "REQUEST_WINDOW", "NATIVE_METRICS").contains(state.scope())
-                        ? metricEvidence.values().stream()
-                                .filter(e -> e.value() != null && state.scope().equals(e.scope()))
-                                .map(ObservabilityDtos.MetricEvidence::sampledAt)
-                                .filter(java.util.Objects::nonNull)
-                                .min(Instant::compareTo)
-                                .orElse(null)
-                        : state.observedAt();
+                "ACTIVE_ALERT".equals(state.scope())
+                        ? alerts.checkedAt()
+                        : Set.of("JVM_RUNTIME", "REQUEST_WINDOW", "NATIVE_METRICS")
+                                        .contains(state.scope())
+                                ? metricEvidence.values().stream()
+                                        .filter(
+                                                e ->
+                                                        e.value() != null
+                                                                && state.scope().equals(e.scope()))
+                                        .map(ObservabilityDtos.MetricEvidence::sampledAt)
+                                        .filter(java.util.Objects::nonNull)
+                                        .min(Instant::compareTo)
+                                        .orElse(null)
+                                : state.observedAt();
         boolean hasHealthEvidence =
                 healthAt != null && !"BUSINESS_EVIDENCE_MISSING".equals(state.reasonCode());
         String evidenceId = environment + ":" + code + ":" + state.scope();

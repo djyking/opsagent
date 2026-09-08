@@ -44,30 +44,50 @@ public class AiStreamHttpExecutor {
         int attempts = Math.max(1, Math.min(maximumAttempts, 3));
         for (int attempt = 1; attempt <= attempts; attempt++) {
             AtomicBoolean emitted = new AtomicBoolean();
+            var reservation = AssistantTokenBudget.reserve(provider, body);
+            final JsonNode[] usage = {null};
+            AtomicBoolean responseTerminal = new AtomicBoolean();
             try {
-                return streamOnce(
-                        provider,
-                        baseUrl,
-                        path,
-                        apiKey,
-                        body,
-                        timeoutSeconds,
-                        handler,
-                        emitted);
+                boolean done =
+                        streamOnce(
+                                provider,
+                                baseUrl,
+                                path,
+                                apiKey,
+                                reservation.body(),
+                                timeoutSeconds,
+                                event -> {
+                                    if (event.hasNonNull("usage")) usage[0] = event.path("usage");
+                                    if (event.path("response").hasNonNull("usage"))
+                                        usage[0] = event.path("response").path("usage");
+                                    if (java.util.Set.of(
+                                                    "response.completed",
+                                                    "response.incomplete",
+                                                    "response.failed")
+                                            .contains(event.path("type").asText()))
+                                        responseTerminal.set(true);
+                                    return handler.handle(event);
+                                },
+                                emitted);
+                reservation.finish(done || responseTerminal.get() ? usage[0] : null);
+                return done;
             } catch (AiProviderException exception) {
-                boolean retryable = exception.statusCode() == 429
-                        || exception.statusCode() >= 500
-                        || exception.statusCode() == 0;
+                boolean retryable =
+                        exception.kind() != AiProviderException.FailureKind.BUDGET
+                                && (exception.statusCode() == 429
+                                        || exception.statusCode() >= 500
+                                        || exception.statusCode() == 0);
                 if (emitted.get() || !retryable || attempt == attempts) {
                     throw exception;
                 }
                 pause(provider, attempt);
             } catch (ResourceAccessException exception) {
                 if (emitted.get() || attempt == attempts) {
-                    throw new AiProviderException(
-                            provider, 0, "AI 服务响应超时，请稍后重试。", exception);
+                    throw new AiProviderException(provider, 0, "AI 服务响应超时，请稍后重试。", exception);
                 }
                 pause(provider, attempt);
+            } finally {
+                reservation.finish(null);
             }
         }
         throw new AiProviderException(provider, 0, "AI 流式响应未完成。", null);
@@ -83,19 +103,22 @@ public class AiStreamHttpExecutor {
             StreamEventHandler handler,
             AtomicBoolean emitted) {
         RestClient client = client(timeoutSeconds);
-        Boolean done = client.post()
-                .uri(normalize(baseUrl) + path)
-                .contentType(MediaType.APPLICATION_JSON)
-                .accept(MediaType.TEXT_EVENT_STREAM)
-                .headers(headers -> headers.setBearerAuth(apiKey))
-                .body(body)
-                .exchange((request, response) -> {
-                    int status = response.getStatusCode().value();
-                    if (status < 200 || status >= 300) {
-                        throw failure(provider, status);
-                    }
-                    return readEvents(provider, response.getBody(), handler, emitted);
-                });
+        Boolean done =
+                client.post()
+                        .uri(normalize(baseUrl) + path)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .headers(headers -> headers.setBearerAuth(apiKey))
+                        .body(body)
+                        .exchange(
+                                (request, response) -> {
+                                    int status = response.getStatusCode().value();
+                                    if (status < 200 || status >= 300) {
+                                        throw failure(provider, status);
+                                    }
+                                    return readEvents(
+                                            provider, response.getBody(), handler, emitted);
+                                });
         return Boolean.TRUE.equals(done);
     }
 
@@ -104,8 +127,8 @@ public class AiStreamHttpExecutor {
             java.io.InputStream input,
             StreamEventHandler handler,
             AtomicBoolean emitted) {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(input, StandardCharsets.UTF_8))) {
+        try (BufferedReader reader =
+                new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
             StringBuilder data = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {

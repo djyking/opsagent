@@ -12,7 +12,7 @@ const read = path => readFileSync(new URL('../src/' + path, import.meta.url), 'u
 function evaluate(source, imports) {
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} };
-  new Function('require', 'module', 'exports', js)(id => Object.hasOwn(imports, id) ? imports[id] : require(id), module, module.exports);
+  new Function('require', 'module', 'exports', js)(id => Object.hasOwn(imports, id) ? imports[id] : id === '@/utils/assistant-placement' ? evaluate(read('utils/assistant-placement.ts'), {}) : require(id), module, module.exports);
   return module.exports;
 }
 const Stub = { setup: (_, { slots }) => () => vue.h('section', [slots.default?.(), slots.actions?.(), slots.tabs?.()]) };
@@ -44,6 +44,7 @@ const router = evaluate(routerSource, {
   'vue-router': { ...vueRouter, createWebHistory: vueRouter.createMemoryHistory },
   '@/stores/auth': { useAuthStore: () => auth },
   '@/utils/route-navigation': routeNavigation,
+  '@/api/session': { ensureAccessToken: async () => 'test-active-session', SessionError: class SessionError extends Error {} },
 }).default;
 for (const [from, expected] of [
   ['/events?keyword=Redis#queue', '/tickets?keyword=Redis#queue'], ['/events/2057?source=alert#evidence', '/tickets/2057?source=alert#evidence'],

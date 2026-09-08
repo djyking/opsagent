@@ -1,0 +1,44 @@
+.cc-page-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.cc-page-heading h2 { margin: 0; color: #263f64; font-size: 22px; font-weight: 650; }
+.cc-page-heading p { margin: 6px 0 0; color: #70839e; font-size: 13px; }
+.cc-page-heading > span { color: #71839d; font-size: 12px; }
+.cc-workspace { grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); }
+.cc-workspace .gov-directory-list { max-height: 600px; }
+.cc-detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 24px; border-bottom: 1px solid #e7edf6; }
+.cc-kicker { color: #7186a4; font-size: 12px; }
+.cc-detail-heading h3 { margin: 8px 0 6px; color: #294667; font-size: 20px; overflow-wrap: anywhere; }
+.cc-detail-heading p { margin: 0; color: #7f8fa5; font-size: 12px; overflow-wrap: anywhere; }
+.cc-status { flex-shrink: 0; padding: 6px 10px; background: #f3f5f8; color: #6d7c91; font-size: 12px; border-radius: 7px; }
+.cc-status.ready { background: #eef4ff; color: #416db8; }
+.cc-main { padding: 24px; }
+.cc-field-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.cc-field-heading strong { color: #314d71; font-size: 15px; font-weight: 600; }
+.cc-field-heading small { color: #8392a6; font-size: 11px; }
+.cc-subtle { margin: 9px 0 20px; color: #74859d; font-size: 12px; line-height: 1.8; }
+.cc-table-scroll { overflow-x: auto; }
+.cc-fields { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.cc-fields th, .cc-fields td { padding: 13px 12px; border-bottom: 1px solid #edf1f7; text-align: left; vertical-align: top; color: #496180; overflow-wrap: anywhere; line-height: 1.7; }
+.cc-fields thead th { background: #f7f9fd; color: #7789a1; font-weight: 500; }
+.cc-fields th:first-child { width: 37%; }
+.cc-fields th:last-child { width: 25%; }
+.cc-fields tbody th { font-weight: 500; }
+.cc-fields tbody th code { display: block; margin-top: 4px; font-size: 10px; color: #8b99ac; font-weight: 400; }
+.cc-fields td code { font-family: var(--oa-font-mono, ui-monospace, monospace); color: #304d73; font-size: 12px; }
+.cc-fields td small { display: block; color: #907444; font-size: 10px; margin-top: 3px; }
+.cc-unavailable { display: grid; justify-items: center; gap: 8px; padding: 24px 10px; color: #8091aa; }
+.cc-unavailable p { font-size: 13px; }
+.cc-change { margin-top: 20px; }
+.cc-accordions { padding: 0 24px 24px; }
+.cc-fold { border: 1px solid #e5ebf4; border-radius: 9px; margin-top: 10px; overflow: hidden; }
+.cc-fold > summary { padding: 15px 16px; color: #456080; cursor: pointer; font-size: 13px; list-style-position: inside; }
+.cc-fold > summary small { float: right; color: #8697ad; font-size: 11px; margin-top: 1px; }
+.cc-fold > summary:focus-visible { outline: 2px solid #557fea; outline-offset: -3px; }
+.cc-fold[open] > summary { background: #f7f9fd; border-bottom: 1px solid #e8edf5; }
+.cc-fold-body { padding: 16px; font-size: 12px; color: #6e819c; line-height: 1.85; }
+.cc-fold-body > p:first-child { margin-top: 0; }
+.cc-fold-body > p:last-child { margin-bottom: 0; }
+.cc-evidence { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin: 18px 0; }
+.cc-evidence dt { color: #8c9aaf; font-size: 11px; }
+.cc-evidence dd { margin: 5px 0 0; color: #4d6482; overflow-wrap: anywhere; }
+@media (max-width: 1000px) { .cc-workspace { grid-template-columns: 240px minmax(0, 1fr); }.cc-field-heading { align-items: flex-start; flex-direction: column; gap: 4px; }.cc-fields th, .cc-fields td { padding: 11px 7px; } }
+@media (max-width: 780px) { .cc-workspace { grid-template-columns: 1fr; }.cc-page-heading > span { display: none; }.cc-workspace .gov-directory-list { max-height: 220px; }.cc-detail-heading { flex-wrap: wrap; padding: 18px; }.cc-main { padding: 18px; }.cc-accordions { padding: 0 18px 18px; }.cc-evidence { grid-template-columns: 1fr; }.cc-fields { min-width: 490px; }.cc-fold > summary small { float: none; margin-left: 10px; } }

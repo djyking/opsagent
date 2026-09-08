@@ -26,6 +26,7 @@ const imports = {
   '@lucide/vue': new Proxy({}, { get: () => ({ render: () => vue.h('i') }) }), '@/api/modules': { itsmApi: api },
   '@/utils/datetime': { formatDateTime: String, formatRelativeTime: String }, '@/ui/status-map': { statusLabel: String },
   '@/composables/usePageFeedback': { usePageFeedback: () => ({}) },
+  '@/styles/pages/phase3-event-lists.css': {},
 };
 for (const name of ['PageHeader', 'FilterBar', 'EmptyState', 'InlineError', 'LoadingState', 'ListSurface', 'DetailPanel', 'StatusBadge', 'PriorityIndicator', 'experience/GuidedEmptyState']) imports['@/components/' + name + '.vue'] = Stub;
 const component = evaluate(script.content, imports).default;

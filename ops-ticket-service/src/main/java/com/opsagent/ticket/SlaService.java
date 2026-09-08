@@ -79,9 +79,10 @@ public class SlaService {
         long total = mapper.countPage(query, now, riskUntil);
         long lastPage = Math.max(1, (total + query.pageSize() - 1) / query.pageSize());
         long pageNum = Math.min(query.pageNum(), lastPage);
-        List<SlaDtos.Row> records = total == 0
-                ? List.of()
-                : mapper.page(query, now, riskUntil, (pageNum - 1) * query.pageSize());
+        List<SlaDtos.Row> records =
+                total == 0
+                        ? List.of()
+                        : mapper.page(query, now, riskUntil, (pageNum - 1) * query.pageSize());
         return new PageResult<>(records, total, pageNum, query.pageSize());
     }
 
@@ -101,9 +102,11 @@ public class SlaService {
             return;
         }
         try {
-            mapper.due(100).forEach(
-                    candidate -> transactions.executeWithoutResult(
-                            status -> evaluate(candidate)));
+            mapper.due(100)
+                    .forEach(
+                            candidate ->
+                                    transactions.executeWithoutResult(
+                                            status -> evaluate(candidate)));
         } finally {
             lock.unlock(SCANNER_LOCK, token);
         }
@@ -111,10 +114,24 @@ public class SlaService {
 
     void evaluate(SlaMapper.SlaCandidate candidate) {
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime responseWarning = candidate.createTime().plusMinutes(
-                Math.max(1L, candidate.responseMinutes() * candidate.warningPercent() / 100L));
-        LocalDateTime resolutionWarning = candidate.createTime().plusMinutes(
-                Math.max(1L, candidate.resolutionMinutes() * candidate.warningPercent() / 100L));
+        LocalDateTime responseWarning =
+                candidate
+                        .createTime()
+                        .plusMinutes(
+                                Math.max(
+                                        1L,
+                                        candidate.responseMinutes()
+                                                * candidate.warningPercent()
+                                                / 100L));
+        LocalDateTime resolutionWarning =
+                candidate
+                        .createTime()
+                        .plusMinutes(
+                                Math.max(
+                                        1L,
+                                        candidate.resolutionMinutes()
+                                                * candidate.warningPercent()
+                                                / 100L));
         if ("RUNNING".equals(candidate.responseStatus()) && !now.isBefore(responseWarning)) {
             emit(candidate, "RESPONSE_WARNING", 0, "响应 SLA 即将到期");
         }
@@ -137,31 +154,36 @@ public class SlaService {
     }
 
     private void emit(
-            SlaMapper.SlaCandidate candidate,
-            String eventType,
-            int level,
-            String detail) {
+            SlaMapper.SlaCandidate candidate, String eventType, int level, String detail) {
         if (mapper.addEvent(candidate.id(), candidate.ticketId(), eventType, level, detail) != 1) {
             return;
         }
         mapper.markEvent(candidate.id(), eventType, level);
-        String metric = "ESCALATION".equals(eventType)
-                ? "opsagent.sla.escalation"
-                : eventType.endsWith("BREACH")
-                        ? "opsagent.sla.breach"
-                        : "opsagent.sla.warning";
+        String metric =
+                "ESCALATION".equals(eventType)
+                        ? "opsagent.sla.escalation"
+                        : eventType.endsWith("BREACH")
+                                ? "opsagent.sla.breach"
+                                : "opsagent.sla.warning";
         metrics.counter(metric).increment();
         String payload = payload(candidate.ticketId(), eventType, level, detail);
-        outbox.add(UUID.randomUUID().toString(), candidate.ticketId(), "sla." + eventType.toLowerCase(), payload);
+        outbox.add(
+                UUID.randomUUID().toString(),
+                candidate.ticketId(),
+                "sla." + eventType.toLowerCase(),
+                payload);
     }
 
     private String payload(long ticketId, String eventType, int level, String detail) {
         try {
-            return json.writeValueAsString(Map.of(
-                    "ticketId", ticketId,
-                    "eventType", eventType,
-                    "escalationLevel", level,
-                    "detail", detail));
+            String service = mapper.notificationService(ticketId);
+            return json.writeValueAsString(
+                    Map.of(
+                            "ticketId", ticketId,
+                            "eventType", eventType,
+                            "escalationLevel", level,
+                            "serviceCiCode", service == null ? "" : service,
+                            "detail", detail));
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("SLA 事件序列化失败", exception);
         }

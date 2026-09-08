@@ -1,6 +1,7 @@
 package com.opsagent.rag;
 
 import com.fasterxml.jackson.databind.JsonNode;
+
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -21,24 +22,31 @@ public class OpenAiLlmClient implements LlmClient {
     private final AiHttpExecutor http;
     private final AiStreamHttpExecutor streamHttp;
 
-    OpenAiLlmClient(
-            AiProperties properties, AiHttpExecutor http, AiStreamHttpExecutor streamHttp) {
+    OpenAiLlmClient(AiProperties properties, AiHttpExecutor http, AiStreamHttpExecutor streamHttp) {
         this.properties = properties;
         this.http = http;
         this.streamHttp = streamHttp;
     }
 
     @Override
-    public String provider() { return "openai"; }
+    public String provider() {
+        return "openai";
+    }
 
     @Override
-    public boolean configured() { return properties.isEnabled() && settings().configured(); }
+    public boolean configured() {
+        return properties.isEnabled() && settings().configured();
+    }
 
     @Override
-    public String model() { return settings().getModel(); }
+    public String model() {
+        return settings().getModel();
+    }
 
     @Override
-    public LlmResult generate(LlmRequest request) { return execute(request, null); }
+    public LlmResult generate(LlmRequest request) {
+        return execute(request, null);
+    }
 
     @Override
     public LlmResult stream(LlmRequest request, Consumer<String> onDelta) {
@@ -53,37 +61,56 @@ public class OpenAiLlmClient implements LlmClient {
         int inputTokens = 0;
         int outputTokens = 0;
         int continuation = 0;
-        for (;;) {
+        for (; ; ) {
             Turn turn = new Turn();
             Map<String, Object> body = body(request, answer.toString(), onDelta != null);
             try {
                 if (onDelta == null) {
-                    JsonNode response = http.post(
-                            provider(), settings().getBaseUrl(), "/responses", settings().getApiKey(),
-                            body, properties.getTimeoutSeconds(), properties.getMaximumAttempts());
+                    JsonNode response =
+                            http.post(
+                                    provider(),
+                                    settings().getBaseUrl(),
+                                    "/responses",
+                                    settings().getApiKey(),
+                                    body,
+                                    properties.getTimeoutSeconds(),
+                                    properties.getMaximumAttempts());
                     if (response == null) {
                         throw new AiProviderException(provider(), 502, "AI 服务返回了空回答。", null);
                     }
                     String text = response.path("output_text").asText("");
                     if (text.isBlank()) {
-                        text = response.path("output").findValues("text").stream()
-                                .map(JsonNode::asText).filter(value -> !value.isBlank())
-                                .reduce("", (left, right) -> left + right);
+                        text =
+                                response.path("output").findValues("text").stream()
+                                        .map(JsonNode::asText)
+                                        .filter(value -> !value.isBlank())
+                                        .reduce("", (left, right) -> left + right);
                     }
                     turn.text.append(text);
                     answer.append(text);
                     turn.complete(response);
                 } else {
                     streamHttp.post(
-                            provider(), settings().getBaseUrl(), "/responses", settings().getApiKey(),
-                            body, properties.getTimeoutSeconds(), properties.getMaximumAttempts(),
+                            provider(),
+                            settings().getBaseUrl(),
+                            "/responses",
+                            settings().getApiKey(),
+                            body,
+                            properties.getTimeoutSeconds(),
+                            properties.getMaximumAttempts(),
                             event -> handleEvent(event, turn, answer, onDelta));
                     if (!turn.terminal) turn.finishReason = "stream_interrupted";
                 }
             } catch (AiProviderException exception) {
                 if (answer.isEmpty()) throw exception;
-                return result(answer, inputTokens + turn.inputTokens, outputTokens + turn.outputTokens,
-                        onDelta == null ? "continuation_failed" : "stream_interrupted", continuation);
+                return result(
+                        answer,
+                        inputTokens + turn.inputTokens,
+                        outputTokens + turn.outputTokens,
+                        exception.kind() == AiProviderException.FailureKind.BUDGET
+                                ? "budget_exhausted"
+                                : onDelta == null ? "continuation_failed" : "stream_interrupted",
+                        continuation);
             }
             inputTokens += turn.inputTokens;
             outputTokens += turn.outputTokens;
@@ -91,9 +118,11 @@ public class OpenAiLlmClient implements LlmClient {
                 throw new AiProviderException(provider(), 502, "AI 服务返回了空回答。", null);
             }
             if (turn.text.isEmpty()) {
-                return result(answer, inputTokens, outputTokens, "empty_continuation", continuation);
+                return result(
+                        answer, inputTokens, outputTokens, "empty_continuation", continuation);
             }
-            if ("length".equals(turn.finishReason) && continuation < properties.getMaximumContinuations()) {
+            if ("length".equals(turn.finishReason)
+                    && continuation < properties.getMaximumContinuations()) {
                 continuation++;
                 continue;
             }
@@ -107,9 +136,12 @@ public class OpenAiLlmClient implements LlmClient {
         input.add(Map.of("role", "user", "content", request.userPrompt()));
         if (!previous.isEmpty()) {
             input.add(Map.of("role", "assistant", "content", previous));
-            input.add(Map.of("role", "user", "content",
-                    "上一条回答因长度上限中断，请紧接最后一个字符继续并完整收尾。"
-                            + "不要重复已有内容，不要重新开始，不要解释续写过程，保留引用编号。"));
+            input.add(
+                    Map.of(
+                            "role",
+                            "user",
+                            "content",
+                            "上一条回答因长度上限中断，请紧接最后一个字符继续并完整收尾。" + "不要重复已有内容，不要重新开始，不要解释续写过程，保留引用编号。"));
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", model());
@@ -131,7 +163,8 @@ public class OpenAiLlmClient implements LlmClient {
             onDelta.accept(delta.textValue());
             return true;
         }
-        if ("response.completed".equals(type) || "response.incomplete".equals(type)
+        if ("response.completed".equals(type)
+                || "response.incomplete".equals(type)
                 || "response.failed".equals(type)) {
             turn.complete(event.path("response"));
         } else if ("error".equals(type)) {
@@ -141,12 +174,25 @@ public class OpenAiLlmClient implements LlmClient {
     }
 
     private LlmResult result(
-            StringBuilder answer, int inputTokens, int outputTokens, String reason, int continuation) {
-        return new LlmResult(answer.toString().trim(), provider(), model(), inputTokens,
-                outputTokens, "stop".equals(reason), reason, continuation);
+            StringBuilder answer,
+            int inputTokens,
+            int outputTokens,
+            String reason,
+            int continuation) {
+        return new LlmResult(
+                answer.toString().trim(),
+                provider(),
+                model(),
+                inputTokens,
+                outputTokens,
+                "stop".equals(reason),
+                reason,
+                continuation);
     }
 
-    private AiProperties.ProviderSettings settings() { return properties.settings(provider()); }
+    private AiProperties.ProviderSettings settings() {
+        return properties.settings(provider());
+    }
 
     /**
      * 保存 Responses API 终止事件和用量，不把单个文本块结束视为完整回答。
@@ -164,15 +210,19 @@ public class OpenAiLlmClient implements LlmClient {
         private void complete(JsonNode response) {
             String status = response.path("status").asText();
             terminal = List.of("completed", "incomplete", "failed").contains(status);
-            finishReason = switch (status) {
-                case "completed" -> "stop";
-                case "failed" -> "provider_error";
-                case "incomplete" -> {
-                    String reason = response.path("incomplete_details").path("reason").asText("unknown");
-                    yield "max_output_tokens".equals(reason) ? "length" : reason;
-                }
-                default -> "unknown";
-            };
+            finishReason =
+                    switch (status) {
+                        case "completed" -> "stop";
+                        case "failed" -> "provider_error";
+                        case "incomplete" -> {
+                            String reason =
+                                    response.path("incomplete_details")
+                                            .path("reason")
+                                            .asText("unknown");
+                            yield "max_output_tokens".equals(reason) ? "length" : reason;
+                        }
+                        default -> "unknown";
+                    };
             inputTokens = response.path("usage").path("input_tokens").asInt();
             outputTokens = response.path("usage").path("output_tokens").asInt();
         }

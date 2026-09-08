@@ -58,16 +58,21 @@ public abstract class ChatCompletionsLlmClient implements LlmClient {
         int inputTokens = 0;
         int outputTokens = 0;
         int continuation = 0;
-        for (;;) {
+        for (; ; ) {
             Turn turn = new Turn();
             Map<String, Object> body = body(request, answer.toString(), onDelta != null);
             String finishReason;
             try {
                 if (onDelta == null) {
-                    JsonNode response = http.post(
-                            provider(), settings().getBaseUrl(), "/chat/completions",
-                            settings().getApiKey(), body, properties.getTimeoutSeconds(),
-                            properties.getMaximumAttempts());
+                    JsonNode response =
+                            http.post(
+                                    provider(),
+                                    settings().getBaseUrl(),
+                                    "/chat/completions",
+                                    settings().getApiKey(),
+                                    body,
+                                    properties.getTimeoutSeconds(),
+                                    properties.getMaximumAttempts());
                     JsonNode choice = response == null ? null : response.path("choices").path(0);
                     if (choice == null) {
                         throw new AiProviderException(provider(), 502, "AI 服务返回了空回答。", null);
@@ -78,19 +83,32 @@ public abstract class ChatCompletionsLlmClient implements LlmClient {
                     answer.append(turn.text);
                     finishReason = turn.finishReason;
                 } else {
-                    boolean done = streamHttp.post(
-                            provider(), settings().getBaseUrl(), "/chat/completions",
-                            settings().getApiKey(), body, properties.getTimeoutSeconds(),
-                            properties.getMaximumAttempts(),
-                            event -> handleEvent(event, turn, answer, onDelta));
-                    finishReason = done && !turn.finishReason.equals("unknown")
-                            ? turn.finishReason : "stream_interrupted";
+                    boolean done =
+                            streamHttp.post(
+                                    provider(),
+                                    settings().getBaseUrl(),
+                                    "/chat/completions",
+                                    settings().getApiKey(),
+                                    body,
+                                    properties.getTimeoutSeconds(),
+                                    properties.getMaximumAttempts(),
+                                    event -> handleEvent(event, turn, answer, onDelta));
+                    finishReason =
+                            done && !turn.finishReason.equals("unknown")
+                                    ? turn.finishReason
+                                    : "stream_interrupted";
                 }
             } catch (AiProviderException exception) {
                 if (answer.isEmpty()) throw exception;
-                return result(answer, inputTokens + turn.inputTokens,
-                        outputTokens + turn.outputTokens, false,
-                        onDelta == null ? "continuation_failed" : "stream_interrupted", continuation);
+                return result(
+                        answer,
+                        inputTokens + turn.inputTokens,
+                        outputTokens + turn.outputTokens,
+                        false,
+                        exception.kind() == AiProviderException.FailureKind.BUDGET
+                                ? "budget_exhausted"
+                                : onDelta == null ? "continuation_failed" : "stream_interrupted",
+                        continuation);
             }
             inputTokens += turn.inputTokens;
             outputTokens += turn.outputTokens;
@@ -98,8 +116,13 @@ public abstract class ChatCompletionsLlmClient implements LlmClient {
                 throw new AiProviderException(provider(), 502, "AI 服务返回了空回答。", null);
             }
             if (turn.text.isEmpty()) {
-                return result(answer, inputTokens, outputTokens,
-                        false, "empty_continuation", continuation);
+                return result(
+                        answer,
+                        inputTokens,
+                        outputTokens,
+                        false,
+                        "empty_continuation",
+                        continuation);
             }
             if ("length".equals(finishReason)
                     && !turn.text.isEmpty()
@@ -107,8 +130,13 @@ public abstract class ChatCompletionsLlmClient implements LlmClient {
                 continuation++;
                 continue;
             }
-            return result(answer, inputTokens, outputTokens,
-                    "stop".equals(finishReason), finishReason, continuation);
+            return result(
+                    answer,
+                    inputTokens,
+                    outputTokens,
+                    "stop".equals(finishReason),
+                    finishReason,
+                    continuation);
         }
     }
 
@@ -151,10 +179,21 @@ public abstract class ChatCompletionsLlmClient implements LlmClient {
     }
 
     private LlmResult result(
-            StringBuilder answer, int inputTokens, int outputTokens,
-            boolean complete, String finishReason, int continuation) {
-        return new LlmResult(answer.toString().trim(), provider(), model(),
-                inputTokens, outputTokens, complete, finishReason, continuation);
+            StringBuilder answer,
+            int inputTokens,
+            int outputTokens,
+            boolean complete,
+            String finishReason,
+            int continuation) {
+        return new LlmResult(
+                answer.toString().trim(),
+                provider(),
+                model(),
+                inputTokens,
+                outputTokens,
+                complete,
+                finishReason,
+                continuation);
     }
 
     private AiProperties.ProviderSettings settings() {

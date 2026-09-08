@@ -9,9 +9,11 @@ export interface ManagedConfiguration extends ManagedConfigurationItem {
   content: Record<string, unknown>; revision: string; appliedRevision: string;
   applicationStatus: string; nacosStatus: string; canPublish: boolean; blockedReason: string; observedAt: string;
   business: { httpStatus?: number; reasonCode?: string; catalogTitle?: string; notice?: string;
-    discountPercent?: number; basePrice?: number; quotedPrice?: number; catalog?: string };
-  application?: {instanceId?: string; targetCode?: string; namespaceId?: string; sourceInstanceId?: string; appliedAt?: string; observedAt?: string; verificationScope?: string; multiInstanceCoverage?: boolean;
-    applicationPause?: {pauseId: string; active: boolean; startedAt: string; expiresAt: string; endedAt: string; recoverySource: string; scope: string}};
+    discountPercent?: number; basePrice?: number; quotedPrice?: number; catalog?: string;
+    businessConfigurationRevision?: string; observedAt?: string };
+  application?: { instanceId?: string; targetCode?: string; observedAt?: string; appliedAt?: string;
+    verificationScope?: string; multiInstanceCoverage?: boolean;
+    applicationPause?: { active?: boolean; expiresAt?: string; recoverySource?: string } };
 }
 export interface ConfigurationVersion {
   id: number; version: number; action: string; status: string; content: Record<string, unknown>;

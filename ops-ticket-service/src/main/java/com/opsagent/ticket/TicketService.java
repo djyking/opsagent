@@ -84,23 +84,35 @@ public class TicketService {
     List<View> list() {
         OpsPrincipal u = SecurityUsers.current();
         var q = new LambdaQueryWrapper<Ticket>();
-        if (!u.roles().contains("ADMIN")) {
-            if (u.roles().contains("DEMO"))
-                q.and(
-                        x ->
-                                x.eq(Ticket::getOwnerActorId, u.userId())
-                                        .or()
-                                        .eq(Ticket::getPublicDemo, true));
-            else if (u.roles().contains("OPS"))
-                q.and(
-                        x ->
-                                x.eq(Ticket::getStatus, "CREATED")
-                                        .or()
-                                        .eq(Ticket::getAssigneeId, u.userId()));
-            else q.eq(Ticket::getCreatorId, u.userId());
+        if (u.roles().contains("DEMO")) {
+            q.and(
+                    x ->
+                            x.eq(Ticket::getOwnerActorId, u.userId())
+                                    .or()
+                                    .eq(Ticket::getPublicDemo, true));
+        } else if (!u.roles().contains("ADMIN")) {
+            q.and(
+                    x -> {
+                        x.eq(Ticket::getCreatorId, u.userId())
+                                .or()
+                                .eq(Ticket::getAssigneeId, u.userId());
+                        if (u.roles().contains("OPS")) x.or().eq(Ticket::getStatus, "CREATED");
+                    });
         }
-        return tickets.selectList(q.orderByDesc(Ticket::getCreateTime)).stream()
-                .map(this::view)
+        List<Ticket> visible = tickets.selectList(q.orderByDesc(Ticket::getCreateTime));
+        if (visible.isEmpty()) return List.of();
+        Map<Long, List<TicketAuditMapper.WorkRecord>> events =
+                audit.eventRecords(visible.stream().map(Ticket::getId).toList()).stream()
+                        .collect(
+                                java.util.stream.Collectors.groupingBy(
+                                        TicketAuditMapper.WorkRecord::ticketId));
+        return visible.stream()
+                .map(
+                        ticket ->
+                                view(
+                                        ticket,
+                                        EventLifecycleService.reduce(
+                                                events.getOrDefault(ticket.getId(), List.of()))))
                 .toList();
     }
 
@@ -140,6 +152,9 @@ public class TicketService {
             throw new BusinessException(ErrorCode.CONFLICT, "工单版本已变化，请刷新后重试");
         if (r.target() == TicketStatus.RESOLVED) {
             sla.resolutionCompleted(id);
+        }
+        if (r.target() == TicketStatus.PROCESSING && source != TicketStatus.ASSIGNED) {
+            audit.workRecord(id, "EVENT_REOPEN", "工单重新进入处理，之前的恢复确认需要重新核对", r.remark(), u.userId());
         }
         audit.history(
                 id, u.userId(), r.target().name(), source.name(), r.target().name(), r.remark());
@@ -261,6 +276,10 @@ public class TicketService {
     }
 
     private View view(Ticket t) {
+        return view(t, EventLifecycleService.reduce(audit.workRecords(t.getId())));
+    }
+
+    private View view(Ticket t, EventLifecycleService.State event) {
         return new View(
                 t.getId(),
                 t.getTicketNo(),
@@ -268,6 +287,14 @@ public class TicketService {
                 t.getDescription(),
                 t.getPriority(),
                 t.getStatus(),
+                "EVT-" + t.getId(),
+                event.legacyArchived()
+                        ? "LEGACY_ARCHIVED"
+                        : event.closed() != null
+                                ? "CLOSED"
+                                : event.result() != null ? "VERIFYING" : "HANDLING",
+                event.closed() != null,
+                event.legacyArchived(),
                 t.getCreatorId(),
                 t.getAssigneeId(),
                 t.getAffectedCiCode(),
@@ -306,7 +333,7 @@ public class TicketService {
         ticket.setCreatorId(provenance.ownerActorId());
         ticket.setAffectedCiCode(normalize(affectedCiCode));
         ticket.setSourceType(provenance.isolated() ? "ISOLATED_DRILL" : "ALERTMANAGER");
-        ticket.setEnvironment(provenance.isolated() ? "ISOLATED" : "CORE");
+        ticket.setEnvironment(provenance.isolated() ? "ISOLATED" : provenance.environment());
         ticket.setOwnerActorId(provenance.ownerActorId());
         ticket.setIncidentId(provenance.incidentId());
         ticket.setEpisodeId(episodeId);
@@ -342,7 +369,16 @@ public class TicketService {
         return ticket;
     }
 
-    record AlertProvenance(String incidentId, long ownerActorId, boolean isolated) {
+    record AlertProvenance(
+            String incidentId, long ownerActorId, boolean isolated, String environment) {
+        AlertProvenance(String incidentId, long ownerActorId, boolean isolated) {
+            this(incidentId, ownerActorId, isolated, isolated ? "ISOLATED" : "CORE");
+        }
+
+        AlertProvenance withEnvironment(String environment) {
+            return new AlertProvenance(incidentId, ownerActorId, isolated, environment);
+        }
+
         static AlertProvenance core() {
             return new AlertProvenance(null, 0L, false);
         }

@@ -25,8 +25,11 @@ class KnowledgeReviewContentService {
     private final FileStorageService storage;
     private final Path storageRoot;
 
-    KnowledgeReviewContentService(KnowledgeService knowledge, KnowledgeRepository repository,
-            FileStorageService storage, KnowledgeProperties properties) {
+    KnowledgeReviewContentService(
+            KnowledgeService knowledge,
+            KnowledgeRepository repository,
+            FileStorageService storage,
+            KnowledgeProperties properties) {
         this.knowledge = knowledge;
         this.repository = repository;
         this.storage = storage;
@@ -38,11 +41,21 @@ class KnowledgeReviewContentService {
         Map<String, Object> document = knowledge.reviewDocument(id);
         long total = repository.reviewChunkCount(id);
         int page = (int) Math.min(requestedPage, Math.max(1, (total + pageSize - 1) / pageSize));
-        return new Preview(id, text(document, "original_name"), text(document, "file_type"),
-                number(document, "file_size"), (int) number(document, "version"),
-                text(document, "status"), text(document, "review_status"), text(document, "parse_error"),
-                sourceAvailable(document), total, page, pageSize,
-                repository.reviewChunks(id, (page - 1) * pageSize, pageSize));
+        return new Preview(
+                id,
+                text(document, "original_name"),
+                text(document, "file_type"),
+                number(document, "file_size"),
+                (int) number(document, "version"),
+                text(document, "status"),
+                text(document, "review_status"),
+                text(document, "parse_error"),
+                sourceAvailable(document),
+                total,
+                page,
+                pageSize,
+                repository.reviewChunks(id, (page - 1) * pageSize, pageSize),
+                text(document, "index_status"));
     }
 
     @Transactional(readOnly = true)
@@ -53,8 +66,10 @@ class KnowledgeReviewContentService {
         if (total > 5000 || repository.reviewTextLength(id) > 2_000_000) {
             throw new BusinessException(ErrorCode.VALIDATION, "解析正文较长，请使用分页切片阅读或下载原文件");
         }
-        String content = repository.reviewChunks(id, 0, (int) total).stream()
-                .map(Chunk::content).collect(java.util.stream.Collectors.joining("\n\n"));
+        String content =
+                repository.reviewChunks(id, 0, (int) total).stream()
+                        .map(Chunk::content)
+                        .collect(java.util.stream.Collectors.joining("\n\n"));
         return new ParsedText(id, (int) number(document, "version"), total, content);
     }
 
@@ -93,17 +108,37 @@ class KnowledgeReviewContentService {
         return row.get(key) instanceof Number value ? value.longValue() : 0;
     }
 
-    /** @author heyu */
+    /**
+     * @author heyu
+     */
     record Chunk(long id, int chunkIndex, String content, Integer tokenCount, Integer pageNumber) {}
 
-    /** @author heyu */
-    record Preview(long documentId, String originalName, String fileType, long fileSize, int version,
-                   String parseStatus, String reviewStatus, String parseError, boolean sourceAvailable,
-                   long total, int pageNum, int pageSize, List<Chunk> chunks) {}
+    /**
+     * @author heyu
+     */
+    record Preview(
+            long documentId,
+            String originalName,
+            String fileType,
+            long fileSize,
+            int version,
+            String parseStatus,
+            String reviewStatus,
+            String parseError,
+            boolean sourceAvailable,
+            long total,
+            int pageNum,
+            int pageSize,
+            List<Chunk> chunks,
+            String indexStatus) {}
 
-    /** @author heyu */
+    /**
+     * @author heyu
+     */
     record ParsedText(long documentId, int version, long chunkCount, String text) {}
 
-    /** @author heyu */
+    /**
+     * @author heyu
+     */
     record Source(String originalName, Path path) {}
 }

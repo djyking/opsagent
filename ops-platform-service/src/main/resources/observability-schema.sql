@@ -27,6 +27,13 @@ CREATE TABLE IF NOT EXISTS observability_inspection_result (
     KEY idx_observation_ci_time (ci_code,checked_at),
     KEY idx_observation_time (checked_at)
 );
+CREATE TABLE IF NOT EXISTS observability_personal_layout (
+    environment VARCHAR(32) NOT NULL,
+    actor_id BIGINT NOT NULL,
+    positions_json MEDIUMTEXT NOT NULL,
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (environment, actor_id)
+);
 CREATE TABLE IF NOT EXISTS observability_inspection_plan (
     plan_key VARCHAR(64) PRIMARY KEY,
     next_run_at DATETIME(3) NOT NULL,

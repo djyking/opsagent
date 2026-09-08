@@ -3,8 +3,10 @@ package com.opsagent.platform;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opsagent.common.core.BusinessException;
 import com.opsagent.common.core.ErrorCode;
+import com.opsagent.common.security.RuntimeConfigurationSnapshot;
 import com.opsagent.common.security.SecurityUsers;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -25,13 +27,23 @@ import java.util.Map;
 class ConfigCenterService {
     private final NacosConfigurationClient nacos;
     private final ConfigurationMasker masker;
+    private final ConfigurationRuntimeClient runtime;
 
     @Value("${ops.configuration.bindings-json:{}}")
     private String bindingsJson = "{}";
 
     ConfigCenterService(NacosConfigurationClient nacos, ConfigurationMasker masker) {
+        this(nacos, masker, null);
+    }
+
+    @Autowired
+    ConfigCenterService(
+            NacosConfigurationClient nacos,
+            ConfigurationMasker masker,
+            ConfigurationRuntimeClient runtime) {
         this.nacos = nacos;
         this.masker = masker;
+        this.runtime = runtime;
     }
 
     ConfigCenterDtos.Catalog catalog(String ciCode) {
@@ -191,7 +203,8 @@ class ConfigCenterService {
                     "",
                     "",
                     "该来源尚未接入真实快照，仅登记管理边界。" + item.description(),
-                    Instant.now());
+                    Instant.now(),
+                    overview(item, ""));
         try {
             var raw = nacos.content(item.dataId(), item.group());
             String masked = masker.mask(raw.value(), raw.type());
@@ -202,14 +215,16 @@ class ConfigCenterService {
                         "",
                         raw.revision(),
                         "实际源内容无法安全解析，已隐藏；未返回模板。",
-                        Instant.now());
+                        Instant.now(),
+                        overview(item, ""));
             return new ConfigCenterDtos.Detail(
                     item,
                     "AVAILABLE",
                     masked,
                     raw.revision(),
                     "这是实际源配置片段，安全预览规范化为 JSON；不是应用完整有效配置。敏感值已隐藏，预览不允许直接写回。",
-                    Instant.now());
+                    Instant.now(),
+                    overview(item, masked));
         } catch (Exception ignored) {
             return new ConfigCenterDtos.Detail(
                     item,
@@ -217,8 +232,61 @@ class ConfigCenterService {
                     "",
                     "",
                     failureMessage(failure(ignored)),
-                    Instant.now());
+                    Instant.now(),
+                    overview(item, ""));
         }
+    }
+
+    private ConfigCenterDtos.Overview overview(ConfigCenterDtos.Item item, String masked) {
+        // Shared sources cannot be attributed to just the service inferred from their filename.
+        if (item.shared())
+            return ConfigurationRuntimeClient.unavailable(
+                    item.serviceId(), "SHARED_SOURCE", "此配置关联多个服务，请从具体服务入口核对运行值；源配置不代表每个目标都已应用。");
+        String serviceId =
+                item.identity().targetScope().size() == 1
+                        ? item.identity().targetScope().get(0)
+                        : item.serviceId();
+        var snapshot =
+                runtime == null
+                        ? ConfigurationRuntimeClient.unavailable(
+                                serviceId, "UNSUPPORTED", "安全运行快照尚未接入。")
+                        : runtime.snapshot(serviceId);
+        if (snapshot.status().equals("AVAILABLE")) return snapshot;
+        List<RuntimeConfigurationSnapshot.Field> fields = new ArrayList<>();
+        boolean markerOnly = false;
+        if (!masked.isBlank()) {
+            try {
+                var root = new ObjectMapper().readTree(masked);
+                for (var definition : RuntimeConfigurationSnapshot.definitions()) {
+                    var value = root.path(definition.key());
+                    if (value.isMissingNode()) {
+                        value = root;
+                        for (String part : definition.key().split("\\.")) value = value.path(part);
+                    }
+                    if (!value.isValueNode() || value.isNull()) continue;
+                    fields.add(
+                            new RuntimeConfigurationSnapshot.Field(
+                                    definition.key(),
+                                    definition.label(),
+                                    definition.category(),
+                                    RuntimeConfigurationSnapshot.safeValue(value.asText()),
+                                    "Nacos 源配置",
+                                    "SOURCE_ONLY"));
+                }
+                markerOnly =
+                        fields.isEmpty()
+                                && (root.path("info").path("middleware").has("nacos-config")
+                                        || root.has("info.middleware.nacos-config"));
+            } catch (Exception ignored) {
+                // Already masked source is optional evidence; never substitute a generated
+                // template.
+            }
+        }
+        String message = snapshot.message();
+        if (markerOnly) message += " 当前 Nacos 文件仅含接入标记，connected 是静态配置文字，不能证明连接正常。";
+        if (!fields.isEmpty()) message += " 下列值仅来自当前 Nacos 源，目标是否采用尚未核实。";
+        return new ConfigCenterDtos.Overview(
+                snapshot.status(), serviceId, "", null, message, List.copyOf(fields));
     }
 
     ConfigCenterDtos.History history(String id) {

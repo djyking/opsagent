@@ -19,6 +19,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 固定内部服务适配器；不接受模型指定 URL，不转存用户 JWT。
@@ -102,10 +104,12 @@ class AgentClients {
     JsonNode call(String audience, String path, String method, JsonNode body, Context actor) {
         String base = urls.get(audience);
         if (base == null || !path.startsWith("/internal/")) throw AgentJson.invalid("内部目标无效");
+        CompletableFuture<HttpResponse<String>> pending = null;
         try {
+            Duration timeout = requestTimeout(audience, path, actor);
             HttpRequest.Builder request =
                     HttpRequest.newBuilder(URI.create(base + path))
-                            .timeout(Duration.ofSeconds(audience.equals("rag") ? 65 : 12))
+                            .timeout(timeout)
                             .header("Authorization", "Bearer " + tokens.issue(audience, actor))
                             .header("Content-Type", "application/json");
             request.method(
@@ -113,8 +117,10 @@ class AgentClients {
                     body == null
                             ? HttpRequest.BodyPublishers.noBody()
                             : HttpRequest.BodyPublishers.ofString(body.toString()));
+            // JDK request timeout can end at response headers; bound the complete body as well.
+            pending = http.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString());
             HttpResponse<String> response =
-                    http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+                    pending.get(Math.max(1, timeout.toMillis()), TimeUnit.MILLISECONDS);
             if (response.body().length() > 300000) throw AgentJson.invalid("工具响应超出证据上限");
             JsonNode result = AgentJson.read(response.body());
             if (response.statusCode() / 100 != 2 || result.path("code").asInt(-1) != 0) {
@@ -127,11 +133,24 @@ class AgentClients {
         } catch (BusinessException exception) {
             throw exception;
         } catch (InterruptedException exception) {
+            if (pending != null) pending.cancel(true);
             Thread.currentThread().interrupt();
             throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "内部调用中断；保留执行意图");
         } catch (Exception exception) {
+            if (pending != null) pending.cancel(true);
             throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "内部调用失败或响应未知；未隐式重试");
         }
+    }
+
+    private static Duration requestTimeout(String audience, String path, Context actor) {
+        // A model decision may use the configured 120 seconds; allow receipt transit while
+        // remaining inside the 150-second worker lease and the original run/actor deadline.
+        Duration configured =
+                Duration.ofSeconds(
+                        audience.equals("rag") ? path.equals("/internal/ai/turns") ? 130 : 65 : 12);
+        Duration remaining = Duration.between(Instant.now(), actor.validUntil());
+        if (remaining.isNegative() || remaining.isZero()) throw denied();
+        return remaining.compareTo(configured) < 0 ? remaining : configured;
     }
 
     private static ErrorCode failureCode(int status, int code) {

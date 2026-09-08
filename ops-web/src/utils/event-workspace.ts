@@ -3,6 +3,16 @@ import type { EventWorkspace } from '@/api/event-workspace';
 export const eventRunLabels: Record<string, string> = { QUEUED: '准备执行', RUNNING: '执行中', WAITING_APPROVAL: '等待审批',
   WAITING_INPUT: '等待补充信息', PAUSED: '已暂停', COMPLETED: '流程结束', NEEDS_ATTENTION: '需要人工处理',
   CANCELLED: '已取消', EXPIRED: '已到期', REJECTED: '审批拒绝', BUDGET_EXCEEDED: '预算已达上限' };
+export function eventRecordAuthor(record: { recordType: string; createBy: number; evidence?: string }) {
+  if (record.recordType === 'EVENT_RESULT' && record.createBy === 0 && record.evidence) {
+    try {
+      const evidence: unknown = JSON.parse(record.evidence);
+      if (evidence && typeof evidence === 'object' && !Array.isArray(evidence)
+        && 'source' in evidence && evidence.source === 'AI_MACHINE_RESULT') return 'AI 自动登记';
+    } catch { /* Other system records retain their original attribution. */ }
+  }
+  return `用户 #${record.createBy}`;
+}
 export function recoveryLabel(source: string) {
   return ({ AGENT_TOOL: 'Agent 工具执行', MANUAL: '人工恢复', TTL_GUARD: '到期保护恢复', NOT_APPLIED: '故障未生效' } as Record<string, string>)[source] || '尚无明确恢复来源';
 }

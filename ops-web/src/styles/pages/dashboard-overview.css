@@ -1,0 +1,49 @@
+.overview-attention { display:flex; align-items:center; gap:16px; padding:14px 20px; margin-bottom:18px; border:1px solid #dce7fb; border-radius:12px; background:#fff; color:var(--oa-primary); }
+.overview-attention strong { color:var(--oa-text-primary); white-space:nowrap; }
+.overview-attention > span { color:var(--oa-text-secondary); font-size:13px; }
+.overview-attention .button { margin-left:auto; }
+.overview-cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-bottom:18px; }
+.overview-card { display:flex; align-items:center; gap:18px; padding:22px; min-width:0; color:var(--oa-text-primary); }
+.overview-card > div { display:grid; gap:5px; min-width:0; }
+.overview-card strong { font-size:28px; font-weight:650; line-height:1.2; }
+.overview-card small { font-size:12px; color:var(--oa-text-secondary); }
+.overview-card small a, .overview-card small button { font-size:12px; }
+.overview-card > svg { margin-left:auto; color:var(--oa-text-muted); }
+.overview-card-icon { display:grid; place-items:center; flex-shrink:0; width:54px; height:54px; border-radius:50%; background:#eff5ff; color:var(--oa-primary); }
+.overview-card-icon.warning { background:#fff3ed; color:#e88337; }
+.overview-window { font-size:13px; color:var(--oa-text-secondary); padding:8px 12px; background:var(--oa-bg-surface); border:1px solid var(--oa-border-subtle); border-radius:7px; }
+.overview-topology { margin-bottom:18px; overflow:hidden; }
+.overview-topology-actions { display:flex; align-items:center; gap:16px; }
+.overview-map-footer { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:8px; }.overview-map-footer details { max-width:70%; text-align:right; }.overview-map-footer summary { cursor:pointer; }.overview-map-footer details p { margin:6px 0 0; line-height:1.7; }.overview-topology-actions { flex-wrap:wrap; gap:8px; }.overview-topology .panel-header { gap:12px; flex-wrap:wrap; }
+.overview-topology .obs-topology-canvas { height:350px; min-height:300px; }
+.overview-source-note { padding:10px 20px; font-size:12px; color:var(--oa-text-muted); margin:0; line-height:1.7; }
+.overview-activity { margin-bottom:20px; }
+.overview-activity-list { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:10px 22px 14px; gap:24px; }
+.overview-activity-list > a { display:grid; align-content:start; gap:9px; padding:0 0 0 17px; border-left:2px solid #cdddff; min-width:0; color:var(--oa-text-primary); }
+.overview-activity-list strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:500; }
+.overview-activity-list time, .overview-activity-list span { color:var(--oa-text-secondary); font-size:12px; }
+.overview-activity-list .status-badge { font-size:11px; }
+@media(max-width:1100px) { .overview-card { padding:18px 14px; gap:12px; }.overview-card-icon { width:42px; height:42px; }.overview-card strong { font-size:24px; } }
+@media(max-width:760px) { .overview-cards { grid-template-columns:1fr; }.overview-attention { flex-wrap:wrap; }.overview-attention .button { margin-left:0; }.overview-topology-actions { flex-wrap:wrap; gap:8px; }.overview-activity-list { grid-template-columns:repeat(2,minmax(0,1fr)); }.overview-window { display:none; } }
+.dashboard-page.oa-dashboard { gap:16px; }
+.oa-dashboard > .overview-attention, .oa-dashboard > .overview-cards, .oa-dashboard > .overview-topology, .oa-dashboard > .overview-activity { margin-bottom:0; }
+.oa-dashboard .oa-page-actions { display:flex; flex-wrap:nowrap; align-items:center; }
+.oa-dashboard .oa-page-actions select { width:150px; flex:none; }
+.oa-dashboard .overview-card { min-height:96px; padding:18px 20px; }
+.oa-dashboard .overview-activity .panel-header { min-height:60px; padding:14px 20px; }
+.oa-dashboard .overview-topology .panel-header { padding:14px 20px; }
+.oa-dashboard .overview-topology .obs-topology-canvas { height:340px; min-height:340px; }
+@media(max-width:760px) { .oa-dashboard .oa-page-actions { flex-wrap:wrap; }.oa-dashboard .overview-card { min-height:80px; } }
+/* Core overview has its own compact layout, independent from the full-map saved layout. */
+.oa-dashboard .overview-topology .obs-topology-canvas { height:clamp(320px,calc(100dvh - 350px),580px); min-height:320px; }
+.oa-dashboard .overview-topology .panel-header { padding:10px 16px; min-height:54px; }
+.oa-dashboard .overview-card { min-height:82px; padding:10px 18px; }
+.oa-dashboard .overview-card > div { gap:2px; }
+.oa-dashboard .overview-card > div > span { font-size:13px; line-height:18px; }
+.oa-dashboard .overview-card small, .oa-dashboard .overview-card small .text-button { line-height:17px; }
+.oa-dashboard .overview-card strong { line-height:28px; }
+.oa-dashboard .overview-topology .panel-header p { line-height:18px; margin-top:3px; }
+.oa-dashboard .overview-card-icon { width:42px; height:42px; }
+.oa-dashboard .overview-card strong { font-size:26px; }
+.oa-dashboard .overview-activity-list { padding:10px 16px 14px; }
+@media(max-width:760px) { .oa-dashboard .overview-topology .obs-topology-canvas { height:360px; }.overview-cards { gap:8px; }.oa-dashboard .overview-card { min-height:65px; }.oa-dashboard .overview-card strong { font-size:22px; } }

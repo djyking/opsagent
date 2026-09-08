@@ -106,17 +106,24 @@ class AgentMessaging {
                         """)) {
             String id = row.get("id").toString();
             try {
-                service.automatic(AgentJson.read(row.get("payload_json").toString()));
+                var payload =
+                        (com.fasterxml.jackson.databind.node.ObjectNode)
+                                AgentJson.read(row.get("payload_json").toString());
+                String boundRun = service.automatic(payload);
+                payload.put("boundRunId", boundRun);
+                payload.put("boundTicketId", store.get(boundRun).state().path("ticketId").asLong());
                 jdbc.update(
-                        "UPDATE agent_trigger SET status='DISPATCHED',last_error=NULL WHERE id=?",
+                        "UPDATE agent_trigger SET"
+                                + " status='DISPATCHED',last_error=NULL,payload_json=? WHERE id=?",
+                        payload.toString(),
                         id);
             } catch (Exception exception) {
                 String message =
                         exception.getMessage() == null ? "自动触发暂不可用" : exception.getMessage();
                 jdbc.update(
                         """
-                        UPDATE agent_trigger SET last_error=?,next_attempt=TIMESTAMPADD(SECOND,30,NOW(3)) WHERE id=?
-                        """,
+UPDATE agent_trigger SET last_error=?,next_attempt=TIMESTAMPADD(SECOND,30,NOW(3)) WHERE id=?
+""",
                         message.substring(0, Math.min(message.length(), 350)),
                         id);
             }

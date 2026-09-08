@@ -46,11 +46,13 @@ class DemoNotificationBroker {
     DemoNotificationBroker(
             DemoRedis receipts,
             @Value("${ops.demo.rabbitmq-host:demo-rabbitmq}") String host,
-            @Value("${ops.demo.rabbitmq-password:}") String password) {
+            @Value("${ops.demo.rabbitmq-password:}") String password,
+            @Value("${ops.demo.rabbitmq-port:5672}") int port) {
         this.receipts = receipts;
         factory = new ConnectionFactory();
         factory.setHost(host);
-        factory.setPort(5672);
+        if (port < 1 || port > 65535) throw new IllegalArgumentException("INVALID_BROKER_PORT");
+        factory.setPort(port);
         factory.setVirtualHost(VHOST);
         factory.setUsername("opsagent_notification");
         factory.setPassword(password);

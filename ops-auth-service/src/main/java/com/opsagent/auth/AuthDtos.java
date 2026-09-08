@@ -36,6 +36,7 @@ final class AuthDtos {
 
     /**
      * 公开注册只接受账号资料，不接受角色或权限字段。
+     *
      * @author heyu
      * @since 2026/9/3
      */
@@ -50,7 +51,11 @@ final class AuthDtos {
      * @author heyu
      * @since 2026/8/1
      */
-    record RefreshRequest(@NotBlank String refreshToken) {}
+    record RefreshRequest(@NotBlank String refreshToken, Instant lastActivityAt) {
+        RefreshRequest(String refreshToken) {
+            this(refreshToken, null);
+        }
+    }
 
     /**
      * 认证令牌响应数据。
@@ -59,7 +64,29 @@ final class AuthDtos {
      * @since 2026/8/1
      */
     record TokenResponse(
-            String accessToken, String refreshToken, String tokenType, Instant expiresAt) {}
+            String accessToken,
+            String refreshToken,
+            String tokenType,
+            Instant expiresAt,
+            String sessionId,
+            Instant sessionStartedAt,
+            Instant sessionExpiresAt,
+            Instant idleExpiresAt,
+            Instant lastActivityAt) {
+        TokenResponse(
+                String accessToken, String refreshToken, String tokenType, Instant expiresAt) {
+            this(
+                    accessToken,
+                    refreshToken,
+                    tokenType,
+                    expiresAt,
+                    null,
+                    null,
+                    expiresAt,
+                    expiresAt,
+                    null);
+        }
+    }
 
     /**
      * 当前登录用户响应数据。

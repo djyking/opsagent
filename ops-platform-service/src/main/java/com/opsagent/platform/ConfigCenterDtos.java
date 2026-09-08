@@ -67,7 +67,16 @@ public final class ConfigCenterDtos {
             String content,
             String revision,
             String message,
-            Instant observedAt) {}
+            Instant observedAt,
+            Overview overview) {}
+
+    public record Overview(
+            String status,
+            String serviceId,
+            String instanceId,
+            Instant observedAt,
+            String message,
+            List<com.opsagent.common.security.RuntimeConfigurationSnapshot.Field> fields) {}
 
     public record Version(long id, String actor, String modifiedAt, String operation) {}
 

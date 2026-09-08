@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.core.ErrorCode;
 import com.opsagent.common.security.InternalActorTokens;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -116,7 +117,7 @@ class DemoTargetServiceTest {
     }
 
     @Test
-    void evidenceKeepsHistoricalOutcomeWithoutReusingAnotherLiveIncidentOrScenarioAnswer() {
+    void recoveredIncidentGetsIndependentLiveVerificationWithoutRewritingItsHistory() {
         var incident =
                 service.create(
                         new DemoTargetDtos.CreateScenario("NACOS_REDIS_CONFIG_DRIFT", 600), actor);
@@ -133,8 +134,13 @@ class DemoTargetServiceTest {
                         "evidence-recovery"),
                 actor);
         var history = service.evidence(incident.incidentId(), actor);
-        assertThat(history.path("current").asBoolean()).isFalse();
-        assertThat(history.path("snapshot").isNull()).isTrue();
+        assertThat(history.path("current").asBoolean()).isTrue();
+        assertThat(history.path("captureStatus").asText()).isEqualTo("LIVE_OBSERVATION");
+        assertThat(history.path("snapshot").path("business").path("httpStatus").asInt())
+                .isEqualTo(200);
+        assertThat(history.path("snapshot").path("incidentId").asText())
+                .isEqualTo(incident.incidentId());
+        assertThat(history.path("snapshot").path("observedAt").asText()).isNotBlank();
         assertThat(history.path("incident").path("status").asText()).isEqualTo("RECOVERED");
         assertThat(history.path("incident").path("recoverySource").asText()).isEqualTo("MANUAL");
         assertThat(history.path("observations")).hasSize(2);
@@ -143,9 +149,62 @@ class DemoTargetServiceTest {
         target.httpStatus = 503;
         service.snapshot(actor);
         var afterBackgroundFailure = service.evidence(incident.incidentId(), actor);
+        assertThat(afterBackgroundFailure.path("current").asBoolean()).isTrue();
+        assertThat(
+                        afterBackgroundFailure
+                                .path("snapshot")
+                                .path("business")
+                                .path("httpStatus")
+                                .asInt())
+                .isEqualTo(503);
         assertThat(afterBackgroundFailure.path("observations")).hasSize(2);
+        assertThat(afterBackgroundFailure.path("observations"))
+                .isEqualTo(history.path("observations"));
         assertThat(afterBackgroundFailure.path("observations").get(0).path("httpStatus").asInt())
                 .isEqualTo(200);
+    }
+
+    @Test
+    void anotherCurrentIncidentCannotVerifyAnOldRecoveredIncident() {
+        var incident =
+                service.create(
+                        new DemoTargetDtos.CreateScenario("NACOS_REDIS_CONFIG_DRIFT", 600), actor);
+        service.action(
+                new DemoTargetDtos.Action(
+                        incident.incidentId(),
+                        "RESTORE_CONFIGURATION",
+                        incident.expectedRevision(),
+                        "switch-recovery"),
+                actor);
+        var completed = service.evidence(incident.incidentId(), actor);
+        target.state.put("incidentId", UUID.randomUUID().toString());
+        var historical = service.evidence(incident.incidentId(), actor);
+        assertThat(historical.path("current").asBoolean()).isFalse();
+        assertThat(historical.path("captureStatus").asText()).isEqualTo("HISTORICAL");
+        assertThat(historical.path("snapshot").isNull()).isTrue();
+        assertThat(historical.path("observations")).isEqualTo(completed.path("observations"));
+        assertThat(historical.path("incident")).isEqualTo(completed.path("incident"));
+    }
+
+    @Test
+    void unavailableLiveTargetNeverFallsBackToHistoricalSuccessAsCurrentEvidence() {
+        var incident =
+                service.create(
+                        new DemoTargetDtos.CreateScenario("NACOS_REDIS_CONFIG_DRIFT", 600), actor);
+        service.action(
+                new DemoTargetDtos.Action(
+                        incident.incidentId(),
+                        "RESTORE_CONFIGURATION",
+                        incident.expectedRevision(),
+                        "unavailable-recovery"),
+                actor);
+        var completed = service.evidence(incident.incidentId(), actor);
+        target.unavailable = true;
+        var unavailable = service.evidence(incident.incidentId(), actor);
+        assertThat(unavailable.path("current").asBoolean()).isFalse();
+        assertThat(unavailable.path("captureStatus").asText()).isEqualTo("LIVE_TARGET_UNAVAILABLE");
+        assertThat(unavailable.path("snapshot").isNull()).isTrue();
+        assertThat(unavailable.path("observations")).isEqualTo(completed.path("observations"));
     }
 
     @Test
@@ -182,6 +241,7 @@ class DemoTargetServiceTest {
         private final ObjectNode state;
         private int httpStatus = 200;
         private boolean failAfterRestore;
+        private boolean unavailable;
         private int restoreCalls;
 
         FakeTarget(ObjectMapper json) {
@@ -200,6 +260,9 @@ class DemoTargetServiceTest {
 
         @Override
         ObjectNode snapshot() {
+            if (unavailable)
+                throw new BusinessException(
+                        ErrorCode.MIDDLEWARE_UNAVAILABLE, "LIVE_TARGET_UNAVAILABLE");
             return state.deepCopy();
         }
 

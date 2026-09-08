@@ -37,8 +37,10 @@ public class ContextAssembler {
         Map<Long, Integer> documentCounts = new HashMap<>();
         Set<Long> seenChunks = new HashSet<>();
         List<String> seenContent = new ArrayList<>();
-        int maximumPerDocument = singleDocumentScope
-                ? Integer.MAX_VALUE : Math.max(1, properties.getMaxChunksPerDocument());
+        int maximumPerDocument =
+                singleDocumentScope
+                        ? Integer.MAX_VALUE
+                        : Math.max(1, properties.getMaxChunksPerDocument());
         int tokenBudget = Math.max(100, properties.getMaxContextTokens());
         int tokens = 0;
         int duplicates = 0;
@@ -57,7 +59,9 @@ public class ContextAssembler {
                 break;
             }
             String sourceId = "S" + (sources.size() + 1);
-            sources.add(new ContextSource(sourceId, chunk, candidate.neighbor(), candidate.parentChunkId()));
+            sources.add(
+                    new ContextSource(
+                            sourceId, chunk, candidate.neighbor(), candidate.parentChunkId()));
             seenContent.add(normalize(chunk.content()));
             documentCounts.put(chunk.documentId(), count + 1);
             tokens += chunkTokens;
@@ -130,7 +134,7 @@ public class ContextAssembler {
         return 0.0D;
     }
 
-    private int approximateTokens(String text) {
+    private static int approximateTokens(String text) {
         int chinese = 0;
         int other = 0;
         for (int offset = 0; offset < text.length(); ) {
@@ -145,23 +149,51 @@ public class ContextAssembler {
         return Math.max(1, chinese + (other + 3) / 4);
     }
 
-    private String render(List<ContextSource> sources) {
+    static AssembledContext fitBytes(AssembledContext context, int maximumBytes) {
+        List<ContextSource> kept = new ArrayList<>();
+        for (ContextSource source : context.sources()) {
+            var candidate = new ArrayList<>(kept);
+            candidate.add(source);
+            if (AssistantTokenBudget.bytes(render(candidate)) <= Math.max(0, maximumBytes))
+                kept.add(
+                        new ContextSource(
+                                "S" + (kept.size() + 1),
+                                source.chunk(),
+                                source.neighbor(),
+                                source.parentChunkId()));
+        }
+        String text = render(kept);
+        return new AssembledContext(
+                text, List.copyOf(kept), approximateTokens(text), context.duplicateRemoved());
+    }
+
+    private static String render(List<ContextSource> sources) {
         if (sources.isEmpty()) {
             return "（没有检索到知识片段）";
         }
         StringBuilder result = new StringBuilder();
         for (ContextSource source : sources) {
             RetrievedChunk chunk = source.chunk();
-            result.append('[').append(source.sourceId()).append("]\n")
-                    .append("文档：").append(safe(chunk.documentName())).append('\n')
-                    .append("章节：").append(safe(chunk.headingPath())).append('\n')
-                    .append("页码：").append(pages(chunk)).append('\n')
-                    .append("正文：").append(chunk.content()).append("\n\n");
+            result.append('[')
+                    .append(source.sourceId())
+                    .append("]\n")
+                    .append("文档：")
+                    .append(safe(chunk.documentName()))
+                    .append('\n')
+                    .append("章节：")
+                    .append(safe(chunk.headingPath()))
+                    .append('\n')
+                    .append("页码：")
+                    .append(pages(chunk))
+                    .append('\n')
+                    .append("正文：")
+                    .append(chunk.content())
+                    .append("\n\n");
         }
         return result.toString();
     }
 
-    private String pages(RetrievedChunk chunk) {
+    private static String pages(RetrievedChunk chunk) {
         if (chunk.pageStart() == null) {
             return "未知";
         }
@@ -171,7 +203,7 @@ public class ContextAssembler {
         return chunk.pageStart() + "-" + chunk.pageEnd();
     }
 
-    private String safe(String text) {
+    private static String safe(String text) {
         return text == null || text.isBlank() ? "未知" : text.replace('\n', ' ');
     }
 
@@ -190,11 +222,7 @@ public class ContextAssembler {
      * @since 2026/9/3
      */
     record AssembledContext(
-            String text,
-            List<ContextSource> sources,
-            int tokenCount,
-            int duplicateRemoved) {
-    }
+            String text, List<ContextSource> sources, int tokenCount, int duplicateRemoved) {}
 
     /**
      * 关联 Source ID、检索切片及其邻居扩展来源。
@@ -203,15 +231,7 @@ public class ContextAssembler {
      * @since 2026/9/3
      */
     record ContextSource(
-            String sourceId,
-            RetrievedChunk chunk,
-            boolean neighbor,
-            Long parentChunkId) {
-    }
+            String sourceId, RetrievedChunk chunk, boolean neighbor, Long parentChunkId) {}
 
-    private record ContextCandidate(
-            RetrievedChunk chunk,
-            boolean neighbor,
-            Long parentChunkId) {
-    }
+    private record ContextCandidate(RetrievedChunk chunk, boolean neighbor, Long parentChunkId) {}
 }

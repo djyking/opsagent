@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
 import {
   ArrowLeft,
   Check,
@@ -48,6 +48,8 @@ import { parseTicketDescription } from "@/utils/ticket-description";
 import { usePageFeedback } from "@/composables/usePageFeedback";
 import ActionButton from "@/components/feedback/ActionButton.vue";
 import EventWorkspace from "@/components/events/EventWorkspace.vue";
+import { eventLifecycleApi, eventActionLabels, type EventLifecycle, type EventAction } from '@/api/event-lifecycle';
+import { definitelyRejected, eventRecordAuthor } from '@/utils/event-workspace';
 
 type TicketAction =
   | "accept"
@@ -88,6 +90,43 @@ const commentText = ref("");
 const workRecordType = ref<WorkRecordType>("DIAGNOSIS");
 const workRecordContent = ref("");
 const workRecordEvidence = ref("");
+const recordOpen = ref(false);
+const recordUnconfirmed = ref(false);
+const lifecycle = ref<EventLifecycle>();
+const lifecycleError = ref('');
+const eventAction = ref<EventAction>();
+const eventContent = ref('');
+const eventEvidence = ref('');
+const eventActionError = ref('');
+let eventAttempt: Parameters<typeof eventLifecycleApi.act>[1] | undefined;
+const eventUnconfirmed = ref(false);
+const needsEventEvidence = computed(() => !!eventAction.value && ['TECH_PASS', 'TECH_FAIL', 'BUSINESS_CONFIRM'].includes(eventAction.value));
+function closeRecord() { if (busy.value === 'work-record') return; if ((workRecordContent.value || workRecordEvidence.value) && !window.confirm('处理记录尚未保存，关闭后保留本页输入，是否关闭？')) return; recordOpen.value = false; }
+function openEventAction(value: EventAction) {
+  if (eventUnconfirmed.value) return;
+  eventAction.value = value; eventContent.value = ''; eventEvidence.value = ''; eventActionError.value = ''; eventAttempt = undefined;
+}
+function closeEventAction() { if (busy.value === 'event-action') return; if ((eventContent.value || eventEvidence.value) && !window.confirm('事件操作尚未提交，关闭后保留本页输入，是否关闭？')) return; eventAction.value = undefined; }
+onBeforeRouteLeave(() => (!workRecordContent.value && !eventContent.value) || window.confirm('当前有未提交内容，确定离开？'));
+async function refreshLifecycle() {
+  try { lifecycle.value = await eventLifecycleApi.read(id); lifecycleError.value = ''; }
+  catch (cause) { lifecycle.value = undefined; lifecycleError.value = cause instanceof Error ? cause.message : '事件确认规则读取失败'; }
+}
+async function submitEventAction() {
+  if (!eventAction.value || !lifecycle.value || busy.value || !eventContent.value.trim() || (needsEventEvidence.value && !eventEvidence.value.trim())) return;
+  busy.value = 'event-action'; eventActionError.value = '';
+  if (!eventAttempt) eventAttempt = { action: eventAction.value, version: lifecycle.value.version, requestId: crypto.randomUUID(), content: eventContent.value.trim(), evidence: eventEvidence.value.trim() };
+  eventUnconfirmed.value = true;
+  try {
+    lifecycle.value = await eventLifecycleApi.act(id, eventAttempt);
+    eventAttempt = undefined; eventUnconfirmed.value = false; eventAction.value = undefined; eventContent.value = ''; eventEvidence.value = '';
+    toast.show('事件操作已记录'); await load();
+  } catch (cause) {
+    const conflict = (cause as { status?: number })?.status === 409 || (cause as { code?: number })?.code === 40900;
+    if (definitelyRejected(cause) || conflict) { eventAttempt = undefined; eventUnconfirmed.value = false; await refreshLifecycle(); }
+    eventActionError.value = `${cause instanceof Error ? cause.message : '操作结果未确认'}${eventUnconfirmed.value ? '。重试将使用同一请求，不重复推进状态。' : ''}`;
+  } finally { busy.value = ''; }
+}
 const selectedFile = ref<File>();
 const dragActive = ref(false);
 const question = ref("");
@@ -133,11 +172,12 @@ const actionLabels = {
   waitConfirm: "提交业务确认",
   resolve: "标记已解决",
   reopen: "重新处理",
-  close: "确认关闭",
+  close: "关闭工单",
 };
 async function refreshTicket() {
   try { ticket.value = await ticketApi.detail(id); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '事件状态刷新失败'; }
+  await refreshLifecycle();
 }
 async function openDocuments() {
   activeTab.value = 'documents';
@@ -147,36 +187,24 @@ async function openDocuments() {
 async function load() {
   loading.value = true;
   error.value = "";
-  try {
-    [
-      ticket.value,
-      logs.value,
-      documents.value,
-      comments.value,
-      workRecords.value,
-      trace.value,
-      sla.value,
-    ] = await Promise.all([
-      ticketApi.detail(id),
-      ticketApi.logs(id),
-      documentApi.list(id),
-      ticketApi.comments(id),
-      ticketApi.workRecords(id),
-      auth.isDemo ? Promise.resolve(undefined) : ticketApi.trace(id),
-      itsmApi.ticketSla(id),
-    ]);
-    questions.value = (await aiApi.page(id)).records;
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : "加载失败";
-  } finally {
-    loading.value = false;
-  }
+  const tasks = await Promise.allSettled([
+    ticketApi.detail(id).then(value => { ticket.value = value; }),
+    ticketApi.logs(id).then(value => { logs.value = value; }),
+    documentApi.list(id).then(value => { documents.value = value; }),
+    ticketApi.comments(id).then(value => { comments.value = value; }),
+    ticketApi.workRecords(id).then(value => { workRecords.value = value; }),
+    auth.isDemo ? Promise.resolve() : ticketApi.trace(id).then(value => { trace.value = value; }),
+    itsmApi.ticketSla(id).then(value => { sla.value = value; }), refreshLifecycle(),
+  ]);
+  const failure = tasks.find(result => result.status === 'rejected');
+  if (failure?.status === 'rejected') error.value = `部分资料未能读取：${failure.reason instanceof Error ? failure.reason.message : '请重试'}`;
+  loading.value = false;
 }
 async function doAction() {
   if (!action.value) return;
   busy.value = "action";
   try {
-    ticket.value = await ticketApi.action(id, action.value, remark.value);
+    ticket.value = await ticketApi.action(id, action.value, remark.value, ticket.value?.version);
     toast.show(action.value === "accept" ? "工单已接取" : "工单状态已更新");
     action.value = "";
     remark.value = "";
@@ -333,7 +361,7 @@ async function addComment() {
 }
 async function addWorkRecord() {
   const content = workRecordContent.value.trim();
-  if (!content || busy.value === "work-record") return;
+  if (!content || busy.value === "work-record" || recordUnconfirmed.value) return;
   busy.value = "work-record";
   try {
     workRecords.value.push(
@@ -346,14 +374,27 @@ async function addWorkRecord() {
     workRecordContent.value = "";
     workRecordEvidence.value = "";
     recordSaved.value = true;
+    recordOpen.value = false;
     toast.show("处置记录已保存");
     clearTimeout(recordTimer);
     recordTimer = setTimeout(() => { recordSaved.value = false; }, 2200);
   } catch (e) {
+    recordUnconfirmed.value = !definitelyRejected(e);
     error.value = e instanceof Error ? e.message : "处置记录保存失败";
   } finally {
     busy.value = "";
   }
+}
+async function checkRecordResult() {
+  if (busy.value || !recordUnconfirmed.value) return;
+  busy.value = 'record-check';
+  try {
+    workRecords.value = await ticketApi.workRecords(id);
+    const found = workRecords.value.find(row => row.createBy === auth.user?.userId && row.recordType === workRecordType.value && row.content === workRecordContent.value.trim() && (row.evidence || '') === workRecordEvidence.value.trim());
+    if (found) { recordUnconfirmed.value = false; workRecordContent.value = ''; workRecordEvidence.value = ''; recordOpen.value = false; error.value = ''; toast.show('已找到保存的处理记录'); }
+    else error.value = '暂未找到对应记录，输入继续保留。请稍后再核对，避免重复提交。';
+  } catch (cause) { error.value = cause instanceof Error ? cause.message : '记录核对失败'; }
+  finally { busy.value = ''; }
 }
 const workRecordLabels: Record<WorkRecordType, string> = {
   DIAGNOSIS: "现象与诊断",
@@ -362,14 +403,18 @@ const workRecordLabels: Record<WorkRecordType, string> = {
   ROOT_CAUSE: "根因分析",
   BUSINESS_REPLY: "业务回复",
 };
-onMounted(load);
+onMounted(async () => {
+  await load();
+  if (route.query.record === '1' && ticket.value && !auth.isDemo) recordOpen.value = true;
+});
 </script>
 <template>
   <LoadingState v-if="loading && !ticket" class="page-loading" text="正在加载事件详情…" />
   <div v-else-if="ticket" class="detail-page ticket-detail-page">
-    <DetailHeader :identifier="ticket.ticketNo" :title="ticket.title">
+    <section v-if="activeTab === 'workspace'" class="event-compact-header"><div class="event-compact-heading"><h1>{{ ticket.title }}</h1><PriorityIndicator :value="ticket.priority" /><span class="event-state-label">{{ ticket.eventLegacyArchived ? '历史档案' : ticket.eventClosed ? '已关闭' : ticket.eventStage === 'VERIFYING' ? '恢复验证' : '处理中' }}</span><div class="event-compact-menu"><button v-if="availableActions.length === 1" class="button secondary" @click="action = availableActions[0]">{{ actionLabels[availableActions[0]] }}</button><details v-else-if="availableActions.length" class="ticket-action-menu"><summary class="button secondary">工单操作</summary><div><button v-for="nextAction in availableActions" :key="nextAction" @click="action = nextAction">{{ actionLabels[nextAction] }}</button></div></details><details class="ticket-action-menu"><summary class="button secondary">更多资料</summary><div><button @click="activeTab = 'overview'">事件资料</button><button @click="openDocuments">文档与问答</button><button @click="activeTab = 'records'">人工记录与回复</button><button @click="activeTab = 'activity'">工单状态历史</button></div></details></div></div><p>{{ ticket.eventId || `EVT-${ticket.id}` }} · {{ affectedService }} · 负责人 {{ ticket.assigneeId ? `#${ticket.assigneeId}` : '待分配' }} · 工单 {{ ticket.ticketNo }}<span v-if="sla"> · 解决截止 {{ formatDateTime(String(sla.resolutionDeadline)) }}</span></p></section>
+    <DetailHeader v-else :identifier="ticket.ticketNo" :title="ticket.title">
       <template #back><button class="text-button" @click="router.push('/tickets')"><ArrowLeft :size="16" />返回事件队列</button></template>
-      <template #badges><PriorityIndicator :value="ticket.priority" /><StatusBadge :value="ticket.status" /></template>
+      <template #badges><PriorityIndicator :value="ticket.priority" /><span class="event-state-label">{{ ticket.eventClosed ? '事件已关闭' : ticket.eventStage === 'VERIFYING' ? '恢复验证中' : '事件处理中' }}</span></template>
       <template #meta>
         <dl class="ticket-header-meta">
           <div><dt>受影响服务</dt><dd><code>{{ affectedService }}</code></dd></div>
@@ -380,12 +425,12 @@ onMounted(load);
       <template #actions>
         <router-link v-if="ticket.incidentId" class="button secondary" :to="{ path: '/automation', query: { ticketId: ticket.id } }">完整运行记录</router-link>
         <button v-if="availableActions.length === 1" class="button" :class="availableActions[0] === 'suspend' || availableActions[0] === 'reopen' ? 'secondary' : 'primary'" @click="action = availableActions[0]"><Check :size="16" />{{ actionLabels[availableActions[0]] }}</button>
-        <details v-else-if="availableActions.length" class="ticket-action-menu"><summary class="button primary">人工处置</summary><div><button v-for="nextAction in availableActions" :key="nextAction" @click="action = nextAction">{{ actionLabels[nextAction] }}</button></div></details>
+        <details v-else-if="availableActions.length" class="ticket-action-menu"><summary class="button secondary">工单操作</summary><div><button v-for="nextAction in availableActions" :key="nextAction" @click="action = nextAction">{{ actionLabels[nextAction] }}</button></div></details>
       </template>
-      <template #tabs><nav class="ticket-detail-tabs" aria-label="事件详情视图"><button :class="{ active: activeTab === 'workspace' }" :aria-pressed="activeTab === 'workspace'" @click="activeTab = 'workspace'">处置工作区</button><button :class="{ active: activeTab === 'overview' }" :aria-pressed="activeTab === 'overview'" @click="activeTab = 'overview'">事件资料</button><button :class="{ active: activeTab === 'documents' }" :aria-pressed="activeTab === 'documents'" @click="openDocuments">文档与问答</button><button :class="{ active: activeTab === 'records' }" :aria-pressed="activeTab === 'records'" @click="activeTab = 'records'">人工记录与回复</button><button :class="{ active: activeTab === 'activity' }" :aria-pressed="activeTab === 'activity'" @click="activeTab = 'activity'">活动时间线</button></nav></template>
+      <template #tabs><nav class="ticket-detail-tabs" aria-label="事件详情视图"><button :aria-pressed="false" @click="activeTab = 'workspace'">处置工作区</button><button :class="{ active: activeTab === 'overview' }" :aria-pressed="activeTab === 'overview'" @click="activeTab = 'overview'">事件资料</button><button :class="{ active: activeTab === 'documents' }" :aria-pressed="activeTab === 'documents'" @click="openDocuments">文档与问答</button><button :class="{ active: activeTab === 'records' }" :aria-pressed="activeTab === 'records'" @click="activeTab = 'records'">人工记录与回复</button><button :class="{ active: activeTab === 'activity' }" :aria-pressed="activeTab === 'activity'" @click="activeTab = 'activity'">活动时间线</button></nav></template>
     </DetailHeader>
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
-    <EventWorkspace v-if="activeTab === 'workspace'" :ticket="ticket" @refresh="refreshTicket" @question="openDocuments" @documents="openDocuments" @records="activeTab = 'records'" />
+    <EventWorkspace v-if="activeTab === 'workspace'" :ticket="ticket" :lifecycle="lifecycle" :lifecycle-error="lifecycleError" :records="workRecords" :logs="logs" :sla="sla" :can-resolve="availableActions.includes('resolve')" @refresh="load" @question="openDocuments" @documents="openDocuments" @records="recordOpen = true; workRecordType = 'ACTION'" @lifecycle="openEventAction" @resolve="action = 'resolve'" />
     <div v-show="activeTab !== 'workspace'" class="detail-grid" :class="{ 'detail-grid-full': activeTab === 'documents' || activeTab === 'records', 'detail-grid-activity': activeTab === 'activity' }">
       <div class="detail-main">
         <section v-show="activeTab === 'overview'" class="panel ticket-overview-panel">
@@ -565,7 +610,7 @@ onMounted(load);
           <div v-if="workRecords.length" class="work-record-list">
             <article v-for="record in workRecords" :key="record.id">
               <span>{{ workRecordLabels[record.recordType] }}</span>
-              <div><p>{{ record.content }}</p><code v-if="record.evidence">{{ record.evidence }}</code><small>记录 #{{ record.id }} · 用户 #{{ record.createBy }} · {{ new Date(record.createTime).toLocaleString("zh-CN") }}</small></div>
+              <div><p>{{ record.content }}</p><code v-if="record.evidence">{{ record.evidence }}</code><small>记录 #{{ record.id }} · {{ eventRecordAuthor(record) }} · {{ new Date(record.createTime).toLocaleString("zh-CN") }}</small></div>
             </article>
           </div>
           <div v-else class="empty-state small-empty">还没有结构化处置记录</div>
@@ -629,9 +674,11 @@ onMounted(load);
         </section>
       </aside>
     </div>
+    <BaseModal v-if="recordOpen" title="记录处理" @close="closeRecord"><form class="event-dialog-body" @submit.prevent="addWorkRecord"><p>工单 {{ ticket.ticketNo }} · 当前处理人 {{ ticket.assigneeId ? `用户 #${ticket.assigneeId}` : '待分配' }}</p><InlineError v-if="error" :message="error" /><FormField label="操作备注 *"><textarea v-model.trim="workRecordContent" required maxlength="2000" rows="7" :disabled="recordUnconfirmed || !!busy" placeholder="记录已核实的现象、处理动作和实际结果" /></FormField><details><summary>补充证据与记录类型</summary><FormField label="记录类型"><select v-model="workRecordType" :disabled="recordUnconfirmed || !!busy"><option v-for="(label, value) in workRecordLabels" :key="value" :value="value">{{ label }}</option></select></FormField><FormField label="证据（选填）"><input v-model.trim="workRecordEvidence" maxlength="1000" :disabled="recordUnconfirmed || !!busy" /></FormField></details><p>仅保存处理记录，不执行生产变更，也不提交恢复确认。</p><p v-if="recordUnconfirmed" class="event-notice">保存结果未确认，请刷新人工记录核对是否已保存；当前输入已保留，暂停重复提交。</p><button v-if="recordUnconfirmed" type="button" class="button secondary" :disabled="!!busy" @click="checkRecordResult">核对保存结果</button><button class="button primary" :disabled="!workRecordContent || !!busy || recordUnconfirmed">{{ busy === 'work-record' ? '保存中…' : '确认记录' }}</button></form></BaseModal>
+    <BaseModal v-if="eventAction" :title="eventActionLabels[eventAction]" @close="closeEventAction"><form class="event-dialog-body" @submit.prevent="submitEventAction"><p>事件 {{ lifecycle?.eventId }} · 本次操作由用户 #{{ auth.user?.userId }} 独立留痕。</p><InlineError v-if="eventActionError" :message="eventActionError" /><FormField :label="eventAction === 'RESULT' ? '实际处理结果 *' : '确认说明 *'"><textarea v-model.trim="eventContent" required maxlength="2000" rows="5" :disabled="eventUnconfirmed || !!busy" :placeholder="eventAction === 'TECH_PASS' ? '填写实际检查范围、指标或探针结果、采样时间与稳定观察结论' : '记录本次操作的事实与依据'" /></FormField><FormField :label="needsEventEvidence ? '检查结果或证据来源 *' : '证据来源（选填）'"><textarea v-model.trim="eventEvidence" :required="needsEventEvidence" maxlength="1000" rows="3" :disabled="eventUnconfirmed || !!busy" placeholder="填写检查结果、监控链接、采样时间或业务反馈依据" /></FormField><p v-if="eventAction === 'TECH_PASS'">这里记录人工核对的技术结论；机器探针证据可在验证明细中核对。缺少实际证据时请选择验证未通过。</p><p v-if="eventAction === 'BUSINESS_CONFIRM'">业务确认与技术验证分别记录；管理员可以兼任确认人。</p><p v-if="eventAction === 'CLOSE'">本次只关闭事件，知识仍需另行整理和审核发布。</p><button class="button primary" :disabled="!!busy || !eventContent || (needsEventEvidence && !eventEvidence)">{{ busy ? '提交中…' : eventUnconfirmed ? '使用同一请求重试' : '确认提交' }}</button></form></BaseModal>
     <BaseModal v-if="action" :title="actionLabels[action]" @close="action = ''"
       ><div class="action-confirm">
-        <p>本操作会推进工单状态且不可回退，请确认业务处理已经完成。</p>
+        <p>本操作更新工单状态。处理结果、技术恢复、业务确认及事件关闭分别记录。</p>
         <FormField label="操作备注"><textarea
             v-model.trim="remark"
             maxlength="512"

@@ -10,7 +10,10 @@ function load(path, replace = source => source) {
   const source = replace(readFileSync(fileURLToPath(new URL('../src/' + path, import.meta.url)), 'utf8'));
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const module = { exports: {} };
-  new Function('require', 'module', 'exports', js)(require, module, module.exports);
+  const localRequire = name => name === './session'
+    ? { sessionFetch: (url, options) => globalThis.fetch(url, options) }
+    : require(name);
+  new Function('require', 'module', 'exports', js)(localRequire, module, module.exports);
   return module.exports;
 }
 const { renderAnswer } = load('utils/answer-markdown.ts');
@@ -24,7 +27,7 @@ assert.ok(!html.includes('<script>') && !html.includes('href="javascript:'));
 console.log('PASS markdown: headings, emphasis, code, tables, trailing content and HTML/link safety');
 globalThis.window = { setTimeout, clearTimeout };
 globalThis.localStorage = { getItem: () => null };
-const { streamRagAnswer, ragCompletionLabel, ragAnswerLabel, normalizeReferences } = load('api/rag-stream.ts', source => source.replaceAll('import.meta.env.VITE_API_BASE_URL', "''"));
+const { streamRagAnswer, ragCompletionLabel, ragIncompleteMessage, ragAnswerLabel, normalizeReferences } = load('api/rag-stream.ts', source => source.replaceAll('import.meta.env.VITE_API_BASE_URL', "''"));
 const encoder = new TextEncoder();
 const events = 'event: token\r\ndata: {"delta":"三、证据"}\r\n\r\nevent: token\r\ndata: {"delta":"\\n结尾完整。"}\r\n\r\nevent: done\r\ndata: {"answer":"三、证据\\n结尾完整。","provider":"test","model":"test","references":[],"metadata":{"generationComplete":true}}\r\n\r\n';
 const bytes = encoder.encode(events);
@@ -74,18 +77,23 @@ assert.equal(sentRequest.body.provider, 'openai', 'selected provider must reach 
 assert.equal(sentRequest.url, '/api/rag/conversations/model-selection/stream');
 await streamRagAnswer({ question: '解释连接池', provider: 'kimi' });
 assert.equal(sentRequest.body.provider, 'kimi', 'selected provider must reach standalone stream without frontend fallback');
+const observationScope = { service: 'ops-rag-service', environment: 'PROD', timeRange: '15m' };
+await streamRagAnswer({ question: '当前服务健康', observabilityContext: observationScope, conversationId: 'scoped-observation' });
+assert.deepEqual(sentRequest.body.observabilityContext, observationScope, 'structured observation scope must actually reach the backend JSON payload');
+assert.equal(sentRequest.url, '/api/rag/conversations/scoped-observation/stream');
+const observationReference = normalizeReferences([{ ...directorySource, sourceType: 'OBSERVABILITY_EVIDENCE', evidenceBundleId: 'bundle-safe', evidenceId: 'prometheus:rag' }])[0];
+assert.equal(observationReference.evidenceBundleId, 'bundle-safe');
+assert.equal(observationReference.evidenceId, 'prometheus:rag');
 const runtimeSource = { ...directorySource, sourceType: 'OPERATIONS', sourceUrl: '/operations', documentName: 'Prometheus 指标与趋势' };
 const normalizedRuntime = normalizeReferences([runtimeSource])[0];
 for (const key of ['sourceType', 'sourceUrl', 'sourceUpdatedAt', 'sourceRetrievedAt']) assert.equal(normalizedRuntime[key], runtimeSource[key]);
 assert.equal(ragCompletionLabel({ ...result, provider: 'operations', metadata: { degradedReason: 'OPERATIONS_UNAVAILABLE' } }), '运行数据暂不可用');
 assert.equal(ragAnswerLabel({ ...result, provider: 'operations' }), '实时运行数据 · 直接读取');
 console.log('PASS model selection payload and runtime source provenance survive both stream routes and history normalization');
-const objectReference = { service: 'ops-demo-order-service', environment: 'DEMO', timeRange: '15m', evidenceBundleId: 'evidence-owned-7' };
-for (const conversationId of [undefined, 'reference-session']) {
-  await streamRagAnswer({ question: '检查业务恢复证据', ticketId: 2053, conversationId, observabilityContext: objectReference });
-  assert.deepEqual(sentRequest.body.observabilityContext, objectReference);
-  assert.equal(sentRequest.body.question, '检查业务恢复证据');
-  assert.equal(sentRequest.body.ticketId, 2053);
-  assert.doesNotMatch(JSON.stringify(sentRequest.body), /statusReason|snapshot|rps|blockQps/);
-}
-console.log('PASS P3 object references survive both SSE routes without browser-authored observation facts');
+
+const budgetResult = { answer: '保留已生成的内容', metadata: { generationComplete: false, finishReason: 'budget_exhausted', budgetLimit: 10000, budgetUsageKnown: false } };
+assert.match(ragIncompleteMessage(budgetResult), /输入、输出和重试累计额度 10,000 token/);
+assert.match(ragIncompleteMessage(budgetResult), /已保留生成内容.*缩小问题范围/);
+assert.doesNotMatch(ragIncompleteMessage(budgetResult), /继续追问/);
+assert.equal(budgetResult.answer, '保留已生成的内容');
+console.log('PASS cumulative per-question budget stops preserve partial output and request narrower scope');

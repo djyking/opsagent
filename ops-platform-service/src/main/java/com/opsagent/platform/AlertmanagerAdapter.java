@@ -25,14 +25,16 @@ import java.util.Map;
 @Component
 class AlertmanagerAdapter {
     private final ObjectMapper json;
+    private final AlertTargetResolver targets;
     private final HttpClient http =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
 
     @Value("${ops.observability.alertmanager-url:http://localhost:9093}")
     private String baseUrl;
 
-    AlertmanagerAdapter(ObjectMapper json) {
+    AlertmanagerAdapter(ObjectMapper json, AlertTargetResolver targets) {
         this.json = json;
+        this.targets = targets;
     }
 
     /**
@@ -109,15 +111,16 @@ class AlertmanagerAdapter {
             JsonNode body = json.readTree(response.body());
             if (!body.isArray()) throw new IllegalStateException("Alertmanager invalid response");
             List<Alert> alerts = new ArrayList<>();
+            int unresolved = 0;
             for (JsonNode row : body) {
                 JsonNode labels = row.path("labels");
                 String state = row.path("status").path("state").asText();
                 if (!"active".equals(state)) continue;
-                String ci =
-                        labels.path("service_ci_code")
-                                .asText(
-                                        labels.path("ci_code")
-                                                .asText(labels.path("service").asText()));
+                var target = targets.resolve(labels);
+                if (!target.matched()) {
+                    unresolved++;
+                    continue;
+                }
                 alerts.add(
                         new Alert(
                                 row.path("fingerprint").asText(),
@@ -128,16 +131,20 @@ class AlertmanagerAdapter {
                                 ObservabilitySanitizer.summary(
                                         row.path("annotations").path("summary").asText()),
                                 row.path("startsAt").asText(),
-                                ci,
+                                target.targetCode(),
                                 labels.path("job").asText(),
                                 "FIRING",
-                                labels.path("environment")
-                                        .asText()
-                                        .replace("ISOLATED_DEMO", "DEMO"),
+                                target.environment(),
                                 labels.path("namespace").asText(),
                                 labels.path("cluster").asText()));
             }
-            return new Snapshot(true, "Alertmanager 当前活动告警", now, List.copyOf(alerts));
+            return new Snapshot(
+                    unresolved == 0,
+                    unresolved == 0
+                            ? "Alertmanager 当前活动告警"
+                            : "存在 " + unresolved + " 条告警的服务或环境关联待核对，不能据此判断零告警",
+                    now,
+                    List.copyOf(alerts));
         } catch (Exception exception) {
             return new Snapshot(false, "Alertmanager 数据暂不可用，不能据此判断零告警", now, List.of());
         }

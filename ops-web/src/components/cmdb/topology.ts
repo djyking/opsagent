@@ -7,6 +7,7 @@ export interface PositionedNode { node: CiNode; x: number; y: number; role: stri
 export const NODE_WIDTH = 224;
 export const NODE_HEIGHT = 126;
 export const ciTypes = {
+  HOST: { label: "主机", icon: Server, tone: "service" },
   SERVICE: { label: "服务", icon: Server, tone: "service" },
   DATABASE: { label: "数据库", icon: Database, tone: "database" },
   CACHE: { label: "缓存", icon: Layers3, tone: "cache" },
@@ -21,6 +22,16 @@ export const ciTypes = {
   VECTOR_DATABASE: { label: "向量库", icon: Boxes, tone: "database" },
   EXTERNAL_API: { label: "外部 API", icon: Globe, tone: "gateway" },
   GOVERNANCE: { label: "流量治理", icon: ShieldCheck, tone: "registry" },
+  APPLICATION: { label: "应用服务", icon: Server, tone: "service" },
+  MYSQL: { label: "MySQL", icon: Database, tone: "database" },
+  POSTGRESQL: { label: "PostgreSQL", icon: Database, tone: "database" },
+  REDIS: { label: "Redis", icon: Layers3, tone: "cache" },
+  RABBITMQ: { label: "RabbitMQ", icon: Radio, tone: "queue" },
+  ELASTICSEARCH: { label: "Elasticsearch", icon: Search, tone: "search" },
+  QDRANT: { label: "Qdrant", icon: Boxes, tone: "database" },
+  NACOS: { label: "Nacos", icon: Network, tone: "registry" },
+  PROMETHEUS: { label: "Prometheus", icon: Activity, tone: "monitor" },
+  GRAFANA: { label: "Grafana", icon: Activity, tone: "monitor" },
 };
 export function ciType(value: unknown) {
   const key = String(value || "");

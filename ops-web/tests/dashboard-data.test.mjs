@@ -60,23 +60,32 @@ function deferred() {
 
 function setup(overrides = {}, isAdmin = true) {
   const mounted = [], unmounting = [], calls = [];
+  const actor = vue.reactive({ isAdmin, user: { userId: 7, roles: isAdmin ? ['ADMIN'] : ['USER'] } });
+  const inbox = vue.reactive({ count: 50, decisionVersion: 0, show() {} });
   const api = {
     tickets: async () => [],
     sla: async () => sla(),
     oncall: async () => ({ fallback: true, message: '当前无有效排班', members: [] }),
     monitor: async () => monitor(),
     alerts: async () => [],
+    topology: async () => ({ nodes: [], edges: [], dataSources: [], checkedAt: '2026-09-07T08:00:00' }),
+    approvals: async () => ({ pendingApprovals: 75 }),
     ...overrides,
   };
   const lifecycleVue = { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounting.push(fn) };
   const read = (key, details) => { calls.push({ key, ...details }); return api[key](); };
   const imports = {
     vue: lifecycleVue,
-    '@/components/dashboard/OperationsDecision.vue': SlotSurface,
-    '@/components/dashboard/DashboardTopology.vue': SlotSurface,
-    '@/stores/auth': { useAuthStore: () => ({ isAdmin }) },
+    '@/components/observability/ServiceTopology.vue': SlotSurface,
+    '@/components/events/EventActivityStrip.vue': SlotSurface,
+    '@/api/observability': { observabilityApi: { topology: () => read('topology') } },
+    '@/stores/approval-inbox': { useApprovalInboxStore: () => inbox },
+    '@/styles/pages/dashboard-overview.css': {},
+    '@/utils/observability': evaluate(readFileSync(new URL('../src/utils/observability.ts', import.meta.url), 'utf8'), {}),
+    '@/stores/auth': { useAuthStore: () => actor },
     '@/composables/usePageFeedback': { usePageFeedback: () => ({}) },
     '@/api/http': { request: ({ url }) => {
+      if (url === '/api/automation/summary') return read('approvals', { url });
       if (url === '/api/tickets') return read('tickets', { url });
       if (url === '/api/platform/monitor/summary') return read('monitor', { url });
       throw new Error(`Unexpected dashboard request: ${url}`);
@@ -104,7 +113,7 @@ function setup(overrides = {}, isAdmin = true) {
   const state = scope.run(() => component.setup({}, { expose() {} }));
   const ready = Promise.all(mounted.map(fn => fn()));
   return {
-    state, api, calls, ready,
+    state, api, calls, ready, actor, inbox,
     metric: key => state.overviewMetrics.value.find(item => item.key === key),
     async html() {
       const context = vue.proxyRefs(state);
@@ -119,7 +128,7 @@ function setup(overrides = {}, isAdmin = true) {
 // Relevant work after the old 100-row cutoff must contribute to every summary.
 {
   const rows = Array.from({ length: 120 }, (_, index) => ticket(index + 1));
-  rows.push(ticket(121, { priority: 'URGENT', status: 'PROCESSING' }), ticket(122, { priority: 'HIGH', status: 'WAITING_CONFIRM' }), ticket(123, { priority: 'URGENT', status: 'CLOSED' }), ticket(124, { priority: 'HIGH', status: 'REJECTED' }), ticket(125, { status: 'RESOLVED' }));
+  rows.push(ticket(121, { priority: 'URGENT', status: 'PROCESSING' }), ticket(122, { priority: 'HIGH', status: 'WAITING_CONFIRM' }), ticket(123, { priority: 'URGENT', status: 'CLOSED', eventClosed: true }), ticket(124, { priority: 'HIGH', status: 'REJECTED', eventClosed: true }), ticket(125, { status: 'RESOLVED' }));
   const app = setup({ tickets: async () => rows });
   try {
     await app.ready;
@@ -128,7 +137,7 @@ function setup(overrides = {}, isAdmin = true) {
     assert.equal(app.metric('priority').value, 2);
     assert.equal(app.metric('processing').value, 1);
     assert.equal(app.state.statusMetrics.value.reduce((total, item) => total + item.value, 0), 125);
-    assert.equal(app.state.visibleTickets.value.length, 5, 'preview size must not become the total count');
+    assert.equal(app.state.visibleTickets.value.length, 7, 'preview size must not become the total count');
     assert.ok(app.state.visibleTickets.value.some(row => row.id === 121));
     assert.match(await app.html(), /当前范围 123 项/);
   } finally { app.stop(); }
@@ -211,9 +220,9 @@ for (const missing of ['tickets', 'sla', 'alerts']) {
   const rows = [
     ticket(11, { priority: 'HIGH', status: 'WAITING_CONFIRM', updateTime: '2026-09-01T08:00:00' }),
     ticket(22, { priority: 'URGENT', status: 'RESOLVED', updateTime: '2026-09-05T08:00:00' }),
-    ticket(33, { priority: 'HIGH', status: 'CLOSED', updateTime: '2026-09-10T08:00:00' }),
+    ticket(33, { priority: 'HIGH', status: 'CLOSED', eventClosed: true, updateTime: '2026-09-10T08:00:00' }),
     ticket(44, { priority: 'LOW', status: 'PROCESSING', updateTime: '2026-09-06T08:00:00' }),
-    ticket(55, { priority: 'URGENT', status: 'REJECTED', updateTime: '2026-09-08T08:00:00' }),
+    ticket(55, { priority: 'URGENT', status: 'REJECTED', eventClosed: true, updateTime: '2026-09-08T08:00:00' }),
     ticket(66, { priority: 'HIGH', status: 'ASSIGNED', updateTime: '2026-09-07T08:00:00' }),
     ticket(77, { priority: 'MEDIUM', status: 'WAITING_CONFIRM', updateTime: '2026-09-09T08:00:00' }),
     ticket(88, { priority: 'HIGH', status: 'SUSPENDED', updateTime: '2026-09-04T08:00:00' }),
@@ -253,3 +262,55 @@ for (const missing of ['tickets', 'sla', 'alerts']) {
 }
 
 console.log('PASS dashboard data: >100 tickets, unknown first loads, partial failures, stale refreshes/recovery, queue semantics, update-time ordering and role-filtered alerts');
+
+// Event closure is independent of ticket closure; scoped totals are never the 50-row inbox preview.
+{
+  const app = setup({ tickets: async () => [ticket(1, { status: 'CLOSED', eventClosed: false, assigneeId: 7 }), ticket(2, { status: 'RESOLVED', eventClosed: true, assigneeId: 7 }), ticket(3, { status: 'PROCESSING', assigneeId: 9 })] });
+  try {
+    await app.ready;
+    assert.deepEqual(app.state.activeTickets.value.map(t => t.id), [3, 1]);
+    assert.equal(app.state.myTickets.value.length, 1);
+    assert.equal(app.state.pendingCount.value, 76);
+    assert.match(await app.html(), /待审批 75/);
+  } finally { app.stop(); }
+}
+console.log('PASS independent event closure, personal ownership and untruncated approval totals');
+
+// The homepage uses the same freshness contract as the service graph.
+{
+  const observed = Date.now();
+  const app = setup({ topology: async () => ({ nodes: [{ ciCode: 'rag', ciName: 'RAG', ciType: 'SERVICE', environment: 'PROD', health: 'HEALTHY', observedAt: new Date(observed).toISOString(), observation: { maximumSampleAgeSeconds: 90 } }], edges: [], dataSources: [], checkedAt: new Date(observed).toISOString() }) });
+  try {
+    await app.ready; assert.equal(app.state.healthCount.value, 1);
+    app.state.observationClock.value = observed + 91000;
+    assert.equal(app.state.healthCount.value, 0); assert.equal(app.state.unknownCount.value, 1);
+  } finally { app.stop(); }
+}
+console.log('PASS homepage health expires using the shared observation validity window');
+
+{
+  const app = setup();
+  try {
+    await app.ready; app.api.approvals = async () => ({ pendingApprovals: 74 });
+    app.inbox.decisionVersion++;
+    await vue.nextTick(); await new Promise(setImmediate);
+    assert.equal(app.state.approvalTotal.value, 74);
+  } finally { app.stop(); }
+}
+{
+  const old = deferred();
+  const app = setup({ tickets: () => old.promise });
+  try {
+    app.api.tickets = async () => [ticket(2, { assigneeId: 8 })];
+    app.actor.user = { userId: 8, roles: ['USER'] };
+    await vue.nextTick(); await new Promise(setImmediate);
+    old.resolve([ticket(1, { assigneeId: 7 })]); await app.ready;
+    assert.deepEqual(app.state.tickets.value.map(row => row.id), [2]);
+  } finally { app.stop(); }
+}
+{
+  const app = setup({ tickets: async () => [ticket(1, { status: 'CLOSED', eventClosed: false, eventLegacyArchived: true }), ticket(2, { status: 'CLOSED', eventClosed: false })] });
+  try { await app.ready; assert.deepEqual(app.state.activeTickets.value.map(row => row.id), [2]); }
+  finally { app.stop(); }
+}
+console.log('PASS live approval decisions, account response isolation and explicitly archived legacy events');

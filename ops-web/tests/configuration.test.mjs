@@ -48,7 +48,7 @@ function fixture() {
     configurationRun: async request => {calls.push(['run', structuredClone(request)]); return {id: 'created-run'};},
   };
   const module = evaluate(read('composables/useManagedConfiguration.ts'), { vue, '@/api/configuration': { configurationApi: api }, '@/api/configCenter': {configCenterApi: center} });
-  const manager = scope.run(() => module.useManagedConfiguration(() => auth.admin, () => auth.userId));
+  const manager = scope.run(() => module.useManagedConfiguration(() => auth.admin, () => auth.userId, runId => calls.push(['submitted', runId])));
   return { manager, api, center, auth, calls, stop() { manager.dispose(); scope.stop(); } };
 }
 async function prepare(app) {
@@ -88,6 +88,8 @@ console.log('PASS runtime content preservation and administrator-only validate/p
     app.manager.comment.value = '回退到初始基线'; await app.manager.confirm();
     assert.equal(app.calls.filter(x => x[0] === 'propose').length, 2);
     assert.equal(app.calls.filter(x => x[0] === 'propose')[1][2].rollbackVersionId, 91);
+    assert.equal(app.calls.filter(x => x[0] === 'publish' || x[0] === 'rollback').length, 0);
+    assert.deepEqual(app.calls.filter(x => x[0] === 'submitted'), [['submitted', 'created-run'], ['submitted', 'created-run']]);
   } finally { app.stop(); }
 }
 console.log('PASS reviewed publish/rollback payloads, baseline identity, comment validation and duplicate-click exclusion');
@@ -216,7 +218,7 @@ function view(app) {
     assert.equal(page.state.destination.value, undefined, 'An old actor cannot leave a discard prompt over a new draft');
     await app.manager.select('order-business'); page.state.tab.value = 'content';
     html = await page.html(); assert.equal([...html.matchAll(/readonly/g)].length, 3);
-    for (const label of ['校验并预览变更', '还原编辑', '确认发布配置', '回退到此版本']) assert.ok(!html.includes(label), label);
+    for (const label of ['校验并预览变更', '还原编辑', '确认提交发布审批', '回退到此版本']) assert.ok(!html.includes(label), label);
     page.state.tab.value = 'history'; assert.ok(!(await page.html()).includes('回退到此版本'));
     app.auth.admin = true; app.api.detail = async () => detail({ id: 'order-runtime', editable: false, canPublish: false,
       content: { redisPort: 6379, preservationMarker: 'ACTUAL-RUNTIME-CONTENT' } });
@@ -228,9 +230,32 @@ function view(app) {
 console.log('PASS actual ConfigurationView/FormField SSR: editable geometry, baseline label, readonly controls and runtime-only JSON');
 
 {
-  const calls = []; const api = evaluate(read('api/configuration.ts'), { './http': { request: async value => { calls.push(value); return {}; } } }).configurationApi;
-  const request = { versionId: 91, expectedRevision: 'e'.repeat(64), requestId: '00000000-0000-4000-8000-000000000007', comment: '核对版本' };
-  await api.rollback('order-business', request);
-  assert.deepEqual(calls, [{ method: 'POST', url: '/api/platform/configuration/managed/order-business/rollback', data: request }]);
+  const app = fixture();
+  try {
+    await app.manager.select('order-business');
+    const page = view(app);
+    app.manager.detail.value = detail({ revision: 'b'.repeat(64), appliedRevision: 'a'.repeat(64),
+      business: { httpStatus: 200, businessConfigurationRevision: 'a'.repeat(64) },
+      application: { applicationPause: { active: true } } });
+    let html = await page.html();
+    assert.match(html, /目标应用待确认/); assert.match(html, /HTTP 200 · 版本待确认/);
+    assert.match(html, /当前暂停，源发布不代表目标已应用/);
+    assert.equal(page.state.targetApplied.value, false); assert.equal(page.state.businessApplied.value, false);
+    app.manager.detail.value = detail({ business: { httpStatus: 200, businessConfigurationRevision: 'a'.repeat(64) } });
+    html = await page.html(); assert.match(html, /业务已采用当前版本/);
+    assert.equal(page.state.targetApplied.value, true); assert.equal(page.state.businessApplied.value, true);
+  } finally { app.stop(); }
 }
-console.log('PASS real configuration API rollback method, route and exact version/CAS/requestId payload');
+console.log('PASS Nacos publication and HTTP success cannot imply target/business application without matching revisions');
+
+{
+  const calls = []; const api = evaluate(read('api/configCenter.ts'), { './http': { request: async value => { calls.push(value); return {}; } } }).configCenterApi;
+  const request = { rollbackVersionId: 91, expectedRevision: 'e'.repeat(64), requestId: '00000000-0000-4000-8000-000000000007', comment: '核对版本' };
+  const run = { proposalId: request.requestId, immutableDigest: 'd'.repeat(64), requestId: request.requestId };
+  await api.propose('full-identity', request); await api.configurationRun(run);
+  assert.deepEqual(calls, [
+    { method: 'POST', url: '/api/platform/config-center/full-identity/proposals', data: request },
+    { method: 'POST', url: '/api/automation/configuration-runs', data: run },
+  ]);
+}
+console.log('PASS proposal and existing automation API routes retain exact rollback/CAS/digest/requestId payloads');

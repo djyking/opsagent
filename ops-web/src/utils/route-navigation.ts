@@ -26,7 +26,7 @@ export function parentLocation(route: RouteLike) {
   if (!route.meta.parentRouteName || route.meta.parentPath === route.path) return undefined;
   const query: Record<string, string> = {};
   // Retain only service scope; child filters and actions must not leak to the parent page.
-  for (const key of ['ciCode', 'environment', 'timeRange']) {
+  if (route.meta.navKey === 'observability') for (const key of ['ciCode', 'environment', 'timeRange']) {
     const value = route.query[key]; if (typeof value === 'string') query[key] = value;
   }
   return { name: route.meta.parentRouteName, query };

@@ -295,6 +295,7 @@ final class NodeObservationService {
                 "",
                 "series");
         addNative(result, snapshot, now, age, "sourceAlerts", "alertmanager_alerts", "", "alerts");
+        InfrastructureObservationContract.addEvidence(result, snapshot, now, age);
         return result;
     }
 
@@ -427,6 +428,17 @@ final class NodeObservationService {
                         .filter(java.util.Objects::nonNull)
                         .min(Instant::compareTo)
                         .orElse(null);
+        var nativeRead = evidence.get("infrastructureReadSuccess");
+        if (!InfrastructureObservationContract.kind(job).isBlank()) {
+            sampledAt = nativeRead == null ? null : nativeRead.sampledAt();
+            successfulAt =
+                    raw(snapshot, "opsagent_infra_last_success_timestamp_seconds", "").stream()
+                            .filter(s -> s.value() > 0 && fresh(s.observedAt(), now, age))
+                            .map(s -> Instant.ofEpochSecond((long) s.value()))
+                            .filter(at -> !at.isAfter(now.plusSeconds(15)))
+                            .min(Instant::compareTo)
+                            .orElse(null);
+        }
         long successful = freshUp.stream().filter(s -> s.value() == 1).count();
         String status;
         String reason;
@@ -460,6 +472,20 @@ final class NodeObservationService {
             status = "FAILED";
             reason = scrapeReason(snapshot.targets());
             message = "目标指标抓取失败；这不等于业务服务宕机，请核对实例抓取错误";
+        } else if (!InfrastructureObservationContract.kind(job).isBlank()
+                && nativeRead != null
+                && nativeRead.sampledAt() != null
+                && !fresh(nativeRead.sampledAt(), now, age)) {
+            status = "STALE";
+            reason = "STALE_NATIVE_CHECK";
+            message = "组件只读检查已过期；采集端点在线不续期检查证据";
+        } else if (!InfrastructureObservationContract.kind(job).isBlank()
+                && evidence.get("infrastructureReadSuccess") != null
+                && evidence.get("infrastructureReadSuccess").value() != null
+                && evidence.get("infrastructureReadSuccess").value() == 0) {
+            status = "FAILED";
+            reason = "INFRA_" + InfrastructureObservationContract.error(snapshot, now, age);
+            message = "采集端点在线，但组件只读检查失败；" + reason;
         } else if (successful < freshUp.size()
                 || successful < snapshot.targets().size()
                 || !snapshot.errors().isEmpty()
@@ -519,6 +545,8 @@ final class NodeObservationService {
     }
 
     private Set<String> required(String job) {
+        if (!InfrastructureObservationContract.kind(job).isBlank())
+            return InfrastructureObservationContract.required(job);
         if (job.contains("rabbitmq"))
             return Set.of("connections", "consumers", "messagesReady", "messagesUnacked");
         if (job.contains("nacos"))

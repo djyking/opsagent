@@ -31,9 +31,24 @@ public class JwtService {
         return issue(userId, username, roles, properties.getAccessTokenTtl());
     }
 
-    public IssuedToken issue(long userId, String username, List<String> roles, java.time.Duration ttl) {
+    public IssuedToken issueUntil(
+            long userId, String username, List<String> roles, Instant deadline) {
+        Instant now = Instant.now();
+        if (!deadline.isAfter(now)) throw new IllegalArgumentException("登录会话已到期");
+        Instant ordinary = now.plus(properties.getAccessTokenTtl());
+        return issueAt(
+                userId, username, roles, now, deadline.isBefore(ordinary) ? deadline : ordinary);
+    }
+
+    public IssuedToken issue(
+            long userId, String username, List<String> roles, java.time.Duration ttl) {
         Instant now = Instant.now();
         Instant expires = now.plus(ttl);
+        return issueAt(userId, username, roles, now, expires);
+    }
+
+    private IssuedToken issueAt(
+            long userId, String username, List<String> roles, Instant now, Instant expires) {
         String id = UUID.randomUUID().toString();
         String token =
                 Jwts.builder()

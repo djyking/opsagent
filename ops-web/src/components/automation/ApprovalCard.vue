@@ -20,11 +20,9 @@ function decide(approved: boolean) { if (valid.value) emit('decision', { approve
   <article class="approval-card">
     <header class="approval-card-heading"><span class="approval-card-icon"><ShieldCheck :size="22" /></span><div><span class="approval-card-eyebrow">{{ description.input ? '需要您补充信息' : '执行前需要您确认' }}</span><h3>{{ description.title }}</h3></div></header>
     <dl class="approval-card-facts">
-      <div><dt>操作目标</dt><dd>{{ description.target }}<RouterLink v-if="approval.ticketId > 0" :to="`/tickets/${approval.ticketId}`">工单 #{{ approval.ticketId }}</RouterLink><RouterLink v-else-if="description.configuration" to="/observability/config/managed?ciCode=ops-demo-order-service">查看配置与应用情况</RouterLink></dd></div>
+      <div><dt>操作目标</dt><dd>{{ description.target }}<RouterLink :to="`/tickets/${approval.ticketId}`">工单 #{{ approval.ticketId }}</RouterLink></dd></div>
       <div><dt>预期变化</dt><dd>{{ description.change }}</dd></div>
       <div><dt>影响范围</dt><dd>{{ description.scope }}</dd></div>
-      <div v-if="description.configuration"><dt>批准基础版本</dt><dd><code>{{ description.baseRevision || '未取得版本摘要' }}</code></dd></div>
-      <div v-for="change in description.configChanges" :key="change.field"><dt>{{ change.field }}</dt><dd>{{ change.before || '（空字符串）' }} → {{ change.after || '（空字符串）' }}</dd></div>
     </dl>
     <p v-if="description.prompt" class="approval-card-prompt">{{ description.prompt }}</p>
     <p class="approval-card-expiry"><Clock3 :size="15" /><span>有效期至 {{ date(approval.expires_at) }}</span></p>

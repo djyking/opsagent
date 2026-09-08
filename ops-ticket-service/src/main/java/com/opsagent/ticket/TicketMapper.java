@@ -15,6 +15,17 @@ public interface TicketMapper extends BaseMapper<Ticket> {
     Ticket lock(long id);
 
     @Update(
+            "UPDATE ticket SET version=version+1,update_time=NOW() WHERE id=#{id} AND"
+                    + " version=#{version} AND deleted=0")
+    int touch(long id, int version);
+
+    @Update(
+            "UPDATE ticket SET affected_ci_code=#{target},environment=#{environment},"
+                    + "version=version+1,update_time=NOW() WHERE id=#{id} AND version=#{version}"
+                    + " AND deleted=0")
+    int bindRecovery(long id, int version, String target, String environment);
+
+    @Update(
             "UPDATE ticket SET"
                     + " assignee_id=#{userId},status='ASSIGNED',version=version+1,update_time=NOW()"
                     + " WHERE id=#{id} AND status='CREATED' AND version=#{version} AND deleted=0")

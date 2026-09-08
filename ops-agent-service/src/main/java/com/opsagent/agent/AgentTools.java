@@ -137,7 +137,7 @@ class AgentTools {
                                 "string",
                                 "conclusionLevel",
                                 "string"),
-                        Set.of("summary", "evidence", "recommendation")));
+                        Set.of("summary", "evidence", "recommendation", "evidenceIds")));
         tools.add(
                 schema(
                         "ticket_resolve",
@@ -183,6 +183,20 @@ class AgentTools {
                             "enum",
                             AgentJson.tree(OfficialDocsSearch.GAPS.stream().sorted().toList()));
         }
+        if (name.equals("ticket_add_analysis")) {
+            ObjectNode ids =
+                    AgentJson.object()
+                            .put("type", "array")
+                            .put("maxItems", 8)
+                            .put("uniqueItems", true)
+                            .put(
+                                    "description",
+                                    "引用本运行证据映射中的 ev- ID；SUPPORTED 必填有效测量引用，缺口写 evidenceGaps。");
+            ids.set("items", AgentJson.object().put("type", "string").put("maxLength", 100));
+            properties.set("evidenceIds", ids);
+            if (properties.has("evidence"))
+                ((ObjectNode) properties.path("evidence")).put("maxLength", 700);
+        }
         parameters.set("properties", properties);
         parameters.set("required", AgentJson.tree(required.stream().sorted().toList()));
         function.set("parameters", parameters);
@@ -206,6 +220,9 @@ class AgentTools {
         args.fieldNames()
                 .forEachRemaining(
                         field -> {
+                            // 引用参数由写入准备前的专用校验给出可纠正反馈。
+                            if (name.equals("ticket_add_analysis") && field.equals("evidenceIds"))
+                                return;
                             if (!fields.contains(field)
                                     || !args.path(field).isTextual()
                                     || args.path(field).asText().length() > fieldLimit(field)) {
@@ -213,7 +230,8 @@ class AgentTools {
                             }
                         });
         for (JsonNode required : schema.path("parameters").path("required")) {
-            if (args.path(required.asText()).asText().isBlank())
+            if (!required.asText().equals("evidenceIds")
+                    && args.path(required.asText()).asText().isBlank())
                 throw AgentJson.invalid("缺少必填工具参数");
         }
         if (HIGH.contains(name)
@@ -409,9 +427,12 @@ class AgentTools {
                 .forEachRemaining(
                         field -> {
                             JsonNode property = parameters.path("properties").path(field);
-                            if (property.isMissingNode()
-                                    || args.path(field).asText().length()
-                                            > property.path("maxLength").asInt(Integer.MAX_VALUE))
+                            if (property.isMissingNode())
+                                throw AgentJson.invalid("工具参数超出本次运行的冻结协议");
+                            if (name.equals("ticket_add_analysis") && field.equals("evidenceIds"))
+                                return;
+                            if (args.path(field).asText().length()
+                                    > property.path("maxLength").asInt(Integer.MAX_VALUE))
                                 throw AgentJson.invalid("工具参数超出本次运行的冻结协议");
                             if (property.path("enum").isArray()) {
                                 boolean matched = false;
@@ -421,7 +442,8 @@ class AgentTools {
                             }
                         });
         for (JsonNode required : parameters.path("required")) {
-            if (args.path(required.asText()).asText().isBlank())
+            if (!required.asText().equals("evidenceIds")
+                    && args.path(required.asText()).asText().isBlank())
                 throw AgentJson.invalid("缺少冻结协议中的必填参数");
         }
     }
@@ -431,19 +453,7 @@ class AgentTools {
         validateForSnapshot(run, name, call.path("arguments"));
         String path = "/internal/agent/tickets/" + run.state().path("ticketId").asLong();
         if (name.equals("ticket_add_analysis")) {
-            if ("SUPPORTED".equals(call.path("arguments").path("conclusionLevel").asText())) {
-                JsonNode bundle = run.state().path("observabilityEvidence");
-                boolean referenced = false;
-                for (JsonNode entry : bundle.path("entries")) {
-                    String evidenceId = entry.path("id").asText();
-                    if (!evidenceId.isBlank()
-                            && call.path("arguments")
-                                    .path("evidence")
-                                    .asText()
-                                    .contains(evidenceId)) referenced = true;
-                }
-                if (!referenced) throw AgentJson.invalid("证据支持结论必须引用本运行后端证据包中的实际证据ID");
-            }
+            AgentEvidenceRegistry.validate(run, call.path("arguments"));
             JsonNode ticket = clients.call("ticket", path, "GET", null, actor);
             return AgentJson.object()
                     .set(
@@ -515,7 +525,9 @@ class AgentTools {
         }
         JsonNode ticket = clients.call("ticket", path, "GET", null, actor);
         String status = ticket.path("status").asText();
-        if (status.equals("RESOLVED") || status.equals("CLOSED")) {
+        boolean machineResult =
+                source.equals("AGENT_TOOL") && run.state().path("approvedRepair").isObject();
+        if (status.equals("CLOSED") || status.equals("RESOLVED") && !machineResult) {
             ObjectNode observation =
                     AgentJson.object()
                             .put("resolved", true)
@@ -530,6 +542,7 @@ class AgentTools {
                     case "CREATED" -> "ASSIGNED";
                     case "ASSIGNED", "SUSPENDED" -> "PROCESSING";
                     case "PROCESSING", "WAITING_CONFIRM" -> "RESOLVED";
+                    case "RESOLVED" -> "RESOLVED";
                     default -> "";
                 };
         if (next.isEmpty()) return waiting("MANUAL_REQUIRED", "当前状态需要人工处理", snapshot, episode);
@@ -554,6 +567,12 @@ class AgentTools {
                         .put("comment", comment.substring(0, Math.min(comment.length(), 500)));
         ObjectNode prepared =
                 AgentJson.object().put("recoverySource", snapshot.path("recoverySource").asText());
+        if (machineResult && next.equals("RESOLVED")) {
+            ObjectNode result = AgentJson.object();
+            result.set("approvedRepair", run.state().path("approvedRepair").deepCopy());
+            result.set("evidence", recoveryEvidence(snapshot, episode));
+            input.set("machineResult", result);
+        }
         prepared.set("body", ticketWrite(run, call, ticket, input));
         prepared.set("evidence", recoveryEvidence(snapshot, episode));
         return prepared;
@@ -645,7 +664,13 @@ class AgentTools {
                             + bounded(args.path("evidenceGaps").asText(), 250);
         }
         return input.put("summary", summary)
-                .put("evidence", args.path("evidence").asText())
+                .put(
+                        "evidence",
+                        args.path("evidence").asText()
+                                + (args.path("evidenceIds").isArray()
+                                                && !args.path("evidenceIds").isEmpty()
+                                        ? "\n证据引用：" + args.path("evidenceIds")
+                                        : ""))
                 .put("recommendation", args.path("recommendation").asText());
     }
 

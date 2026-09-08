@@ -99,7 +99,20 @@ public final class ObservabilityDtos {
             @Pattern(regexp = "[a-zA-Z0-9_.:-]{0,128}") String prometheusJob,
             @Pattern(regexp = "[a-zA-Z0-9_.:-]{0,128}") String sentinelApp,
             @Pattern(regexp = "[a-zA-Z0-9_.:-]{0,128}") String nacosDataId,
-            @Pattern(regexp = "[a-zA-Z0-9_.:-]{0,128}") String alertLabel) {}
+            @Pattern(regexp = "[a-zA-Z0-9_.:-]{0,128}") String alertLabel,
+            @Pattern(regexp = "[a-zA-Z0-9_.-]{0,64}") String hostCiCode,
+            @Pattern(regexp = "[a-zA-Z0-9_.-]{0,64}") String hostId,
+            @Size(max = 403)
+                    @Pattern(
+                            regexp =
+                                    "(?:(?:[A-Z]:|/[A-Za-z0-9_./-]*)(?:,(?:[A-Z]:|/[A-Za-z0-9_./-]*)){0,7})?")
+                    String hostDisks,
+            @Size(max = 403) String hostInterfaces) {
+        public Bindings(
+                String prometheusJob, String sentinelApp, String nacosDataId, String alertLabel) {
+            this(prometheusJob, sentinelApp, nacosDataId, alertLabel, null, null, null, null);
+        }
+    }
 
     /**
      * @author heyu

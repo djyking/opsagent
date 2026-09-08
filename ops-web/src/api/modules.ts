@@ -40,6 +40,8 @@ export const ticketApi = {
     const all = await request<Ticket[]>({ url: "/api/tickets" });
     const keyword = String(params.keyword || "").trim().toLowerCase();
     const status = String(params.status || "");
+    const eventScope = String(params.eventScope || "");
+    const assigneeId = params.assigneeId == null ? undefined : Number(params.assigneeId);
     const priority = String(params.priority || "");
     const pageNum = Math.max(Number(params.pageNum || 1), 1);
     const pageSize = Math.max(Number(params.pageSize || 10), 1);
@@ -50,6 +52,10 @@ export const ticketApi = {
           ticket.title.toLowerCase().includes(keyword) ||
           ticket.description.toLowerCase().includes(keyword)) &&
         (!status || ticket.status === status) &&
+        (eventScope !== 'OPEN' || (ticket.eventClosed !== true && ticket.eventLegacyArchived !== true)) &&
+        (eventScope !== 'ARCHIVED' || ticket.eventLegacyArchived === true) &&
+        (eventScope !== 'CLOSED' || ticket.eventClosed === true) &&
+        (assigneeId == null || ticket.assigneeId === assigneeId) &&
         (!priority || ticket.priority === priority),
     );
     const records = filtered.slice((pageNum - 1) * pageSize, pageNum * pageSize);
@@ -85,13 +91,14 @@ export const ticketApi = {
       | "reopen"
       | "close",
     remark: string,
+    expectedVersion?: number,
   ) => {
     const current = await request<Ticket>({ url: `/api/tickets/${id}` });
     if (action === "accept")
       return request<Ticket>({
         method: "POST",
         url: `/api/tickets/${id}/claim`,
-        data: { version: current.version },
+        data: { version: expectedVersion ?? current.version },
       });
     const targets = {
       start: "PROCESSING",
@@ -105,7 +112,7 @@ export const ticketApi = {
     return request<Ticket>({
       method: "POST",
       url: `/api/tickets/${id}/transition`,
-      data: { target: targets[action], version: current.version, remark },
+      data: { target: targets[action], version: expectedVersion ?? current.version, remark },
     });
   },
   logs: (id: number) =>
@@ -235,11 +242,11 @@ export const itsmApi = {
       method: "POST",
       url: `/api/knowledge/documents/${documentId}/submit-review`,
     }),
-  approveDocument: (documentId: number, comment = "") =>
+  approveDocument: (documentId: number, comment = "", version?: number) =>
     request<Record<string, unknown>>({
       method: "POST",
       url: `/api/knowledge/documents/${documentId}/approve`,
-      data: { comment },
+      data: { comment, version },
     }),
   rejectDocument: (documentId: number, comment: string) =>
     request<Record<string, unknown>>({

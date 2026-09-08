@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.opsagent.common.security.OpsPrincipal;
 
 import jakarta.validation.Validation;
 import jakarta.validation.ValidatorFactory;
@@ -21,9 +22,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -40,6 +44,7 @@ class SlaPaginationTest {
 
     @BeforeEach
     void setUp() {
+        actor(1, "ADMIN");
         DriverManagerDataSource datasource =
                 new DriverManagerDataSource(
                         "jdbc:h2:mem:sla-"
@@ -50,15 +55,15 @@ class SlaPaginationTest {
         jdbc = new JdbcTemplate(datasource);
         jdbc.execute(
                 """
-                CREATE TABLE ticket(id BIGINT PRIMARY KEY,ticket_no VARCHAR(64),title VARCHAR(128),
-                    priority VARCHAR(16),status VARCHAR(32),affected_ci_code VARCHAR(64),deleted INT)
-                """);
+CREATE TABLE ticket(id BIGINT PRIMARY KEY,ticket_no VARCHAR(64),title VARCHAR(128),
+    priority VARCHAR(16),status VARCHAR(32),affected_ci_code VARCHAR(64),deleted INT)
+""");
         jdbc.execute(
                 """
-                CREATE TABLE ticket_sla(id BIGINT PRIMARY KEY,ticket_id BIGINT,response_deadline TIMESTAMP,
-                    resolution_deadline TIMESTAMP,response_status VARCHAR(32),resolution_status VARCHAR(32),
-                    escalation_level INT)
-                """);
+CREATE TABLE ticket_sla(id BIGINT PRIMARY KEY,ticket_id BIGINT,response_deadline TIMESTAMP,
+    resolution_deadline TIMESTAMP,response_status VARCHAR(32),resolution_status VARCHAR(32),
+    escalation_level INT)
+""");
         Configuration configuration =
                 new Configuration(
                         new Environment(
@@ -72,6 +77,47 @@ class SlaPaginationTest {
     @AfterEach
     void tearDown() {
         session.close();
+        SecurityContextHolder.clearContext();
+    }
+
+    private void actor(long id, String role) {
+        SecurityContextHolder.getContext()
+                .setAuthentication(
+                        new UsernamePasswordAuthenticationToken(
+                                new OpsPrincipal(id, "test", "sla-test", List.of(role)),
+                                null,
+                                List.of()));
+    }
+
+    @Test
+    void userCannotInferOtherTicketsThroughRowsTotalsOrServiceOptions() {
+        jdbc.execute("ALTER TABLE ticket ADD creator_id BIGINT DEFAULT 1");
+        jdbc.execute("ALTER TABLE ticket ADD assignee_id BIGINT");
+        jdbc.execute("ALTER TABLE ticket ADD owner_actor_id BIGINT");
+        jdbc.execute("ALTER TABLE ticket ADD public_demo BOOLEAN DEFAULT FALSE");
+        insert(1, "own", "HIGH", "own-service", "RUNNING", LocalDateTime.now().plusHours(1), 0);
+        insert(
+                2,
+                "private",
+                "HIGH",
+                "hidden-service",
+                "RUNNING",
+                LocalDateTime.now().plusHours(1),
+                0);
+        jdbc.update("UPDATE ticket SET creator_id=3 WHERE id=1");
+        actor(3, "USER");
+        assertThat(service.page(query(1, 10, "all", "", "", "")).total()).isEqualTo(1);
+        assertThat(service.summary().counts().total()).isEqualTo(1);
+        assertThat(service.summary().services()).containsExactly("own-service");
+        assertThat(service.overview()).hasSize(1);
+        assertThat(service.page(query(1, 10, "all", "", "hidden-service", "")).total()).isZero();
+        actor(9, "USER");
+        assertThat(service.summary().counts().total()).isZero();
+        actor(9, "DEMO");
+        assertThat(service.summary().counts().total()).isZero();
+        jdbc.update("UPDATE ticket SET public_demo=TRUE WHERE id=2");
+        session.clearCache();
+        assertThat(service.summary().services()).containsExactly("hidden-service");
     }
 
     @Test
@@ -110,12 +156,12 @@ class SlaPaginationTest {
         jdbc.execute("ALTER TABLE ticket_sla ADD COLUMN policy_id BIGINT DEFAULT 1");
         jdbc.execute(
                 "ALTER TABLE ticket_sla ADD COLUMN create_time TIMESTAMP DEFAULT"
-                    + " CURRENT_TIMESTAMP");
+                        + " CURRENT_TIMESTAMP");
         jdbc.execute("ALTER TABLE ticket_sla ADD COLUMN next_check_time TIMESTAMP");
         jdbc.execute(
                 "CREATE TABLE ticket_sla_event(sla_id BIGINT,ticket_id BIGINT,event_type"
-                    + " VARCHAR(32),escalation_level INT,detail VARCHAR(255),create_time"
-                    + " TIMESTAMP)");
+                        + " VARCHAR(32),escalation_level INT,detail VARCHAR(255),create_time"
+                        + " TIMESTAMP)");
         jdbc.update("INSERT INTO sla_policy VALUES(1,80,10,60)");
         insert(1, "active", "HIGH", "order", "RUNNING", LocalDateTime.now().minusMinutes(1), 0);
         insert(2, "archived", "HIGH", "order", "RUNNING", LocalDateTime.now().minusMinutes(1), 1);
@@ -220,7 +266,8 @@ class SlaPaginationTest {
             LocalDateTime deadline,
             int deleted) {
         jdbc.update(
-                "INSERT INTO ticket VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO ticket(id,ticket_no,title,priority,status,affected_ci_code,deleted)"
+                        + " VALUES(?,?,?,?,?,?,?)",
                 id,
                 "OPS-" + id,
                 title,
@@ -229,8 +276,10 @@ class SlaPaginationTest {
                 ci,
                 deleted);
         jdbc.update(
-                "INSERT INTO ticket_sla(id,ticket_id,response_deadline,resolution_deadline,"
-                        + "response_status,resolution_status,escalation_level) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO"
+                        + " ticket_sla(id,ticket_id,response_deadline,resolution_deadline,"
+                        + "response_status,resolution_status,escalation_level)"
+                        + " VALUES(?,?,?,?,?,?,?)",
                 id,
                 id,
                 deadline,

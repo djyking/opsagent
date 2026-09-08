@@ -31,6 +31,12 @@ final class ObservabilityPromptContext {
             boolean degraded,
             String reason,
             int tokenEstimate) {
+        int inputOverhead() {
+            LlmRequest empty = new LlmRequest("", "", 1);
+            return AssistantTokenBudget.promptUpperBound(enrich(empty))
+                    - AssistantTokenBudget.promptUpperBound(empty);
+        }
+
         LlmRequest enrich(LlmRequest request) {
             return new LlmRequest(
                     request.systemPrompt() + RULES,
@@ -71,8 +77,9 @@ final class ObservabilityPromptContext {
         List<ContextAssembler.ContextSource> contexts = new ArrayList<>();
         List<RagService.Source> sources = new ArrayList<>();
         int index = offset;
+        boolean budgetLimited = false;
         for (var entry : evidence.entries()) {
-            String citation = "S" + (++index);
+            String citation = "S" + (index + 1);
             var data = JsonNodeFactory.instance.objectNode();
             data.put("evidenceId", entry.id());
             data.put("source", entry.source());
@@ -81,6 +88,19 @@ final class ObservabilityPromptContext {
             data.put("summary", entry.summary());
             data.set("data", entry.data());
             String serialized = data.toString();
+            if (AssistantTokenBudget.bytes(serialized) > 1400) {
+                data.remove("data");
+                data.put("detailOmittedForBudget", "完整数据未加入本次模型上下文，请只依据本条摘要和原始采样时间；完整证据在证据包中。");
+                serialized = data.toString();
+                budgetLimited = true;
+            }
+            if (AssistantTokenBudget.bytes(block.toString())
+                            + AssistantTokenBudget.bytes(serialized)
+                    > 2900) {
+                budgetLimited = true;
+                continue;
+            }
+            index++;
             block.append('[').append(citation).append("] ").append(serialized).append('\n');
             var chunk =
                     RetrievedChunk.from(
@@ -135,13 +155,18 @@ final class ObservabilityPromptContext {
                     .append(entry.observedAt() == null ? "未知" : entry.observedAt())
                     .append("。原始数据以引用的证据包为准。\n");
         }
+        if (budgetLimited) {
+            block.append("部分详细证据因本次问答额度未纳入，不得推断遗漏项为正常；完整证据需在服务证据包中核对。\n");
+            facts.append("本次模型仅使用预算内的证据摘要，完整证据仍保留在服务证据包中。\n");
+        }
         if (!evidence.available() || evidence.entries().isEmpty()) {
             facts.append("未取得足以判断该服务的观测证据，不能确认当前健康或根因。\n");
         }
         if (!evidence.gaps().isEmpty())
             facts.append("证据缺口：").append(String.join("；", evidence.gaps())).append("。\n");
         boolean degraded =
-                !evidence.available()
+                budgetLimited
+                        || !evidence.available()
                         || !evidence.gaps().isEmpty()
                         || !Set.of("READY", "COMPLETE", "GOOD", "OBSERVED")
                                 .contains(evidence.quality())

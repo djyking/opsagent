@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { legacyObservabilityLocation, pageMeta } from '@/utils/route-navigation';
+import { ensureAccessToken, SessionError } from '@/api/session';
 
 const router = createRouter({
   history: createWebHistory(),
@@ -49,9 +50,14 @@ router.beforeEach(async to => {
   const auth = useAuthStore();
   if (to.meta.public) return auth.isAuthenticated ? '/dashboard' : true;
   if (!auth.isAuthenticated) return { name: 'login', query: { redirect: to.fullPath } };
-  if (!auth.user) {
-    try { await auth.fetchMe(); }
-    catch { auth.logout(); return { name: 'login' }; }
+  try {
+    await ensureAccessToken();
+    if (!auth.user) await auth.fetchMe();
+  } catch (error) {
+    if (error instanceof SessionError && error.expired)
+      return { name: 'login', query: { redirect: to.fullPath, reason: 'expired' } };
+    // A network/server failure cancels this navigation, retaining the session and current form.
+    throw error;
   }
   if (to.meta.admin && !auth.isAdmin) return '/dashboard';
   return true;

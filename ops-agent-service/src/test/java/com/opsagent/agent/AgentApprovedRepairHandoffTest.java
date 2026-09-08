@@ -39,7 +39,10 @@ class AgentApprovedRepairHandoffTest {
         fixture.step();
         assertEquals(8, fixture.store.get(id).state().path("toolCount").asInt());
         assertEquals(4, fixture.store.get(id).state().path("turns").asInt());
-        assertEquals(17580, fixture.store.get(id).state().path("tokens").asInt());
+        assertEquals(
+                17580 + com.opsagent.common.core.QueryEmbeddingBudget.reserve("Redis连接故障如何核验"),
+                fixture.store.get(id).state().path("tokens").asInt());
+        assertEquals(1, fixture.store.get(id).state().path("toolAiReservations").size());
         fixture.step();
 
         var run = fixture.store.get(id);
@@ -259,7 +262,7 @@ class AgentApprovedRepairHandoffTest {
                                 default ->
                                         throw new AssertionError(
                                                 "No fifth model decision is needed after approved"
-                                                    + " repair");
+                                                        + " repair");
                             };
                     response.put("totalTokens", new int[] {1609, 2746, 4130, 9095}[round - 1]);
                     return response;
@@ -343,7 +346,7 @@ class AgentApprovedRepairHandoffTest {
                             firstAction,
                             body,
                             "Remote action must replay exact persisted idempotency key and"
-                                + " arguments");
+                                    + " arguments");
                 if (crashAfterAction) {
                     crashAfterAction = false;
                     throw new AssertionError("Crash after accepted remote repair");

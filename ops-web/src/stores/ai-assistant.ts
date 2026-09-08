@@ -3,8 +3,7 @@ import { defineStore } from 'pinia';
 import { useAuthStore } from '@/stores/auth';
 import { conversationApi, ragProviderApi, type AiProvider, type ProviderOption, type Conversation, type ConversationTurn } from '@/api/conversations';
 import { ragCompletionLabel, ragIncompleteMessage, streamRagAnswer } from '@/api/rag-stream';
-import { cleanAiContext, assistantQuestionBody, contextLabel, type AiContext } from '@/utils/ai-context';
-import { resolveAiObservabilityContext } from '@/api/ai-observability-context';
+import { cleanAiContext, contextualQuestion, contextLabel, serverObservabilityContext, type AiContext } from '@/utils/ai-context';
 
 export const useAiAssistantStore = defineStore('ai-assistant', () => {
   const auth = useAuthStore();
@@ -45,7 +44,7 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
   watch(() => [auth.isAuthenticated, auth.user?.userId], reset, { flush: 'sync' });
   function setContext(value: AiContext) { context.value = cleanAiContext(value); }
   function show(value?: AiContext) {
-    if (value) setContext({ ...value, page: value.page || context.value.page });
+    if (value) setContext({ ...context.value, ...value });
     open.value = true; minimized.value = false; initialize();
     void nextTick(() => questionInput.value?.focus());
   }
@@ -125,9 +124,8 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
     const requestController = new AbortController(); controller = requestController;
     let pending: ConversationTurn | undefined;
     try {
-      const observabilityContext = await resolveAiObservabilityContext(requestContext, requestController.signal);
       if (!valid(identity) || requestController.signal.aborted) return;
-      const submitted = assistantQuestionBody(value).trim().slice(0, 2000);
+      const submitted = contextualQuestion(value, requestContext);
       if (!sessionId.value) {
         const session = await conversationApi.create(); if (!valid(identity)) return;
         sessionId.value = session.id; sessions.value = [session, ...sessions.value]; total.value++;
@@ -136,7 +134,8 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
       const turn = reactive<ConversationTurn>({ id: -Date.now(), question: submitted, answer: '', status: 'PROCESSING', createTime: new Date().toISOString() });
       pending = turn; turns.value.push(turn); selectedTurnId.value = turn.id; question.value = ''; draftImported.value = false;
       await scrollBottom(); if (!valid(identity)) return;
-      const result = await streamRagAnswer({ question: submitted, topK: 5, conversationId: activeId, ...(observabilityContext ? { observabilityContext } : {}), provider: selectedProvider.value || undefined,
+      const result = await streamRagAnswer({ question: submitted, topK: 5, conversationId: activeId, provider: selectedProvider.value || undefined,
+        observabilityContext: serverObservabilityContext(requestContext, value),
         ...(requestContext.ticketId ? { ticketId: requestContext.ticketId } : {}) }, {
         onStatus: value => { if (valid(identity)) progress.value = value; },
         onToken: delta => {

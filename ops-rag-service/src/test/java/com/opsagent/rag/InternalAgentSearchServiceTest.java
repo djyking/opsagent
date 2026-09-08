@@ -95,6 +95,7 @@ class InternalAgentSearchServiceTest {
                 new InternalAgentController(
                         model,
                         service(),
+                        mock(InternalAgentUsageService.class),
                         "search-test-internal-secret-over-32-bytes",
                         "http://unused.test");
         assertThatThrownBy(() -> controller.models(null))

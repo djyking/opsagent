@@ -335,7 +335,7 @@ class PrometheusAdapter {
                     + "jvm_memory_(used|max)_bytes|rabbitmq_(connections|channel_consumers|queue_messages_ready|"
                     + "queue_messages_unacked|alarms_.*)|nacos_monitor|collections_total|collections_vector_total|"
                     + "app_status_recovery_mode|memory_resident_bytes|prometheus_tsdb_head_series|"
-                    + "alertmanager_alerts|grafana_stat_totals_instance\"}["
+                    + "alertmanager_alerts|grafana_stat_totals_instance|opsagent_infra_.*\"}["
                         + maximumSampleAge()
                         + "s]");
         return queries;

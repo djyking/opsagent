@@ -10,16 +10,32 @@ public class AiProviderException extends RuntimeException {
     private final String provider;
     private final int statusCode;
     private final FailureKind kind;
+    private final String diagnosticCode;
+    private final boolean responseStarted;
 
     AiProviderException(String provider, int statusCode, String message, Throwable cause) {
         this(provider, statusCode, message, cause, FailureKind.UNKNOWN);
     }
 
-    AiProviderException(String provider, int statusCode, String message, Throwable cause, FailureKind kind) {
+    AiProviderException(
+            String provider, int statusCode, String message, Throwable cause, FailureKind kind) {
+        this(provider, statusCode, message, cause, kind, kind.name(), false);
+    }
+
+    AiProviderException(
+            String provider,
+            int statusCode,
+            String message,
+            Throwable cause,
+            FailureKind kind,
+            String diagnosticCode,
+            boolean responseStarted) {
         super(message, cause);
         this.provider = provider;
         this.statusCode = statusCode;
         this.kind = kind;
+        this.diagnosticCode = diagnosticCode;
+        this.responseStarted = responseStarted;
     }
 
     String provider() {
@@ -30,8 +46,28 @@ public class AiProviderException extends RuntimeException {
         return statusCode;
     }
 
-    FailureKind kind() { return kind; }
+    FailureKind kind() {
+        return kind;
+    }
 
-    /** @author heyu */
-    enum FailureKind { HTTP, NETWORK, TIMEOUT, PROTOCOL, CANCELLED, UNKNOWN }
+    String diagnosticCode() {
+        return diagnosticCode;
+    }
+
+    boolean responseStarted() {
+        return responseStarted;
+    }
+
+    /**
+     * @author heyu
+     */
+    enum FailureKind {
+        HTTP,
+        NETWORK,
+        TIMEOUT,
+        PROTOCOL,
+        CANCELLED,
+        BUDGET,
+        UNKNOWN
+    }
 }

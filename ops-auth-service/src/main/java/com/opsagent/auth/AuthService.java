@@ -37,6 +37,12 @@ public class AuthService {
     @Value("${ops.auth.demo-enabled:false}")
     private boolean demoEnabled;
 
+    @Value("${ops.auth.session-idle-timeout:PT2H}")
+    private Duration sessionIdleTimeout = Duration.ofHours(2);
+
+    @Value("${ops.auth.session-max-lifetime:PT24H}")
+    private Duration sessionMaxLifetime = Duration.ofHours(24);
+
     AuthService(
             UserMapper users,
             RefreshTokenMapper refreshTokens,
@@ -104,17 +110,42 @@ public class AuthService {
     TokenResponse refresh(RefreshRequest req) {
         // Refresh Token 仅以 SHA-256 摘要落库，避免数据库泄露后直接重放原始令牌。
         String hash = hash(req.refreshToken());
-        Long userId = refreshTokens.validUser(hash);
-        if (userId == null)
+        RefreshTokenMapper.RefreshLease lease = refreshTokens.lockLease(hash);
+        Instant now = Instant.now();
+        if (lease == null || lease.revoked() || !instant(lease.expireTime()).isAfter(now))
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "Refresh Token 无效或已过期");
-        refreshTokens.revoke(hash);
-        User u = users.selectById(userId);
+        Instant started =
+                instant(
+                        lease.sessionStartedAt() == null
+                                ? lease.createTime()
+                                : lease.sessionStartedAt());
+        Instant absolute =
+                lease.absoluteExpiresAt() == null
+                        ? started.plus(sessionMaxLifetime)
+                        : instant(lease.absoluteExpiresAt());
+        Instant previous =
+                lease.lastActivityAt() == null ? started : instant(lease.lastActivityAt());
+        Instant activity =
+                SessionLifetime.activity(
+                        previous, req.lastActivityAt(), absolute, now, sessionIdleTimeout);
+        User u = users.selectById(lease.userId());
         if (u == null
                 || !"enable".equalsIgnoreCase(u.getStatus())
                 || !Integer.valueOf(0).equals(u.getDeleted())) {
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "账号不可用，请重新登录或联系管理员");
         }
-        return issue(u);
+        String sessionId = lease.sessionId();
+        if (sessionId == null) {
+            sessionId = UUID.randomUUID().toString();
+            // Keep the predecessor in the same family, including a concurrent logout after upgrade.
+            if (refreshTokens.attachLegacySession(
+                            hash, sessionId, local(started), local(activity), local(absolute))
+                    != 1) throw new BusinessException(ErrorCode.UNAUTHENTICATED, "登录凭据已更新，请重新登录");
+        }
+        // The lock serializes refreshes; the conditional update is a second guard against reuse.
+        if (refreshTokens.revoke(hash) != 1)
+            throw new BusinessException(ErrorCode.UNAUTHENTICATED, "登录凭据已更新，请重新登录");
+        return issue(u, sessionId, started, activity, absolute);
     }
 
     boolean registrationEnabled() {
@@ -133,7 +164,13 @@ public class AuthService {
         if (authentication != null
                 && authentication.getPrincipal() instanceof OpsPrincipal actor
                 && actor.roles().contains("DEMO")) users.revokeVisitor(actor.userId());
-        if (token != null && !token.isBlank()) refreshTokens.revoke(hash(token));
+        if (token != null && !token.isBlank()) {
+            String hash = hash(token);
+            RefreshTokenMapper.RefreshLease lease = refreshTokens.lockLease(hash);
+            if (lease != null && lease.sessionId() != null)
+                refreshTokens.revokeSession(lease.sessionId());
+            else refreshTokens.revoke(hash);
+        }
     }
 
     CurrentUser current() {
@@ -151,16 +188,45 @@ public class AuthService {
     }
 
     private TokenResponse issue(User u) {
+        Instant now = Instant.now();
+        return issue(u, UUID.randomUUID().toString(), now, now, now.plus(sessionMaxLifetime));
+    }
+
+    private TokenResponse issue(
+            User u, String sessionId, Instant started, Instant activity, Instant absolute) {
         List<String> roles = users.roles(u.getId());
-        IssuedToken access = jwt.issue(u.getId(), u.getUsername(), roles);
+        Instant deadline = SessionLifetime.deadline(activity, absolute, sessionIdleTimeout);
+        IssuedToken access = jwt.issueUntil(u.getId(), u.getUsername(), roles, deadline);
         // 两段随机 UUID 提供足够熵，数据库只持久化其摘要。
         String raw = UUID.randomUUID() + "." + UUID.randomUUID();
-        refreshTokens.insert(
+        refreshTokens.insertSession(
                 UUID.randomUUID().toString(),
                 u.getId(),
                 hash(raw),
-                LocalDateTime.now().plusDays(7));
-        return new TokenResponse(access.token(), raw, "Bearer", access.expiresAt());
+                local(deadline),
+                LocalDateTime.now(),
+                sessionId,
+                local(started),
+                local(activity),
+                local(absolute));
+        return new TokenResponse(
+                access.token(),
+                raw,
+                "Bearer",
+                access.expiresAt(),
+                sessionId,
+                started,
+                absolute,
+                activity.plus(sessionIdleTimeout),
+                activity);
+    }
+
+    private static Instant instant(LocalDateTime value) {
+        return value.atZone(ZoneId.systemDefault()).toInstant();
+    }
+
+    private static LocalDateTime local(Instant value) {
+        return LocalDateTime.ofInstant(value, ZoneId.systemDefault());
     }
 
     ActorView actor(long userId) {

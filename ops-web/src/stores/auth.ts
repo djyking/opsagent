@@ -2,10 +2,18 @@ import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 import { authApi } from "@/api/modules";
 import type { CurrentUser } from "@/types/api";
+import { ensureAccessToken, readSession, saveLogin, subscribeSession, logoutSession } from "@/api/session";
 
 export const useAuthStore = defineStore("auth", () => {
   const user = ref<CurrentUser | null>(null);
-  const token = ref(localStorage.getItem("opsagent_token"));
+  const token = ref(readSession()?.accessToken ?? null);
+  const identity = ref(readSession()?.identity ?? null);
+  subscribeSession(() => {
+    const session = readSession();
+    token.value = session?.accessToken ?? null;
+    if ((session?.identity ?? null) !== identity.value) user.value = null;
+    identity.value = session?.identity ?? null;
+  });
   const loading = ref(false);
   const isAuthenticated = computed(() => Boolean(token.value));
   const isAdmin = computed(() => user.value?.roles.includes("ADMIN") ?? false);
@@ -14,10 +22,7 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function login(username: string, password: string, captchaId: string, captchaCode: string) {
     const result = await authApi.login({ username, password, captchaId, captchaCode });
-    token.value = result.accessToken;
-    localStorage.setItem("opsagent_token", result.accessToken);
-    localStorage.setItem("opsagent_refresh_token", result.refreshToken);
-    localStorage.setItem("opsagent_token_expire_at", result.expiresAt);
+    saveLogin(result);
     await fetchMe();
   }
 
@@ -25,23 +30,23 @@ export const useAuthStore = defineStore("auth", () => {
     if (!token.value) return;
     loading.value = true;
     try {
-      user.value = await authApi.me();
+      await ensureAccessToken();
+      const requestedSession = readSession()?.identity;
+      const profile = await authApi.me();
+      if (readSession()?.identity === requestedSession) user.value = profile;
     } finally {
       loading.value = false;
     }
   }
 
   function logout() {
-    token.value = null;
-    user.value = null;
-    localStorage.removeItem("opsagent_token");
-    localStorage.removeItem("opsagent_refresh_token");
-    localStorage.removeItem("opsagent_token_expire_at");
+    logoutSession();
   }
 
   return {
     user,
     token,
+    identity,
     loading,
     isAuthenticated,
     isAdmin,

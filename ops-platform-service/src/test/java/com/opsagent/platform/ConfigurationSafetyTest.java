@@ -39,18 +39,18 @@ class ConfigurationSafetyTest {
         String masked =
                 masker.mask(
                         """
-                        spring:
-                          datasource:
-                            password: db-private
-                            url: jdbc:mysql://real-user:real-pass@mysql:3306/ops?password=url-private
-                          ai:
-                            api-key: model-private
-                        nested: '{"jwtSecret":"jwt-private","visible":123}'
-                        script: |
-                          password=embedded-private
-                          next=value
-                        label: safe-value
-                        """,
+spring:
+  datasource:
+    password: db-private
+    url: jdbc:mysql://real-user:real-pass@mysql:3306/ops?password=url-private
+  ai:
+    api-key: model-private
+nested: '{"jwtSecret":"jwt-private","visible":123}'
+script: |
+  password=embedded-private
+  next=value
+label: safe-value
+""",
                         "yaml");
         assertThat(masked)
                 .contains("******", "safe-value", "visible")
@@ -127,14 +127,14 @@ class ConfigurationSafetyTest {
                             if (request.uri().getPath().endsWith("/history/list"))
                                 return response(
                                         """
-                                        {"code":0,"data":{"pageItems":[{"id":12,"srcUser":"admin",
-                                        "modifyTime":1788649999000,"opType":"U","content":"private-value"}]}}
-                                        """);
+{"code":0,"data":{"pageItems":[{"id":12,"srcUser":"admin",
+"modifyTime":1788649999000,"opType":"U","content":"private-value"}]}}
+""");
                             return response(
                                     """
-                                    {"code":0,"data":{"dataId":"ops-auth-service.yaml","groupName":"DEFAULT_GROUP",
-                                    "type":"yaml","content":"password: private-value"}}
-                                    """);
+{"code":0,"data":{"dataId":"ops-auth-service.yaml","groupName":"DEFAULT_GROUP",
+"type":"yaml","content":"password: private-value"}}
+""");
                         });
         var history = client.history("ops-auth-service.yaml", "DEFAULT_GROUP");
         assertThat(history).hasSize(1);
@@ -184,6 +184,69 @@ class ConfigurationSafetyTest {
         when(response.statusCode()).thenReturn(200);
         when(response.body()).thenReturn(body);
         return response;
+    }
+
+    @Test
+    void identicalNacosMarkersDoNotReplaceActualRuntimeParametersOrImplyConnectionHealth()
+            throws Exception {
+        var actor = new OpsPrincipal(1, "admin", "test", List.of("ADMIN"));
+        SecurityContextHolder.getContext()
+                .setAuthentication(new UsernamePasswordAuthenticationToken(actor, null, List.of()));
+        var nacos = mock(NacosConfigurationClient.class);
+        when(nacos.sourceInstanceId()).thenReturn("nacos-test");
+        when(nacos.environment()).thenReturn("test");
+        when(nacos.namespace()).thenReturn("public");
+        when(nacos.catalog())
+                .thenReturn(
+                        List.of(
+                                new NacosConfigurationClient.Entry(
+                                        "ops-rag-service.yaml", "DEFAULT_GROUP", "yaml", "")));
+        when(nacos.content("ops-rag-service.yaml", "DEFAULT_GROUP"))
+                .thenReturn(
+                        new NacosConfigurationClient.Content(
+                                "info:\n  middleware:\n    nacos-config: connected",
+                                "yaml",
+                                "a".repeat(64),
+                                true));
+        var runtime = mock(ConfigurationRuntimeClient.class);
+        var field =
+                new com.opsagent.common.security.RuntimeConfigurationSnapshot.Field(
+                        "ops.rag.top-k", "检索条数", "模型与检索", "9", "环境变量", "RUNTIME_RESOLVED");
+        when(runtime.snapshot("ops-rag-service"))
+                .thenReturn(
+                        new ConfigCenterDtos.Overview(
+                                "AVAILABLE",
+                                "ops-rag-service",
+                                "process-id",
+                                java.time.Instant.now(),
+                                "单实例解析值不等同业务已应用",
+                                List.of(field)));
+        var service = new ConfigCenterService(nacos, new ConfigurationMasker(json), runtime);
+        String id = service.catalog("ops-rag-service").items().get(0).id();
+        var detail = service.detail(id);
+        assertThat(detail.content()).contains("connected");
+        assertThat(detail.overview().fields()).containsExactly(field);
+        assertThat(detail.overview().message()).contains("不等同");
+        when(runtime.snapshot("ops-rag-service"))
+                .thenReturn(
+                        ConfigurationRuntimeClient.unavailable(
+                                "ops-rag-service", "UNAVAILABLE", "运行快照未核实。"));
+        var missing = service.detail(id);
+        assertThat(missing.overview().fields()).isEmpty();
+        assertThat(missing.overview().message()).contains("静态配置文字", "不能证明连接正常");
+        when(nacos.content("ops-rag-service.yaml", "DEFAULT_GROUP"))
+                .thenReturn(
+                        new NacosConfigurationClient.Content(
+                                "ops:\n  rag:\n    top-k: 4", "yaml", "b".repeat(64), true));
+        var sourceOnly = service.detail(id).overview();
+        assertThat(sourceOnly.status()).isEqualTo("UNAVAILABLE");
+        assertThat(sourceOnly.fields())
+                .singleElement()
+                .satisfies(
+                        sourceField -> {
+                            assertThat(sourceField.value()).isEqualTo("4");
+                            assertThat(sourceField.verification()).isEqualTo("SOURCE_ONLY");
+                        });
     }
 
     @Test

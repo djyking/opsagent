@@ -166,6 +166,12 @@ class RagObservabilityContextTest {
         assertThat(plan.question()).isEqualTo(QUESTION);
         verify(knowledge).search(QUESTION, 30, null);
         String user = plan.request().userPrompt();
+        assertThat(plan.sources()).hasSize(2);
+        assertThat(
+                        AssistantTokenBudget.promptUpperBound(plan.request())
+                                + plan.request().priorReservedTokens()
+                                + 2048)
+                .isLessThanOrEqualTo(AssistantTokenBudget.LIMIT);
         assertThat(
                         user.substring(
                                 user.indexOf("<conversation_history>"),

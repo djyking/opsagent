@@ -80,7 +80,7 @@ class AgentStore {
                     status -> {
                         jdbc.update(
                                 "INSERT INTO agent_definition(id,name,draft_json,published_version)"
-                                    + " VALUES(?,?,?,1)",
+                                        + " VALUES(?,?,?,1)",
                                 "configuration-change",
                                 "受控配置变更与应用核验",
                                 graph.toString());
@@ -181,6 +181,12 @@ class AgentStore {
                     jdbc.queryForObject(
                             "SELECT id FROM agent_runtime_guard WHERE id=1 FOR UPDATE",
                             Integer.class);
+                    if (trigger.startsWith("alert:")) {
+                        String incident = state.path("incidentId").asText();
+                        if (incident.isBlank()) throw AgentJson.invalid("自动运行必须绑定隔离事件");
+                        String bound = incidentRun(definition, owner, incident);
+                        if (bound != null) return bound;
+                    }
                     List<String> existing =
                             jdbc.queryForList(
                                     "SELECT id FROM agent_run WHERE trigger_key=?",
@@ -259,6 +265,20 @@ WHERE status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
                     wake(id);
                     return id;
                 });
+    }
+
+    /** 自动入口可提前查询；创建时必须在 runtime_guard 事务锁内再次复核。 */
+    String incidentRun(String definition, long owner, String incident) {
+        if (incident == null || incident.isBlank()) return null;
+        List<String> ids =
+                jdbc.queryForList(
+                        "SELECT id FROM agent_run WHERE definition_id=? AND owner_id=? AND"
+                                + " incident_id=? ORDER BY created_at,id LIMIT 1",
+                        String.class,
+                        definition,
+                        owner,
+                        incident);
+        return ids.isEmpty() ? null : ids.get(0);
     }
 
     Run get(String id) {
@@ -353,7 +373,7 @@ ORDER BY next_attempt LIMIT 1 FOR UPDATE SKIP LOCKED
                     jdbc.update(
                             """
                             UPDATE agent_run SET status='RUNNING',fence=fence+1,
-                            lease_until=TIMESTAMPADD(SECOND,120,NOW(3)) WHERE id=?
+                            lease_until=TIMESTAMPADD(SECOND,150,NOW(3)) WHERE id=?
                             """,
                             id);
                     return get(id);
@@ -686,12 +706,15 @@ WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
                     Run current = get(id);
                     if (current.cancelled()
                             || !List.of(
-                                            "PAUSED",
-                                            "NEEDS_ATTENTION",
-                                            "WAITING_APPROVAL",
-                                            "WAITING_INPUT")
-                                    .contains(current.status())) throw conflict();
-                    if (current.status().equals("NEEDS_ATTENTION")
+                                                    "PAUSED",
+                                                    "NEEDS_ATTENTION",
+                                                    "WAITING_APPROVAL",
+                                                    "WAITING_INPUT")
+                                            .contains(current.status())
+                                    && !AgentRuntime.resumableContextBudget(current))
+                        throw conflict();
+                    if ((current.status().equals("NEEDS_ATTENTION")
+                                    || AgentRuntime.resumableContextBudget(current))
                             && jdbc.queryForObject(
                                             "SELECT COUNT(*) FROM agent_run WHERE status IN"
                                                 + " ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')",
@@ -707,10 +730,20 @@ WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
                     if (modelFailure != null) {
                         throw AgentJson.invalid(modelFailure.path("reason").asText());
                     }
+                    ObjectNode referenceCorrection = AgentReferenceCorrections.resume(current);
+                    if (referenceCorrection != null)
+                        event(
+                                id,
+                                "EVIDENCE_REFERENCE_CORRECTION",
+                                current.node(),
+                                referenceCorrection);
+                    current.state().remove("message");
                     jdbc.update(
                             "UPDATE agent_run SET pause_requested=FALSE,status=CASE WHEN status IN"
                                 + " ('WAITING_APPROVAL','WAITING_INPUT') THEN status ELSE 'QUEUED'"
-                                + " END,next_attempt=NOW(3),updated_at=NOW(3) WHERE id=?",
+                                + " END,state_json=?,next_attempt=NOW(3),updated_at=NOW(3) WHERE"
+                                + " id=?",
+                            current.state().toString(),
                             id);
                     event(
                             id,
@@ -751,6 +784,44 @@ WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
                         run.id(),
                         run.fence());
         if (valid == null || valid != 1) throw conflict();
+    }
+
+    void reserveToolAiBudget(Run run, String callId, int tokens, int limit) {
+        tx.executeWithoutResult(
+                transaction -> {
+                    assertLease(run);
+                    ObjectNode reservations = run.state().withObject("/toolAiReservations");
+                    if (tokens < 1
+                            || reservations.has(callId)
+                            || !AgentRuntime.unlimited(run.state())
+                                    && (limit < 1
+                                            || (long) run.state().path("tokens").asInt() + tokens
+                                                    > limit)) throw conflict();
+                    reservations.put(callId, tokens);
+                    run.state().put("tokens", run.state().path("tokens").asInt() + tokens);
+                    int updated =
+                            jdbc.update(
+                                    "UPDATE agent_run SET state_json=?,updated_at=NOW(3) WHERE id=?"
+                                        + " AND fence=? AND lease_until>NOW(3) AND status='RUNNING'"
+                                        + " AND cancel_requested=FALSE AND pause_requested=FALSE",
+                                    run.state().toString(),
+                                    run.id(),
+                                    run.fence());
+                    if (updated != 1) throw conflict();
+                    event(
+                            run.id(),
+                            "TOOL_AI_BUDGET_RESERVED",
+                            run.node(),
+                            Map.of(
+                                    "callId",
+                                    callId,
+                                    "budgetTokens",
+                                    tokens,
+                                    "usageKnown",
+                                    false,
+                                    "source",
+                                    "QUERY_EMBEDDING_UPPER_BOUND"));
+                });
     }
 
     boolean approvalFresh(String id) {

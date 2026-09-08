@@ -16,23 +16,43 @@ import java.util.Map;
  * @since 2026/9/3
  */
 public interface SlaMapper {
+    @Select("SELECT affected_ci_code FROM ticket WHERE id=#{ticketId} AND deleted=0")
+    String notificationService(long ticketId);
+
+    String VISIBLE_TICKET =
+            """
+            <bind name="actor" value="@com.opsagent.common.security.SecurityUsers@current()"/>
+            <choose>
+              <when test="actor.roles.contains('DEMO')">
+                AND (t.owner_actor_id=#{actor.userId} OR t.public_demo=1)
+              </when>
+              <when test="!actor.roles.contains('ADMIN')">
+                AND (t.creator_id=#{actor.userId} OR t.assignee_id=#{actor.userId}
+                <if test="actor.roles.contains('OPS')">OR t.status='CREATED'</if>)
+              </when>
+            </choose>
+            """;
+
     String PAGE_FILTER =
             """
             FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id
             WHERE t.deleted=0
-            <if test="query.view == 'risk'">
-              AND s.resolution_status='RUNNING'
-              AND s.resolution_deadline &gt; #{now} AND s.resolution_deadline &lt;= #{riskUntil}
-            </if>
-            <if test="query.view == 'breached'">AND s.resolution_status='BREACHED'</if>
-            <if test="query.priority != ''">AND t.priority=#{query.priority}</if>
-            <if test="query.service != ''">AND t.affected_ci_code=#{query.service}</if>
-            <if test="query.keyword != ''">
-              AND (LOWER(t.title) LIKE LOWER(#{query.keywordPattern}) ESCAPE '!'
-                OR LOWER(t.ticket_no) LIKE LOWER(#{query.keywordPattern}) ESCAPE '!'
-                OR LOWER(t.affected_ci_code) LIKE LOWER(#{query.keywordPattern}) ESCAPE '!')
-            </if>
-            """;
+            """
+                    + VISIBLE_TICKET
+                    + """
+<if test="query.view == 'risk'">
+  AND s.resolution_status='RUNNING'
+  AND s.resolution_deadline &gt; #{now} AND s.resolution_deadline &lt;= #{riskUntil}
+</if>
+<if test="query.view == 'breached'">AND s.resolution_status='BREACHED'</if>
+<if test="query.priority != ''">AND t.priority=#{query.priority}</if>
+<if test="query.service != ''">AND t.affected_ci_code=#{query.service}</if>
+<if test="query.keyword != ''">
+  AND (LOWER(t.title) LIKE LOWER(#{query.keywordPattern}) ESCAPE '!'
+    OR LOWER(t.ticket_no) LIKE LOWER(#{query.keywordPattern}) ESCAPE '!'
+    OR LOWER(t.affected_ci_code) LIKE LOWER(#{query.keywordPattern}) ESCAPE '!')
+</if>
+""";
 
     @Insert(
             """
@@ -120,16 +140,22 @@ public interface SlaMapper {
     Map<String, Object> detail(long ticketId);
 
     @Select(
-            """
-            SELECT s.id,s.ticket_id ticketId,t.ticket_no ticketNo,t.title,t.priority,t.status,
-                   t.affected_ci_code affectedCiCode,s.response_deadline responseDeadline,
-                   s.resolution_deadline resolutionDeadline,s.response_status responseStatus,
-                   s.resolution_status resolutionStatus,s.escalation_level escalationLevel
-            FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id
-            WHERE t.deleted=0 ORDER BY
-                FIELD(s.resolution_status,'BREACHED','RUNNING','COMPLETED'),
-                s.resolution_deadline LIMIT #{limit}
-            """)
+            "<script>"
+                    + """
+SELECT s.id,s.ticket_id ticketId,t.ticket_no ticketNo,t.title,t.priority,t.status,
+       t.affected_ci_code affectedCiCode,s.response_deadline responseDeadline,
+       s.resolution_deadline resolutionDeadline,s.response_status responseStatus,
+       s.resolution_status resolutionStatus,s.escalation_level escalationLevel
+FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id
+WHERE t.deleted=0
+"""
+                    + VISIBLE_TICKET
+                    + """
+    ORDER BY
+CASE s.resolution_status WHEN 'BREACHED' THEN 0 WHEN 'RUNNING' THEN 1 ELSE 2 END,
+        s.resolution_deadline LIMIT #{limit}
+    </script>
+""")
     List<Map<String, Object>> overview(int limit);
 
     @Select("<script>SELECT COUNT(*) " + PAGE_FILTER + "</script>")
@@ -141,18 +167,18 @@ public interface SlaMapper {
     @Select(
             "<script>"
                     + """
-                    SELECT s.id,s.ticket_id ticketId,t.ticket_no ticketNo,t.title,t.priority,t.status,
-                           t.affected_ci_code affectedCiCode,s.response_deadline responseDeadline,
-                           s.resolution_deadline resolutionDeadline,s.response_status responseStatus,
-                           s.resolution_status resolutionStatus,s.escalation_level escalationLevel
-                    """
+SELECT s.id,s.ticket_id ticketId,t.ticket_no ticketNo,t.title,t.priority,t.status,
+       t.affected_ci_code affectedCiCode,s.response_deadline responseDeadline,
+       s.resolution_deadline resolutionDeadline,s.response_status responseStatus,
+       s.resolution_status resolutionStatus,s.escalation_level escalationLevel
+"""
                     + PAGE_FILTER
                     + """
-                    ORDER BY CASE s.resolution_status WHEN 'BREACHED' THEN 0 WHEN 'RUNNING' THEN 1 ELSE 2 END,
-                             s.resolution_deadline,s.id
-                    LIMIT #{query.pageSize} OFFSET #{offset}
-                    </script>
-                    """)
+ORDER BY CASE s.resolution_status WHEN 'BREACHED' THEN 0 WHEN 'RUNNING' THEN 1 ELSE 2 END,
+         s.resolution_deadline,s.id
+LIMIT #{query.pageSize} OFFSET #{offset}
+</script>
+""")
     List<SlaDtos.Row> page(
             @Param("query") SlaDtos.Query query,
             @Param("now") LocalDateTime now,
@@ -160,29 +186,37 @@ public interface SlaMapper {
             @Param("offset") long offset);
 
     @Select(
-            """
-            SELECT COUNT(*) total,
-                   COALESCE(SUM(CASE WHEN s.resolution_status='RUNNING' THEN 1 ELSE 0 END),0) running,
-                   COALESCE(SUM(CASE WHEN s.resolution_status='RUNNING'
-                     AND s.resolution_deadline > #{now} AND s.resolution_deadline <= #{riskUntil}
-                     THEN 1 ELSE 0 END),0) risk,
-                   COALESCE(SUM(CASE WHEN s.resolution_status='RUNNING'
-                     AND s.resolution_deadline > '1970-01-01 00:00:00'
-                     AND s.resolution_deadline <= #{riskUntil} THEN 1 ELSE 0 END),0) dashboardRisk,
-                   COALESCE(SUM(CASE WHEN s.resolution_status='BREACHED' THEN 1 ELSE 0 END),0) breached,
-                   COALESCE(SUM(CASE WHEN s.resolution_status='COMPLETED' THEN 1 ELSE 0 END),0) completed
-            FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id WHERE t.deleted=0
-            """)
+            "<script>"
+                    + """
+SELECT COUNT(*) total,
+       COALESCE(SUM(CASE WHEN s.resolution_status='RUNNING' THEN 1 ELSE 0 END),0) running,
+       COALESCE(SUM(CASE WHEN s.resolution_status='RUNNING'
+         AND s.resolution_deadline &gt; #{now} AND s.resolution_deadline &lt;= #{riskUntil}
+         THEN 1 ELSE 0 END),0) risk,
+       COALESCE(SUM(CASE WHEN s.resolution_status='RUNNING'
+         AND s.resolution_deadline &gt; '1970-01-01 00:00:00'
+         AND s.resolution_deadline &lt;= #{riskUntil} THEN 1 ELSE 0 END),0) dashboardRisk,
+       COALESCE(SUM(CASE WHEN s.resolution_status='BREACHED' THEN 1 ELSE 0 END),0) breached,
+       COALESCE(SUM(CASE WHEN s.resolution_status='COMPLETED' THEN 1 ELSE 0 END),0) completed
+FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id WHERE t.deleted=0
+"""
+                    + VISIBLE_TICKET
+                    + "</script>")
     SlaDtos.Counts counts(
             @Param("now") LocalDateTime now, @Param("riskUntil") LocalDateTime riskUntil);
 
     @Select(
-            """
-            SELECT DISTINCT t.affected_ci_code
-            FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id
-            WHERE t.deleted=0 AND t.affected_ci_code IS NOT NULL AND t.affected_ci_code<>''
-            ORDER BY t.affected_ci_code
-            """)
+            "<script>"
+                    + """
+SELECT DISTINCT t.affected_ci_code
+FROM ticket_sla s JOIN ticket t ON t.id=s.ticket_id
+WHERE t.deleted=0 AND t.affected_ci_code IS NOT NULL AND t.affected_ci_code&lt;&gt;''
+"""
+                    + VISIBLE_TICKET
+                    + """
+                    ORDER BY t.affected_ci_code
+                    </script>
+                    """)
     List<String> services();
 
     /**

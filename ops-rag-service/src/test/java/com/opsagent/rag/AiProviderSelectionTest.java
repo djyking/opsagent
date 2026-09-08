@@ -117,7 +117,14 @@ class AiProviderSelectionTest {
         var result =
                 new LlmInvocationService.Invocation(
                         new LlmResult("answer", "openai", "openai-model", 1, 2), 10);
-        when(invocation.invoke(eq("openai"), anyString(), eq(request))).thenReturn(result);
+        when(invocation.invoke(
+                        eq("openai"),
+                        anyString(),
+                        eq(
+                                request.withPriorReservedTokens(
+                                        com.opsagent.common.core.QueryEmbeddingBudget.reserve(
+                                                "解释连接池")))))
+                .thenReturn(result);
         when(invocation.stream(eq("openai"), anyString(), any(LlmRequest.class), any(), any()))
                 .thenReturn(result);
         var properties = new RagProperties();

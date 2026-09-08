@@ -9,7 +9,7 @@ readonly COMPOSE_DIR
 readonly BACKUP_ROOT=/opt/opsagent/backups
 readonly OWNER_MARKER=opsagent-logical-backup-v1
 readonly -a COMPOSE
-SERVICES=(mysql redis rabbitmq nacos sentinel elasticsearch qdrant ops-auth-app ops-ticket-app ops-knowledge-app ops-rag-app ops-platform-app ops-gateway-app reranker prometheus alertmanager grafana ops-web-app operations-lab ops-agent-app ops-demo-order-app demo-redis demo-rabbitmq)
+SERVICES=(mysql redis rabbitmq nacos sentinel elasticsearch qdrant ops-auth-app ops-ticket-app ops-knowledge-app ops-rag-app ops-platform-app ops-gateway-app reranker prometheus alertmanager grafana ops-web-app operations-lab ops-agent-app ops-demo-order-app demo-redis demo-rabbitmq observation-collector)
 if [[ "$OPSAGENT_TRACE_ACTIVE" == true ]]; then SERVICES+=(otel-collector tempo); fi
 readonly -a SERVICES
 CURRENT_BACKUP=

@@ -1,5 +1,11 @@
 package com.opsagent.rag;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+
 import com.opsagent.common.core.BusinessException;
 import com.opsagent.common.security.OpsPrincipal;
 
@@ -16,11 +22,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.util.List;
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
-
 /**
  * 验证预算在同步与 SSE 的实际供应商调用之前生效，失败后不会泄漏并发名额。
  *
@@ -36,16 +37,22 @@ class LlmBudgetIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        var jdbc = new JdbcTemplate(new DriverManagerDataSource(
-                "jdbc:h2:mem:llm-budget-" + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+        var jdbc =
+                new JdbcTemplate(
+                        new DriverManagerDataSource(
+                                "jdbc:h2:mem:llm-budget-"
+                                        + UUID.randomUUID()
+                                        + ";MODE=MySQL;DB_CLOSE_DELAY=-1",
+                                "sa",
+                                ""));
         budget = new AiBudgetGuard(jdbc, new RagProperties(), true, 1, 2);
         budget.initialize();
         LlmClientRouter router = mock(LlmClientRouter.class);
         when(router.selected()).thenReturn(client);
         service = new LlmInvocationService(router, metrics, mock(AiUsageRepository.class), budget);
         var user = new OpsPrincipal(10, "demo", "test", List.of("USER"));
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(user, "", List.of()));
+        SecurityContextHolder.getContext()
+                .setAuthentication(new UsernamePasswordAuthenticationToken(user, "", List.of()));
     }
 
     @AfterEach
@@ -59,20 +66,58 @@ class LlmBudgetIntegrationTest {
         budget.acquire().close();
         budget.acquire().close();
         assertThatThrownBy(() -> service.invoke(client, "test", request))
-                .isInstanceOf(BusinessException.class).hasMessageContaining("今日");
-        assertThatThrownBy(() -> service.stream("test", request, delta -> {}, service.currentContext()))
-                .isInstanceOf(BusinessException.class).hasMessageContaining("今日");
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("今日");
+        assertThatThrownBy(
+                        () ->
+                                service.stream(
+                                        "test", request, delta -> {}, service.currentContext()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("今日");
         verifyNoInteractions(client);
     }
 
     @Test
     void shouldReleaseConcurrencyForBothPathsEvenWhenProviderThrowsUnexpectedly() {
         when(client.generate(request)).thenThrow(new IllegalStateException("sync test failure"));
-        when(client.stream(eq(request), any())).thenThrow(new IllegalStateException("stream test failure"));
-        assertThatThrownBy(() -> service.invoke(client, "test", request)).hasMessage("sync test failure");
-        assertThatThrownBy(() -> service.stream("test", request, delta -> {}, service.currentContext()))
+        when(client.stream(eq(request), any()))
+                .thenThrow(new IllegalStateException("stream test failure"));
+        assertThatThrownBy(() -> service.invoke(client, "test", request))
+                .hasMessage("sync test failure");
+        assertThatThrownBy(
+                        () ->
+                                service.stream(
+                                        "test", request, delta -> {}, service.currentContext()))
                 .hasMessage("stream test failure");
         verify(client).generate(request);
         verify(client).stream(eq(request), any());
+    }
+
+    @Test
+    void bothInvocationPathsStartWithRetrievalReservation() {
+        when(client.provider()).thenReturn("deepseek");
+        when(client.model()).thenReturn("test-model");
+        LlmRequest withRetrieval = request.withPriorReservedTokens(3000);
+        org.mockito.stubbing.Answer<LlmResult> provider =
+                ignored -> {
+                    var reservation =
+                            AssistantTokenBudget.reserve(
+                                    "deepseek",
+                                    java.util.Map.of(
+                                            "max_tokens", 20000, "messages", java.util.List.of()));
+                    assertThat((int) reservation.body().get("max_tokens")).isLessThan(7000);
+                    reservation.finish(null);
+                    return new LlmResult("answer", "deepseek", "test-model", 1, 1);
+                };
+        when(client.generate(withRetrieval)).thenAnswer(provider);
+        when(client.stream(eq(withRetrieval), any())).thenAnswer(provider);
+        var sync = service.invoke(client, "test", withRetrieval).result();
+        var streamed =
+                service.stream("test", withRetrieval, delta -> {}, service.currentContext())
+                        .result();
+        assertThat(sync.budgetChargedTokens()).isEqualTo(10000);
+        assertThat(streamed.budgetChargedTokens()).isEqualTo(10000);
+        assertThat(sync.budgetUsageKnown()).isFalse();
+        assertThat(streamed.budgetUsageKnown()).isFalse();
     }
 }

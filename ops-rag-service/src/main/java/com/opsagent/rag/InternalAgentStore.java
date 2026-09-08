@@ -40,15 +40,21 @@ class InternalAgentStore {
     void initialize() {
         jdbc.execute(
                 "CREATE TABLE IF NOT EXISTS rag_agent_model_capability (provider VARCHAR(20) NOT"
-                    + " NULL, model VARCHAR(128) NOT NULL, profile_hash VARCHAR(64) NOT NULL,"
-                    + " status VARCHAR(24) NOT NULL, verified_at VARCHAR(40) NOT NULL, PRIMARY"
-                    + " KEY(provider,model,profile_hash))");
+                        + " NULL, model VARCHAR(128) NOT NULL, profile_hash VARCHAR(64) NOT NULL,"
+                        + " status VARCHAR(24) NOT NULL, verified_at VARCHAR(40) NOT NULL, PRIMARY"
+                        + " KEY(provider,model,profile_hash))");
         jdbc.execute(
                 "CREATE TABLE IF NOT EXISTS rag_agent_model_turn (call_id VARCHAR(160) PRIMARY KEY,"
                     + " actor_id BIGINT NOT NULL, run_id VARCHAR(128) NOT NULL, request_hash"
                     + " VARCHAR(64) NOT NULL, status VARCHAR(24) NOT NULL, result_json LONGTEXT,"
                     + " error_code VARCHAR(80), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
                     + " updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
+        jdbc.execute(
+                "CREATE TABLE IF NOT EXISTS rag_agent_model_attempt (call_id VARCHAR(160) NOT NULL,"
+                    + " attempt_no INT NOT NULL, provider VARCHAR(20) NOT NULL, status VARCHAR(24)"
+                    + " NOT NULL, input_tokens BIGINT, output_tokens BIGINT, total_tokens BIGINT,"
+                    + " reserved_tokens INT NOT NULL, error_code VARCHAR(80), PRIMARY"
+                    + " KEY(call_id,attempt_no))");
     }
 
     InternalAgentDtos.ModelCapability capability(
@@ -117,7 +123,8 @@ class InternalAgentStore {
                 }
             }
             String error =
-                    List.of("FAILED", "UNKNOWN").contains(row.get("status")) && row.get("error_code") != null
+                    List.of("FAILED", "UNKNOWN").contains(row.get("status"))
+                                    && row.get("error_code") != null
                             ? String.valueOf(row.get("error_code"))
                             : "MODEL_OUTCOME_UNKNOWN";
             throw new BusinessException(ErrorCode.CONFLICT, error);
@@ -141,6 +148,33 @@ class InternalAgentStore {
                 submitted ? "UNKNOWN" : "FAILED",
                 code,
                 callId);
+    }
+
+    void beginAttempt(String callId, int attempt, String provider, int reservation) {
+        jdbc.update(
+                "INSERT INTO"
+                    + " rag_agent_model_attempt(call_id,attempt_no,provider,status,reserved_tokens)"
+                    + " VALUES(?,?,?,'STARTED',?)",
+                callId,
+                attempt,
+                provider,
+                reservation);
+    }
+
+    void finishAttempt(
+            String callId, int attempt, InternalAgentDtos.TurnResponse response, String error) {
+        boolean known = response != null && response.usageKnown();
+        jdbc.update(
+                "UPDATE rag_agent_model_attempt SET"
+                    + " status=?,input_tokens=?,output_tokens=?,total_tokens=?,error_code=? WHERE"
+                    + " call_id=? AND attempt_no=? AND status='STARTED'",
+                known ? "KNOWN" : "UNKNOWN",
+                known ? response.inputTokens() : null,
+                known ? response.outputTokens() : null,
+                known ? response.totalTokens() : null,
+                error,
+                callId,
+                attempt);
     }
 
     String json(Object value) {

@@ -237,6 +237,7 @@ services:
     image: opsagent/ticket-service:1.0.0
     environment:
       <<: *app-env
+      OPS_AGENT_INTERNAL_URL: http://ops-agent-app:8106
       OPS_TICKET_DB_URL: jdbc:mysql://mysql:3306/ops_ticket?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
       OPS_TICKET_DB_USERNAME: opsagent_app
       OPS_TICKET_DB_PASSWORD: ${OPS_DB_APP_PASSWORD:?Set the dedicated MySQL application password}
@@ -322,6 +323,9 @@ services:
       OPS_PROMETHEUS_PUBLIC_URL: ""
       OPS_GRAFANA_PUBLIC_URL: ""
       OPS_OPERATIONS_RAG_URL: http://ops-rag-app:8104
+      # Fixed internal addresses for authenticated, allowlisted runtime configuration snapshots.
+      OPS_KNOWLEDGE_INTERNAL_URL: http://ops-knowledge-app:8103
+      OPS_AGENT_INTERNAL_URL: http://ops-agent-app:8106
       OPS_DEMO_TARGET_URL: http://ops-demo-order-app:8110
       OPS_DEMO_CONTROL_TOKEN: ${OPS_DEMO_CONTROL_TOKEN:?Set isolated target control token}
       OPS_OPERATIONS_NACOS_URL: http://nacos:8848/nacos
@@ -453,6 +457,24 @@ services:
       timeout: 10s
       retries: 3
 
+  observation-collector:
+    <<: *common
+    image: opsagent/observation-collector:1.0.0
+    networks: [backplane, demo-data]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 32
+    volumes:
+      - ./runtime/collector.json:/run/opsagent/collector.json:ro
+    healthcheck:
+      test: [CMD, python, -c, "import json,urllib.request; c=json.load(open('/run/opsagent/collector.json')); r=urllib.request.Request('http://127.0.0.1:18111/metrics/prometheus',headers={'Authorization':'Bearer '+c['bearer_token']}); urllib.request.urlopen(r,timeout=5)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+
   reranker:
     <<: *common
     image: opsagent/bge-reranker-v2-m3:1.0.0
@@ -491,8 +513,7 @@ services:
     environment: {GOMAXPROCS: "2", GOMEMLIMIT: "192MiB"}
     command: ['--config.file=/etc/prometheus/prometheus.yml', '--storage.tsdb.path=/prometheus', '--storage.tsdb.retention.time=15d']
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./config/opsagent-alerts.yml:/etc/prometheus/opsagent-alerts.yml:ro
+      - ./config:/etc/prometheus:ro
       - prometheus-data:/prometheus
 
   alertmanager:

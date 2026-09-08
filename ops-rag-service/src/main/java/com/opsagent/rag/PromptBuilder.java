@@ -17,9 +17,7 @@ public class PromptBuilder {
     private final AiProperties aiProperties;
 
     PromptBuilder(
-            PromptTemplateLoader loader,
-            RagProperties ragProperties,
-            AiProperties aiProperties) {
+            PromptTemplateLoader loader, RagProperties ragProperties, AiProperties aiProperties) {
         this.loader = loader;
         this.ragProperties = ragProperties;
         this.aiProperties = aiProperties;
@@ -34,11 +32,14 @@ public class PromptBuilder {
         return build(question, context.text());
     }
 
+    int inputOverhead(String question) {
+        return AssistantTokenBudget.promptUpperBound(build(question, ""));
+    }
+
     private LlmRequest build(String question, String context) {
         PromptTemplateLoader.PromptTemplate template = loader.get();
-        String user = template.user()
-                .replace("{{question}}", question)
-                .replace("{{context}}", context);
+        String user =
+                template.user().replace("{{question}}", question).replace("{{context}}", context);
         return new LlmRequest(template.system(), user, aiProperties.getMaxOutputTokens());
     }
 
@@ -61,14 +62,30 @@ public class PromptBuilder {
 
     private String block(RetrievedChunk chunk) {
         return "--- BEGIN KNOWLEDGE CHUNK ---\n"
-                + "citation: [chunk:" + chunk.chunkId() + "]\n"
-                + "document_name: " + safe(chunk.documentName()) + "\n"
-                + "document_id: " + chunk.documentId() + "\n"
-                + "chunk_index: " + chunk.chunkIndex() + "\n"
-                + "page: " + (chunk.page() == null ? "unknown" : chunk.page()) + "\n"
-                + "version: " + (chunk.version() == null ? "unknown" : chunk.version()) + "\n"
-                + "update_time: " + safe(chunk.updateTime()) + "\n"
-                + "content:\n" + chunk.content() + "\n"
+                + "citation: [chunk:"
+                + chunk.chunkId()
+                + "]\n"
+                + "document_name: "
+                + safe(chunk.documentName())
+                + "\n"
+                + "document_id: "
+                + chunk.documentId()
+                + "\n"
+                + "chunk_index: "
+                + chunk.chunkIndex()
+                + "\n"
+                + "page: "
+                + (chunk.page() == null ? "unknown" : chunk.page())
+                + "\n"
+                + "version: "
+                + (chunk.version() == null ? "unknown" : chunk.version())
+                + "\n"
+                + "update_time: "
+                + safe(chunk.updateTime())
+                + "\n"
+                + "content:\n"
+                + chunk.content()
+                + "\n"
                 + "--- END KNOWLEDGE CHUNK ---\n";
     }
 

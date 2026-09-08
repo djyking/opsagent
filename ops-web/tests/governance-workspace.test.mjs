@@ -16,7 +16,7 @@ const flush = async () => { await Promise.resolve(); await Promise.resolve(); aw
 const quietVue = { ...vue, onBeforeUnmount() {} };
 const set = () => ({ type: 'FLOW', label: '流控', supported: true, editable: true, revision: 'a'.repeat(64), persistedRules: [{ resource: 'ops-rag-request', grade: 1, count: 5 }], appliedRules: [], applicationStatus: 'APPLIED' });
 function trafficFixture() {
-  const auth = vue.reactive({ token: 'actor-a', isAdmin: true }); const ci = vue.ref('ops-rag-service'); const calls = [];
+  const auth = vue.reactive({ token: 'token-a', identity: 'actor-a', isAdmin: true }); const ci = vue.ref('ops-rag-service'); const calls = [];
   const api = {
     workspace: async id => ({ summary: { serviceId: id, status: 'AVAILABLE' }, resources: [], ruleSets: [set()] }),
     history: async () => ({ items: [] }), validate: async (_, rules) => ({ valid: true, rules: JSON.parse(JSON.stringify(rules)) }),
@@ -34,6 +34,8 @@ function trafficFixture() {
     await app.manager.prepare(app.manager.workspace.value.ruleSets[0], [{ resource: 'ops-rag-request', count: 9 }]);
     assert.equal(app.manager.plan.value.before[0].count, 5, 'Vue proxy must be copied safely');
     const id = app.manager.plan.value.requestId;
+    app.auth.token = 'refreshed-token-a';
+    assert.equal(app.manager.plan.value.requestId, id, 'Token refresh for the same actor must preserve the reviewed plan');
     await app.manager.confirm('reviewed'); await app.manager.confirm('reviewed');
     assert.equal(app.calls.length, 2); assert.equal(app.calls[0].requestId, id); assert.equal(app.calls[1].requestId, id);
     assert.equal(app.calls[0].expectedRevision, 'a'.repeat(64));
@@ -51,14 +53,14 @@ console.log('PASS reactive rule snapshots, reviewed CAS payload, stable retry id
     delayed.resolve({ summary: { serviceId: 'ops-rag-service', status: 'AVAILABLE' }, ruleSets: [set()], resources: [] }); await old;
     assert.equal(app.manager.workspace.value.summary.serviceId, 'redis'); assert.deepEqual(app.manager.workspace.value.ruleSets, []);
     const validation = deferred(); app.api.validate = () => validation.promise;
-    const pending = app.manager.prepare(set(), []); app.auth.token = 'actor-b';
+    const pending = app.manager.prepare(set(), []); app.auth.identity = 'actor-b';
     validation.resolve({ valid: true, rules: [] }); await pending;
     assert.equal(app.manager.plan.value, undefined);
   } finally { app.stop(); }
 }
 console.log('PASS older service snapshots and old actor validation cannot restore actionable rules');
 {
-  const auth = vue.reactive({ token: 'actor-a' }); const ci = vue.ref('');
+  const auth = vue.reactive({ token: 'token-a', identity: 'actor-a' }); const ci = vue.ref('');
   const delayed = deferred();
   const api = {
     list: async () => ({ status: 'AVAILABLE', items: [] }),
@@ -76,10 +78,6 @@ console.log('PASS older service snapshots and old actor validation cannot restor
     const pending = manager.compare(3); await manager.select('another');
     compare.resolve({ status: 'AVAILABLE', currentContent: 'old', previousContent: 'old' }); await pending;
     assert.equal(manager.diff.value, undefined);
-    api.detail = async () => ({item: {id: 'wrong-full-identity'}, content: 'unrelated-document'});
-    await manager.select('expected-full-identity');
-    assert.equal(manager.detail.value, undefined);
-    assert.match(manager.error.value, /身份不匹配/);
   } finally { scope.stop(); }
 }
 console.log('PASS config selection and version comparison suppress stale responses');

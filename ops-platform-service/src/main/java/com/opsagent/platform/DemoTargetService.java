@@ -184,18 +184,17 @@ public class DemoTargetService {
         ObjectNode currentSnapshot = null;
         boolean current = false;
         String captureStatus = "HISTORICAL";
-        if (incident.recoveredAt() == null) {
-            try {
-                ObjectNode captured = capture(incident.targetCode());
-                incident = authorized(id, actor);
-                current =
-                        incident.recoveredAt() == null
-                                && id.equals(captured.path("incidentId").asText());
-                if (current) currentSnapshot = evidence.safeSnapshot(captured);
-                captureStatus = current ? "LIVE_OBSERVATION" : "HISTORICAL";
-            } catch (BusinessException unavailable) {
-                captureStatus = "LIVE_TARGET_UNAVAILABLE";
-            }
+        try {
+            // A recorded recovery does not replace the current technical verification.
+            // capture() keeps completed-incident observations immutable, while the live
+            // snapshot remains usable only while the runtime retains this exact incident ID.
+            ObjectNode captured = capture(incident.targetCode());
+            incident = authorized(id, actor);
+            current = id.equals(captured.path("incidentId").asText());
+            if (current) currentSnapshot = evidence.safeSnapshot(captured);
+            captureStatus = current ? "LIVE_OBSERVATION" : "HISTORICAL";
+        } catch (BusinessException unavailable) {
+            captureStatus = "LIVE_TARGET_UNAVAILABLE";
         }
         ObjectNode result =
                 json.createObjectNode()

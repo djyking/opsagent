@@ -29,18 +29,21 @@ class InternalTicketTools {
     private final AgentTicketEffectMapper effects;
     private final AlertEpisodeMapper episodes;
     private final ObjectMapper json;
+    private final AgentEventResultService machineResults;
 
     InternalTicketTools(
             TicketService service,
             TicketMapper tickets,
             AgentTicketEffectMapper effects,
             AlertEpisodeMapper episodes,
-            ObjectMapper json) {
+            ObjectMapper json,
+            AgentEventResultService machineResults) {
         this.service = service;
         this.tickets = tickets;
         this.effects = effects;
         this.episodes = episodes;
         this.json = json;
+        this.machineResults = machineResults;
     }
 
     void target(InternalActorTokens.Context actor, Ticket ticket) {
@@ -144,6 +147,11 @@ class InternalTicketTools {
                 } catch (IllegalArgumentException exception) {
                     throw new BusinessException(ErrorCode.VALIDATION, "无效工单状态");
                 }
+                boolean machineResult = input.has("machineResult");
+                if (machineResult) {
+                    if (target != TicketStatus.RESOLVED) throw conflict("AI 处理结果只用于已解决阶段");
+                    machineResults.validate(ticket, input.path("machineResult"));
+                }
                 if ("ISOLATED".equals(ticket.getEnvironment())
                         && (target == TicketStatus.RESOLVED || target == TicketStatus.CLOSED)) {
                     var episode =
@@ -155,15 +163,22 @@ class InternalTicketTools {
                     }
                 }
                 result =
-                        target == TicketStatus.ASSIGNED
-                                ? service.claim(
-                                        ticketId, new TicketDtos.Claim(call.expectedVersion()))
-                                : service.transition(
-                                        ticketId,
-                                        new TicketDtos.Action(
-                                                target,
-                                                call.expectedVersion(),
-                                                text(input, "comment", 512, false)));
+                        machineResult && "RESOLVED".equals(ticket.getStatus())
+                                ? service.detail(ticketId)
+                                : target == TicketStatus.ASSIGNED
+                                        ? service.claim(
+                                                ticketId,
+                                                new TicketDtos.Claim(call.expectedVersion()))
+                                        : service.transition(
+                                                ticketId,
+                                                new TicketDtos.Action(
+                                                        target,
+                                                        call.expectedVersion(),
+                                                        text(input, "comment", 512, false)));
+                if (machineResult) {
+                    machineResults.record(tickets.lock(ticketId), call, actor);
+                    result = service.detail(ticketId);
+                }
             }
             default -> throw denied("工具不在允许范围");
         }

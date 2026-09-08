@@ -2,8 +2,7 @@ package com.opsagent.agent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -28,10 +27,15 @@ import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
@@ -92,6 +96,83 @@ class AgentClientsTest {
                     server.clients()
                             .call("ticket", "/internal/agent/tickets/7", "GET", null, actor()));
             assertEquals(List.of("GET /internal/agent/tickets/7 HTTP/1.1"), server.requests());
+        }
+    }
+
+    @Test
+    void modelTransportAllowsConfiguredDecisionButRemainsInsideTheRunDeadline() throws Exception {
+        var clients =
+                new AgentClients(
+                        "test-internal-secret-".repeat(3),
+                        "http://localhost",
+                        "http://localhost",
+                        "http://localhost",
+                        "http://localhost");
+        var http = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn("{\"code\":0,\"data\":{}}");
+        when(http.sendAsync(
+                        any(),
+                        org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any()))
+                .thenReturn(CompletableFuture.completedFuture(response));
+        org.springframework.test.util.ReflectionTestUtils.setField(clients, "http", http);
+        clients.call("rag", "/internal/ai/turns", "POST", AgentJson.object(), actor());
+        var request = org.mockito.ArgumentCaptor.forClass(HttpRequest.class);
+        verify(http)
+                .sendAsync(
+                        request.capture(),
+                        org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any());
+        assertEquals(Duration.ofSeconds(130), request.getValue().timeout().orElseThrow());
+
+        clearInvocations(http);
+        var shortLease =
+                new Context(
+                        -1,
+                        "visitor",
+                        List.of("DEMO"),
+                        "test-run",
+                        AgentTargets.ORDER,
+                        Instant.now().plusSeconds(5));
+        clients.call("rag", "/internal/ai/turns", "POST", AgentJson.object(), shortLease);
+        verify(http)
+                .sendAsync(
+                        request.capture(),
+                        org.mockito.ArgumentMatchers.<HttpResponse.BodyHandler<String>>any());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                request.getValue().timeout().orElseThrow().compareTo(Duration.ofSeconds(5)) <= 0);
+    }
+
+    @Test
+    void modelTransportDeadlineIncludesTheBodyAfterResponseHeaders() throws Exception {
+        try (ReplyServer server =
+                new ReplyServer(new Reply(200, "{\"code\":0,\"data\":{}}", 3500))) {
+            var shortLease =
+                    new Context(
+                            -1,
+                            "visitor",
+                            List.of("DEMO"),
+                            "test-run",
+                            AgentTargets.ORDER,
+                            Instant.now().plusSeconds(2));
+            long started = System.nanoTime();
+            var failure =
+                    assertThrows(
+                            BusinessException.class,
+                            () ->
+                                    server.clients()
+                                            .call(
+                                                    "rag",
+                                                    "/internal/ai/turns",
+                                                    "POST",
+                                                    AgentJson.object(),
+                                                    shortLease));
+            assertEquals(ErrorCode.MIDDLEWARE_UNAVAILABLE, failure.getErrorCode());
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(3))
+                            < 0);
+            assertEquals(1, server.acceptedRequests);
         }
     }
 
@@ -163,7 +244,11 @@ class AgentClientsTest {
     /**
      * @author heyu
      */
-    private record Reply(int status, String body) {}
+    private record Reply(int status, String body, long bodyDelayMillis) {
+        Reply(int status, String body) {
+            this(status, body, 0);
+        }
+    }
 
     /**
      * 有界本地 HTTP 服务，不引入额外依赖或访问线上服务。
@@ -173,6 +258,7 @@ class AgentClientsTest {
     private static final class ReplyServer implements AutoCloseable {
         private final ServerSocket server;
         private final FutureTask<List<String>> exchange;
+        private volatile int acceptedRequests;
 
         ReplyServer(Reply... replies) throws Exception {
             server = new ServerSocket(0, 4, InetAddress.getByName("127.0.0.1"));
@@ -183,6 +269,7 @@ class AgentClientsTest {
                                 List<String> requests = new ArrayList<>();
                                 for (Reply reply : replies) {
                                     try (Socket socket = server.accept()) {
+                                        acceptedRequests++;
                                         socket.setSoTimeout(5000);
                                         BufferedReader reader =
                                                 new BufferedReader(
@@ -205,6 +292,9 @@ class AgentClientsTest {
                                                         + "Connection: close\r\n\r\n";
                                         socket.getOutputStream()
                                                 .write(headers.getBytes(StandardCharsets.UTF_8));
+                                        socket.getOutputStream().flush();
+                                        if (reply.bodyDelayMillis() > 0)
+                                            Thread.sleep(reply.bodyDelayMillis());
                                         socket.getOutputStream().write(body);
                                         socket.getOutputStream().flush();
                                     }

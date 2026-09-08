@@ -203,6 +203,143 @@ class AgentContextTest {
     }
 
     @Test
+    void summarizesRepeatedAssistantTextBeforeToolEvidenceAndPreservesEveryNativeCallField() {
+        ArrayNode messages = history(1);
+        ObjectNode assistant = (ObjectNode) messages.path(2);
+        assistant.put("content", "业务探针为429，接下来核对限流规则与变更时间。".repeat(800));
+        ObjectNode function = (ObjectNode) assistant.path("tool_calls").path(0).path("function");
+        function.put("arguments", "{\"revision\":\"exact-revision\",\"note\":\"中文🚀\\n原样\"}");
+        ObjectNode request = request(messages.deepCopy(), 40000).put("maxOutputTokens", 4096);
+        ObjectNode baseline = request.deepCopy();
+        ((ObjectNode) baseline.path("messages").path(2)).put("content", "短分析");
+        int remaining = (int) AgentContext.inputUpperBound(baseline) + 2000 + 4096;
+        request.put("remainingTokens", remaining);
+        JsonNode original = messages.deepCopy();
+
+        assertTrue(AgentContext.inputUpperBound(request) + 4096 > remaining);
+        assertTrue(AgentContext.fitNewRequest(request));
+
+        assertEquals(original, messages);
+        assertEquals(4096, request.path("maxOutputTokens").asInt());
+        assertEquals(messages.size(), request.path("messages").size());
+        for (int index = 0; index < messages.size(); index++) {
+            JsonNode before = messages.path(index);
+            JsonNode after = request.path("messages").path(index);
+            if (index == 2) {
+                ObjectNode expected = before.deepCopy();
+                expected.set("content", after.path("content"));
+                assertEquals(expected, after);
+                assertTrue(after.path("content").asText().contains("业务探针为429"));
+                assertTrue(after.path("content").asText().contains("完整正文见持久化消息"));
+                assertTrue(after.path("content").asText().length() <= 320);
+            } else {
+                assertEquals(before, after);
+            }
+        }
+        assertTrue(AgentContext.inputUpperBound(request) + 4096 <= remaining);
+    }
+
+    @Test
+    void reducesOnlyNewRequestOutputAllowanceWithinTheUnchangedRemainingBudget() {
+        for (int allowance : new int[] {2048, 1024}) {
+            ObjectNode request = requestWithoutToolDescriptions(40000).put("maxOutputTokens", 4096);
+            long input = AgentContext.inputUpperBound(request);
+            request.put("remainingTokens", input + allowance);
+            JsonNode messages = request.path("messages").deepCopy();
+            JsonNode tools = request.path("tools").deepCopy();
+
+            assertTrue(AgentContext.fitNewRequest(request));
+
+            assertEquals(allowance, request.path("maxOutputTokens").asInt());
+            assertEquals(input, AgentContext.inputUpperBound(request));
+            assertEquals(input + allowance, request.path("remainingTokens").asLong());
+            assertEquals(messages, request.path("messages"));
+            assertEquals(tools, request.path("tools"));
+        }
+    }
+
+    @Test
+    void refusesOutputBelowMeaningfulMinimumAndNeverRelaxesNativeInputLimit() {
+        ObjectNode request = requestWithoutToolDescriptions(40000).put("maxOutputTokens", 4096);
+        request.put("remainingTokens", AgentContext.inputUpperBound(request) + 1023);
+        JsonNode original = request.deepCopy();
+
+        assertFalse(AgentContext.fitNewRequest(request));
+        assertEquals(original, request);
+
+        ((ObjectNode) request.path("messages").path(0)).put("content", "不可压缩的系统规则".repeat(2000));
+        request.put("remainingTokens", 100000);
+        original = request.deepCopy();
+        assertTrue(AgentContext.inputUpperBound(request) > 32768);
+        assertFalse(AgentContext.fitNewRequest(request));
+        assertEquals(original, request);
+    }
+
+    @Test
+    void descriptionCompactionCanRecoverOutputHeadroomWithoutChangingFrozenPermissions() {
+        ObjectNode request = request(history(0), 40000).put("maxOutputTokens", 4096);
+        JsonNode frozenTools = request.path("tools");
+        JsonNode originalTools = frozenTools.deepCopy();
+        JsonNode originalMessages = request.path("messages").deepCopy();
+        long originalInput = AgentContext.inputUpperBound(request);
+        long remaining = originalInput + 1023;
+        request.put("remainingTokens", remaining);
+
+        assertTrue(AgentContext.fitNewRequest(request));
+
+        assertEquals(remaining, request.path("remainingTokens").asLong());
+        assertEquals(originalMessages, request.path("messages"));
+        assertEquals(originalTools, frozenTools);
+        assertEquals(frozenTools.size(), request.path("tools").size());
+        assertTrue(AgentContext.inputUpperBound(request) < originalInput);
+        assertTrue(request.path("maxOutputTokens").asInt() >= 1024);
+        assertTrue(
+                AgentContext.inputUpperBound(request) + request.path("maxOutputTokens").asInt()
+                        <= remaining);
+        for (int index = 0; index < frozenTools.size(); index++) {
+            JsonNode before = frozenTools.path(index).path("function");
+            JsonNode after = request.path("tools").path(index).path("function");
+            assertEquals(before.path("name"), after.path("name"));
+            assertEquals(before.path("parameters"), after.path("parameters"));
+            if (AgentTools.HIGH.contains(before.path("name").asText())) assertEquals(before, after);
+        }
+    }
+
+    @Test
+    void runtimeSummarizesNewRequestButRetainsFullAssistantAnalysisAndObservation() {
+        var fixture = new AgentTestSupport();
+        String id = fixture.create("assistant-context-budget", -1);
+        fixture.step();
+        ObjectNode state = fixture.store.get(id).state();
+        ArrayNode messages = history(1);
+        ((ObjectNode) messages.path(2)).put("content", "业务探针为429，需要独立证据核对规则修订号与时序。".repeat(800));
+        state.set("messages", messages);
+        state.put("turns", 2).put("tokens", 14000).put("tokenBudget", 40000);
+        ObjectNode observation = AgentJson.object().put("raw", "完整原始业务探针".repeat(1000));
+        state.withObject("/observations").set("diagnose:2:0", observation);
+        fixture.jdbc.update("UPDATE agent_run SET state_json=? WHERE id=?", state.toString(), id);
+
+        fixture.step();
+
+        var run = fixture.store.get(id);
+        JsonNode intent = run.state().path("modelIntent");
+        assertEquals("QUEUED", run.status());
+        assertTrue(intent.isObject());
+        assertEquals(messages, run.state().path("messages"));
+        assertEquals(observation, run.state().path("observations").path("diagnose:2:0"));
+        assertEquals(14000, run.state().path("tokens").asInt());
+        assertEquals(26000, intent.path("remainingTokens").asInt());
+        assertTrue(intent.path("messages").path(2).path("content").asText().length() <= 320);
+        assertEquals(
+                messages.path(2).path("tool_calls"),
+                intent.path("messages").path(2).path("tool_calls"));
+        assertTrue(
+                AgentContext.inputUpperBound(intent) + intent.path("maxOutputTokens").asInt()
+                        <= 26000);
+        assertEquals(0, fixture.clients.modelRequests.size());
+    }
+
+    @Test
     void runtimeFitsNewIntentButKeepsStoredObservationAndConversationEvidenceIntact() {
         var fixture = new AgentTestSupport();
         String id = fixture.create("context-budget", -1);
@@ -272,7 +409,7 @@ class AgentContextTest {
     }
 
     @Test
-    void eightToolDecisionRoundsWithLargeChineseEvidenceFinishInsideEveryNativeBudget() {
+    void repeatedPaidRetrievalStopsBeforeAnUnaffordableNativeRoundAndRetainsEvidence() {
         var fixture = new AgentTestSupport();
         String rawDescription = "中文工单完整现场诊断".repeat(1200) + "原文结尾";
         ObjectNode knowledge = AgentJson.object();
@@ -354,6 +491,10 @@ class AgentContextTest {
         AgentRuntime runtime =
                 new AgentRuntime(fixture.store, clients, new AgentTools(clients), true);
         String id = fixture.create("eight-context-rounds", -1);
+        ObjectNode initialState = fixture.store.get(id).state();
+        initialState.put("tokenBudget", 40000);
+        fixture.jdbc.update(
+                "UPDATE agent_run SET state_json=? WHERE id=?", initialState.toString(), id);
         for (int step = 0; step < 140 && fixture.store.get(id).status().equals("QUEUED"); step++) {
             fixture.jdbc.update("UPDATE agent_run SET next_attempt=TIMESTAMPADD(SECOND,-1,NOW(3))");
             runtime.tick();
@@ -361,7 +502,7 @@ class AgentContextTest {
 
         var run = fixture.store.get(id);
         assertEquals(
-                "COMPLETED",
+                "BUDGET_EXCEEDED",
                 run.status(),
                 () ->
                         "turns="
@@ -372,9 +513,19 @@ class AgentContextTest {
                                 + run.state().path("tokens")
                                 + ", reason="
                                 + run.state().path("message"));
-        assertTrue(run.state().path("ticketResolved").asBoolean());
-        assertEquals(9, clients.modelRequests.size());
-        assertEquals(17100, run.state().path("tokens").asInt());
+        assertFalse(run.state().path("ticketResolved").asBoolean());
+        assertTrue(clients.modelRequests.size() < 9);
+        int retrievals = run.state().path("toolAiReservations").size();
+        assertTrue(retrievals > 0);
+        assertEquals(
+                1900 * clients.modelRequests.size()
+                        + retrievals
+                                * com.opsagent.common.core.QueryEmbeddingBudget.reserve("故障诊断证据"),
+                run.state().path("tokens").asInt());
+        assertTrue(run.state().path("tokens").asInt() < 40000);
+        int attempted = clients.modelRequests.size();
+        runtime.tick();
+        assertEquals(attempted, clients.modelRequests.size());
         assertEquals(
                 rawDescription,
                 run.state().path("observations").path("diagnose:1:0").path("description").asText());
@@ -387,6 +538,13 @@ class AgentContextTest {
                                                 && event.path("payload")
                                                         .path("result")
                                                         .equals(knowledge)));
+    }
+
+    private static ObjectNode requestWithoutToolDescriptions(int remaining) {
+        ObjectNode request = request(history(0), remaining);
+        for (JsonNode tool : request.path("tools"))
+            ((ObjectNode) tool.path("function")).put("description", "");
+        return request;
     }
 
     private static ObjectNode request(ArrayNode messages, int remaining) {

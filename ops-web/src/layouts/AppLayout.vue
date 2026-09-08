@@ -56,8 +56,7 @@ function logout() { auth.logout(); router.push('/login'); }
         <RouterLink v-if="parent" class="module-parent-link" :to="parent"><ArrowLeft :size="15" />返回{{ route.meta.parentTitle }}</RouterLink>
         <nav v-if="secondaryNavigation.length" class="module-secondary-navigation" aria-label="模块二级导航"><RouterLink v-for="item in secondaryNavigation" :key="item.to" :to="item.to" :aria-current="route.path === item.to ? 'page' : undefined"><component :is="item.icon" :size="16" />{{ item.label }}</RouterLink></nav>
         <p v-if="route.path === '/rag/chat'" class="assistant-scope-note"><strong>AI 助手</strong><span>用于通用问答与知识检索；具体事件的诊断、审批和执行记录保存在事件工作区。</span><RouterLink to="/tickets">进入事件处置</RouterLink></p>
-        <!-- Commit module chrome and business content in the same Vue update; an out-in exit kept the previous page below the next navigation. -->
-        <RouterView v-slot="{ Component, route: contentRoute }"><component :is="Component" :key="contentRoute.path" /></RouterView>
+        <RouterView v-slot="{ Component }"><component :is="Component" :key="route.path" /></RouterView>
       </div>
     </main>
     <GlobalApprovalInbox />

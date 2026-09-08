@@ -58,7 +58,8 @@ class EventWorkspaceContextTest {
                         mapper,
                         mock(AgentTicketEffectMapper.class),
                         mock(AlertEpisodeMapper.class),
-                        new ObjectMapper());
+                        new ObjectMapper(),
+                        mock(AgentEventResultService.class));
         controller =
                 new InternalTicketController(
                         service,

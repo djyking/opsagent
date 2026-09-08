@@ -22,6 +22,7 @@ import java.time.Duration;
 public class DemoRedis {
     private final String host;
     private final String password;
+    private final int baselinePort;
     private final DefaultClientResources resources =
             DefaultClientResources.builder()
                     .ioThreadPoolSize(2)
@@ -35,9 +36,13 @@ public class DemoRedis {
 
     DemoRedis(
             @Value("${ops.demo.redis-host}") String host,
-            @Value("${ops.demo.redis-password}") String password) {
+            @Value("${ops.demo.redis-password}") String password,
+            @Value("${ops.demo.redis-port:6379}") int baselinePort) {
         this.host = host;
         this.password = password;
+        if (baselinePort < 1 || baselinePort > 65534)
+            throw new IllegalArgumentException("INVALID_BASELINE_PORT");
+        this.baselinePort = baselinePort;
     }
 
     synchronized String catalog(int port) {
@@ -45,7 +50,8 @@ public class DemoRedis {
         if (connection == null || connectedPort != port || !connection.isOpen()) {
             closeConnection();
             RedisURI.Builder uri =
-                    RedisURI.Builder.redis(host, port).withTimeout(Duration.ofMillis(500));
+                    RedisURI.Builder.redis(host, baselinePort + (port == 6380 ? 1 : 0))
+                            .withTimeout(Duration.ofMillis(500));
             if (!password.isBlank()) uri.withPassword(password.toCharArray());
             client = RedisClient.create(resources, uri.build());
             connection = client.connect();
@@ -67,7 +73,7 @@ public class DemoRedis {
             if (notificationClient != null)
                 notificationClient.shutdown(Duration.ZERO, Duration.ofMillis(200));
             RedisURI.Builder uri =
-                    RedisURI.Builder.redis(host, 6379).withTimeout(Duration.ofMillis(500));
+                    RedisURI.Builder.redis(host, baselinePort).withTimeout(Duration.ofMillis(500));
             if (!password.isBlank()) uri.withPassword(password.toCharArray());
             notificationClient = RedisClient.create(resources, uri.build());
             notificationConnection = notificationClient.connect();

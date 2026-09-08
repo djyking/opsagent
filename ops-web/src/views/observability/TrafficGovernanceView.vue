@@ -52,7 +52,7 @@ function summary(rule: TrafficRule) {
 let timer: ReturnType<typeof setInterval>;
 onMounted(() => { void manager.load(); void manager.loadHistory(); timer = setInterval(() => { if (!document.hidden && !busy.value && !editing.value && !plan.value) void manager.load(); }, 15000); });
 onBeforeUnmount(() => clearInterval(timer));
-watch([() => auth.token, ciCode, selectedType], () => { editing.value = false; draft.value = {}; comment.value = ''; });
+watch([() => auth.identity, ciCode, selectedType], () => { editing.value = false; draft.value = {}; comment.value = ''; });
 </script>
 <template>
   <ObservabilityWorkspaceView title="服务与观测" description="实时核对流量与保护规则，让每一次限制都有依据。">

@@ -2,12 +2,12 @@ package com.opsagent.knowledge;
 
 import com.opsagent.common.core.ApiResponse;
 
-import jakarta.validation.constraints.*;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.security.access.prepost.PreAuthorize;
 
 import java.util.*;
 
@@ -33,8 +33,7 @@ public class KnowledgeController {
      * @since 2026/8/17
      */
     record BaseRequest(
-            @NotBlank @Size(max = 128) String name,
-            @Size(max = 500) String description) {}
+            @NotBlank @Size(max = 128) String name, @Size(max = 500) String description) {}
 
     /**
      * 知识审核意见请求。
@@ -43,6 +42,11 @@ public class KnowledgeController {
      * @since 2026/9/3
      */
     record ReviewRequest(@Size(max = 1000) String comment) {}
+
+    record ReviewApproval(
+            @jakarta.validation.constraints.NotNull @jakarta.validation.constraints.Min(0)
+                    Integer version,
+            @Size(max = 1000) String comment) {}
 
     @PostMapping("/bases")
     ApiResponse<Long> create(@Valid @RequestBody BaseRequest r) {
@@ -86,6 +90,19 @@ public class KnowledgeController {
     @GetMapping("/documents/{id}/chunks")
     ApiResponse<List<Map<String, Object>>> chunks(@PathVariable long id) {
         return ApiResponse.success(service.chunks(id));
+    }
+
+    @GetMapping("/documents/{id}/draft-text")
+    ApiResponse<KnowledgeService.DraftText> draftText(@PathVariable long id) {
+        return ApiResponse.success(service.draftText(id));
+    }
+
+    @PutMapping("/documents/{id}/draft-file")
+    ApiResponse<Map<String, Object>> reviseDraft(
+            @PathVariable long id,
+            @RequestParam @Min(1) int version,
+            @RequestPart MultipartFile file) {
+        return ApiResponse.success(service.reviseDraft(id, version, file));
     }
 
     @DeleteMapping("/documents/{id}")
@@ -156,15 +173,17 @@ public class KnowledgeController {
      * @author heyu
      * @since 2026/9/3
      */
-    record RetryIndexRequest(@NotNull @Min(0) Integer documentVersion,
-                             @NotBlank @Pattern(regexp = "INDEX|DELETE") String operation) {}
+    record RetryIndexRequest(
+            @NotNull @Min(0) Integer documentVersion,
+            @NotBlank @Pattern(regexp = "INDEX|DELETE") String operation) {}
 
     @PostMapping("/admin/index/tasks/{taskId}/retry")
     @PreAuthorize("hasRole('ADMIN')")
     ApiResponse<Long> retryIndexTask(
             @PathVariable long taskId, @Valid @RequestBody RetryIndexRequest request) {
-        return ApiResponse.success(service.retryFailedIndexTask(
-                taskId, request.documentVersion(), request.operation()));
+        return ApiResponse.success(
+                service.retryFailedIndexTask(
+                        taskId, request.documentVersion(), request.operation()));
     }
 
     @GetMapping("/internal/debug/search")
@@ -176,13 +195,14 @@ public class KnowledgeController {
             @RequestParam(required = false) Long documentId,
             @RequestParam(required = false) Set<Long> allowedKnowledgeBaseIds,
             @RequestParam(defaultValue = "false") boolean administratorPreview) {
-        return ApiResponse.success(service.debugSearch(
-                query,
-                topK,
-                knowledgeBaseId,
-                documentId,
-                allowedKnowledgeBaseIds,
-                administratorPreview));
+        return ApiResponse.success(
+                service.debugSearch(
+                        query,
+                        topK,
+                        knowledgeBaseId,
+                        documentId,
+                        allowedKnowledgeBaseIds,
+                        administratorPreview));
     }
 
     @GetMapping("/review/documents")
@@ -200,9 +220,8 @@ public class KnowledgeController {
     @PostMapping("/documents/{id}/approve")
     @PreAuthorize("hasAnyRole('OPS','ADMIN')")
     ApiResponse<Map<String, Object>> approve(
-            @PathVariable long id, @RequestBody(required = false) ReviewRequest request) {
-        return ApiResponse.success(
-                service.approveReview(id, request == null ? null : request.comment()));
+            @PathVariable long id, @Valid @RequestBody ReviewApproval request) {
+        return ApiResponse.success(service.approveReview(id, request.comment(), request.version()));
     }
 
     @PostMapping("/documents/{id}/reject")

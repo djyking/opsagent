@@ -21,6 +21,23 @@ import java.util.concurrent.Executors;
  */
 class AgentStoreTest {
     @Test
+    void workerFenceCoversModelTransportWithoutExtendingTheOriginalRunDeadline() {
+        var fixture = new AgentTestSupport();
+        String id = fixture.create("bounded-model-lease", -1);
+        String deadline = fixture.store.get(id).state().path("deadline").asText();
+        var run = fixture.store.claim();
+        Long remaining =
+                fixture.jdbc.queryForObject(
+                        "SELECT TIMESTAMPDIFF(SECOND,NOW(3),lease_until) FROM agent_run WHERE id=?",
+                        Long.class,
+                        id);
+        assertNotNull(remaining);
+        assertTrue(remaining > 130 && remaining <= 150);
+        assertEquals(deadline, run.state().path("deadline").asText());
+        assertNull(fixture.store.claim());
+    }
+
+    @Test
     void concurrentDuplicateTriggerCreatesOnlyOneRunAndWake() throws Exception {
         var fixture = new AgentTestSupport();
         var executor = Executors.newFixedThreadPool(4);

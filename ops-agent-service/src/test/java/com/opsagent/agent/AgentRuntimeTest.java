@@ -16,13 +16,146 @@ import java.time.Instant;
  */
 class AgentRuntimeTest {
     @Test
+    void contextBudgetStopResumesSameRunWithoutResettingItsAllowanceOrEvidence() {
+        var fixture = new AgentTestSupport();
+        String id = fixture.create("context-only-stop", -1);
+        var state = fixture.store.get(id).state();
+        state.put("tokens", 21479).put("tokenBudget", 40000).put("turns", 2).put("toolCount", 7);
+        state.put("message", "剩余Token预算无法容纳原生调用链、关键观测与回复预留；未登记新模型请求");
+        state.putArray("pendingCalls");
+        state.withObject("/observations").put("evidence", "原始证据保留");
+        var original = state.deepCopy();
+        fixture.jdbc.update(
+                "UPDATE agent_run SET status='BUDGET_EXCEEDED',state_json=? WHERE id=?",
+                state.toString(),
+                id);
+        fixture.store.resume(id, -1);
+        var resumed = fixture.store.get(id);
+        assertEquals("QUEUED", resumed.status());
+        original.remove("message");
+        assertEquals(original, resumed.state());
+        assertEquals(0, fixture.clients.modelRequests.size());
+    }
+
+    @Test
+    void spentBudgetAndUncertainModelIntentsCannotResumeAsAContextOnlyStop() {
+        var fixture = new AgentTestSupport();
+        String id = fixture.create("non-resumable-budget", -1);
+        var state = fixture.store.get(id).state();
+        state.put("tokens", 40000).put("tokenBudget", 40000);
+        state.put("message", "剩余Token预算无法容纳原生调用链、关键观测与回复预留；未登记新模型请求");
+        state.putArray("pendingCalls");
+        fixture.jdbc.update(
+                "UPDATE agent_run SET status='BUDGET_EXCEEDED',state_json=? WHERE id=?",
+                state.toString(),
+                id);
+        assertThrows(
+                com.opsagent.common.core.BusinessException.class,
+                () -> fixture.store.resume(id, -1));
+        state.put("tokens", 21479)
+                .set("modelIntent", AgentJson.object().put("callId", "uncertain-call"));
+        fixture.jdbc.update("UPDATE agent_run SET state_json=? WHERE id=?", state.toString(), id);
+        assertThrows(
+                com.opsagent.common.core.BusinessException.class,
+                () -> fixture.store.resume(id, -1));
+        assertEquals("BUDGET_EXCEEDED", fixture.store.get(id).status());
+        assertEquals(0, fixture.clients.modelRequests.size());
+    }
+
+    @Test
+    void fiveIndependentFactReadsRetainNativeCallIdsAndExecuteWithinTheSameBudget() {
+        var fixture =
+                new AgentTestSupport(
+                        new AgentTestSupport.FakeClients() {
+                            @Override
+                            JsonNode call(
+                                    String audience,
+                                    String path,
+                                    String method,
+                                    JsonNode body,
+                                    com.opsagent.common.security.InternalActorTokens.Context
+                                            actor) {
+                                if (path.equals("/internal/agent/tickets/7/history"))
+                                    return AgentJson.MAPPER.createArrayNode();
+                                if (path.endsWith("/evidence"))
+                                    return AgentJson.object()
+                                            .put("current", true)
+                                            .put("incidentId", "incident-1")
+                                            .put("targetCode", "ops-demo-order-service");
+                                return super.call(audience, path, method, body, actor);
+                            }
+                        });
+        fixture.clients.model = request -> fiveCalls(false);
+        String id = fixture.create("five-fact-reads", -1);
+        for (int i = 0; i < 3; i++) fixture.step();
+        var state = fixture.store.get(id).state();
+        assertEquals(5, state.path("pendingCalls").size());
+        for (int i = 0; i < 5; i++)
+            assertEquals(
+                    "fact-" + i,
+                    state.path("pendingCalls").path(i).path("providerCallId").asText());
+        for (int i = 0; i < 12 && fixture.store.get(id).state().path("toolCount").asInt() < 5; i++)
+            fixture.step();
+        assertEquals(5, fixture.store.get(id).state().path("toolCount").asInt());
+        assertEquals(10, fixture.store.get(id).state().path("tokens").asInt());
+        assertEquals(1, fixture.clients.modelRequests.size());
+        assertEquals(0, fixture.clients.actions);
+        assertEquals(0, fixture.store.approvals(id).size());
+    }
+
+    @Test
+    void oversizedBatchContainingAWriteStillStopsBeforeExecutingAnyCall() {
+        var fixture = new AgentTestSupport();
+        fixture.clients.model = request -> fiveCalls(true);
+        String id = fixture.create("oversized-write-batch", -1);
+        for (int i = 0; i < 3; i++) fixture.step();
+        var run = fixture.store.get(id);
+        assertEquals("NEEDS_ATTENTION", run.status());
+        assertFalse(run.state().has("pendingCalls"));
+        assertEquals(0, run.state().path("toolCount").asInt());
+        assertEquals(0, fixture.clients.actions);
+        assertEquals(0, fixture.store.approvals(id).size());
+    }
+
+    private static JsonNode fiveCalls(boolean write) {
+        ObjectNode result =
+                (ObjectNode) AgentTestSupport.response("ticket_get", AgentJson.object());
+        var calls = ((ObjectNode) result.path("assistantMessage")).putArray("tool_calls");
+        var names =
+                java.util.List.of(
+                        "ticket_get",
+                        "ticket_history",
+                        "demo_target_inspect",
+                        "recent_changes",
+                        write ? "demo_config_restore" : "observability_evidence");
+        for (int i = 0; i < names.size(); i++) {
+            ObjectNode arguments = AgentJson.object();
+            if (write && i == 4) arguments.put("expectedRevision", "a".repeat(64));
+            ObjectNode call = calls.addObject().put("id", "fact-" + i).put("type", "function");
+            call.set(
+                    "function",
+                    AgentJson.object()
+                            .put("name", names.get(i))
+                            .put("arguments", arguments.toString()));
+        }
+        return result;
+    }
+
+    @Test
     void retriedModelDecisionStillCreatesOneExactApprovalAndChargesReservedUsage() {
         var fixture = new AgentTestSupport();
-        fixture.clients.model = request -> {
-            ObjectNode result = (ObjectNode) AgentTestSupport.response("demo_config_restore",
-                    AgentJson.object().put("expectedRevision", "a".repeat(64)));
-            return result.put("attempts", 2).put("usageKnown", false).put("budgetTokens", 9500);
-        };
+        fixture.clients.model =
+                request -> {
+                    ObjectNode result =
+                            (ObjectNode)
+                                    AgentTestSupport.response(
+                                            "demo_config_restore",
+                                            AgentJson.object()
+                                                    .put("expectedRevision", "a".repeat(64)));
+                    return result.put("attempts", 2)
+                            .put("usageKnown", false)
+                            .put("budgetTokens", 9500);
+                };
         String id = fixture.create("retried-read-only-decision", -1);
         for (int i = 0; i < 5; i++) fixture.step();
         assertEquals("WAITING_APPROVAL", fixture.store.get(id).status());
@@ -31,8 +164,13 @@ class AgentRuntimeTest {
         assertEquals(1, fixture.store.get(id).state().path("turns").asInt());
         assertEquals(1, fixture.store.approvals(id).size());
         JsonNode approval = fixture.store.approvals(id).get(0);
-        fixture.store.decide(approval.path("id").asText(), 1,
-                approval.path("args_hash").asText(), true, "同意", -1);
+        fixture.store.decide(
+                approval.path("id").asText(),
+                1,
+                approval.path("args_hash").asText(),
+                true,
+                "同意",
+                -1);
         fixture.step();
         assertEquals(1, fixture.clients.actions);
         assertEquals(1, fixture.clients.modelRequests.size());
@@ -42,14 +180,20 @@ class AgentRuntimeTest {
     void failedModelDecisionHasChineseRecoveryReasonAndCannotBeResubmittedByResume() {
         var fixture = new AgentTestSupport();
         String id = fixture.create("no-model-resubmit", -1);
-        fixture.clients.model = request -> { throw AgentJson.invalid("MODEL_OUTCOME_UNKNOWN"); };
+        fixture.clients.model =
+                request -> {
+                    throw AgentJson.invalid("MODEL_OUTCOME_UNKNOWN");
+                };
         for (int i = 0; i < 3; i++) fixture.step();
         var run = fixture.store.get(id);
         assertEquals("NEEDS_ATTENTION", run.status());
         assertFalse(run.state().path("modelFailure").path("canResume").asBoolean(true));
-        assertEquals("MODEL_OUTCOME_UNKNOWN", run.state().path("modelFailure").path("code").asText());
+        assertEquals(
+                "MODEL_OUTCOME_UNKNOWN", run.state().path("modelFailure").path("code").asText());
         assertTrue(run.state().path("message").asText().contains("新的隔离演练"));
-        assertThrows(com.opsagent.common.core.BusinessException.class, () -> fixture.store.resume(id, -1));
+        assertThrows(
+                com.opsagent.common.core.BusinessException.class,
+                () -> fixture.store.resume(id, -1));
         assertEquals(0, fixture.clients.actions);
         assertEquals(1, fixture.clients.modelRequests.size());
     }
@@ -62,18 +206,28 @@ class AgentRuntimeTest {
         fixture.step();
         var state = fixture.store.get(id).state();
         state.put("message", "MODEL_OUTCOME_UNKNOWN");
-        fixture.jdbc.update("UPDATE agent_run SET status='NEEDS_ATTENTION',state_json=? WHERE id=?",
-                state.toString(), id);
-        assertEquals("MODEL_OUTCOME_UNKNOWN", AgentModelFailure.fromState(state).path("code").asText());
-        assertThrows(com.opsagent.common.core.BusinessException.class, () -> fixture.store.resume(id, -1));
+        fixture.jdbc.update(
+                "UPDATE agent_run SET status='NEEDS_ATTENTION',state_json=? WHERE id=?",
+                state.toString(),
+                id);
+        assertEquals(
+                "MODEL_OUTCOME_UNKNOWN", AgentModelFailure.fromState(state).path("code").asText());
+        assertThrows(
+                com.opsagent.common.core.BusinessException.class,
+                () -> fixture.store.resume(id, -1));
         state.remove("message");
-        fixture.jdbc.update("UPDATE agent_run SET status='PAUSED',state_json=? WHERE id=?", state.toString(), id);
+        fixture.jdbc.update(
+                "UPDATE agent_run SET status='PAUSED',state_json=? WHERE id=?",
+                state.toString(),
+                id);
         fixture.store.resume(id, -1);
         assertEquals("QUEUED", fixture.store.get(id).status());
         state.remove("modelIntent");
         state.put("message", "工单版本冲突，请检查后继续");
-        fixture.jdbc.update("UPDATE agent_run SET status='NEEDS_ATTENTION',state_json=? WHERE id=?",
-                state.toString(), id);
+        fixture.jdbc.update(
+                "UPDATE agent_run SET status='NEEDS_ATTENTION',state_json=? WHERE id=?",
+                state.toString(),
+                id);
         fixture.store.resume(id, -1);
         assertEquals("QUEUED", fixture.store.get(id).status());
     }
@@ -98,7 +252,9 @@ class AgentRuntimeTest {
         fixture.step();
         assertEquals(intent, fixture.clients.modelRequests.get(1));
         assertEquals(1, fixture.store.get(id).state().path("turns").asInt());
-        assertEquals(8000, fixture.store.get(id).state().path("tokens").asInt());
+        assertEquals(
+                intent.path("remainingTokens").asInt(),
+                fixture.store.get(id).state().path("tokens").asInt());
         assertEquals("NEEDS_ATTENTION", fixture.store.get(id).status());
     }
 
