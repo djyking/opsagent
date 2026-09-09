@@ -3,7 +3,7 @@ import { h, type VNodeChild } from 'vue';
 // Render supported Markdown as Vue nodes; model output is never interpreted as HTML.
 function inline(text: string): VNodeChild[] {
   const nodes: VNodeChild[] = [];
-  const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
+  const pattern = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\((?:https?:\/\/[^\s)]+|\/(?:dashboard|automation(?:\?tab=(?:workflows(?:&definition=[a-z][a-z0-9-]{0,60})?|experience(?:&target=ops-demo-(?:order|notification)-service)?|runs))?|tickets|knowledge|rag\/chat|observability\/(?:topology|catalog|metrics|config(?:\/managed)?|traffic|inspections|wallboard)))\))/g;
   let start = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index!;
@@ -13,7 +13,7 @@ function inline(text: string): VNodeChild[] {
     else if (value.startsWith('**')) nodes.push(h('strong', value.slice(2, -2)));
     else {
       const link = /^\[([^\]]+)\]\((.+)\)$/.exec(value)!;
-      nodes.push(h('a', { href: link[2], target: '_blank', rel: 'noopener noreferrer' }, link[1]));
+      nodes.push(h('a', { href: link[2], target: link[2]!.startsWith('/') ? '_self' : '_blank', rel: 'noopener noreferrer' }, link[1]));
     }
     start = index + value.length;
   }
@@ -24,8 +24,9 @@ function inline(text: string): VNodeChild[] {
 function cells(line: string) {
   return line.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'));
 }
-export function renderAnswer(content: string) {
-  const lines = content.replace(/\r\n/g, '\n').replace(/\[chunk:\d+\]/g, '').split('\n');
+export function renderAnswer(content: string, options: { stripChunkMarkers?: boolean } = {}) {
+  const normalized = content.replace(/\r\n/g, '\n');
+  const lines = (options.stripChunkMarkers === false ? normalized : normalized.replace(/\[chunk:\d+\]/g, '')).split('\n');
   const nodes: VNodeChild[] = [];
   let i = 0;
   const structural = (line: string) => /^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|```|~~~|(?:---+|\*\*\*+)\s*$)/.test(line.trim());

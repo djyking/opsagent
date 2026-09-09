@@ -80,8 +80,24 @@ public class SecurityAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(VisitorSessionVerifier.class)
+    VisitorSessionVerifier visitorSessionVerifier(
+            @org.springframework.beans.factory.annotation.Value(
+                            "${ops.agent.internal-secret:${OPS_AGENT_INTERNAL_SECRET:}}")
+                    String secret,
+            @org.springframework.beans.factory.annotation.Value(
+                            "${ops.agent.auth-url:${OPS_AUTH_INTERNAL_URL:http://localhost:8101}}")
+                    String authUrl) {
+        return VisitorSessionVerifier.remote(secret, authUrl);
+    }
+
+    @Bean
     SecurityFilterChain opsSecurityFilterChain(
-            HttpSecurity http, JwtService jwt, JwtProperties p, ObjectMapper mapper)
+            HttpSecurity http,
+            JwtService jwt,
+            JwtProperties p,
+            ObjectMapper mapper,
+            VisitorSessionVerifier visitorSessions)
             throws Exception {
         return http.csrf(c -> c.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -123,7 +139,7 @@ public class SecurityAutoConfiguration {
                                         .anyRequest()
                                         .authenticated())
                 .addFilterBefore(
-                        new JwtAuthenticationFilter(jwt),
+                        new JwtAuthenticationFilter(jwt, visitorSessions),
                         UsernamePasswordAuthenticationFilter.class)
                 .build();
     }

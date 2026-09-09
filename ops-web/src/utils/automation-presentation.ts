@@ -118,7 +118,7 @@ export function runModelFailure(run?: RunDetail): ModelFailure | undefined {
     canResume: false, retryable: false, recoveryAction: 'NEW_RUN' };
 }
 export function approvalActionable(approval: PendingApproval, userId: number | undefined, admin: boolean, now: number) {
-  return (admin || approval.ownerId === userId) && approval.status === 'PENDING' && !approval.pauseRequested
+  return approval.canOperate !== false && (admin || approval.ownerId === userId) && approval.status === 'PENDING' && !approval.pauseRequested
     && ['WAITING_APPROVAL', 'WAITING_INPUT'].includes(approval.runStatus)
     && new Date(approval.expires_at).getTime() > now && new Date(approval.runDeadline).getTime() > now;
 }

@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -17,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 读取 AI 供应商的 SSE 响应，并在首个 Token 前执行有限重试。
@@ -26,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Component
 public class AiStreamHttpExecutor {
+    private static final Logger LOG = LoggerFactory.getLogger(AiStreamHttpExecutor.class);
     private final ObjectMapper mapper;
 
     AiStreamHttpExecutor(ObjectMapper mapper) {
@@ -42,9 +47,32 @@ public class AiStreamHttpExecutor {
             int maximumAttempts,
             StreamEventHandler handler) {
         int attempts = Math.max(1, Math.min(maximumAttempts, 3));
+        AiProviderException lastFailure = null;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             AtomicBoolean emitted = new AtomicBoolean();
-            var reservation = AssistantTokenBudget.reserve(provider, body);
+            AtomicInteger responseStatus = new AtomicInteger();
+            AssistantTokenBudget.Reservation reservation;
+            try {
+                reservation = AssistantTokenBudget.reserve(provider, body);
+            } catch (AiProviderException rejected) {
+                if (rejected.kind() == AiProviderException.FailureKind.BUDGET
+                        && lastFailure != null) {
+                    LOG.warn(
+                            "AI stream retry stopped: provider={}, nextAttempt={}, reason=BUDGET,"
+                                + " originalKind={}, originalStatus={}, transport={}, traceId={}",
+                            provider,
+                            attempt,
+                            lastFailure.kind(),
+                            lastFailure.statusCode(),
+                            lastFailure.diagnosticCode(),
+                            traceId());
+                    // Admission did not send a request: preserve the last actual failure and keep
+                    // every unknown-usage reservation charged. Budget evidence remains separate.
+                    throw lastFailure;
+                }
+                throw rejected;
+            }
+            long started = System.nanoTime();
             final JsonNode[] usage = {null};
             AtomicBoolean responseTerminal = new AtomicBoolean();
             try {
@@ -68,12 +96,17 @@ public class AiStreamHttpExecutor {
                                         responseTerminal.set(true);
                                     return handler.handle(event);
                                 },
-                                emitted);
+                                emitted,
+                                responseStatus);
                 reservation.finish(done || responseTerminal.get() ? usage[0] : null);
                 return done;
             } catch (AiProviderException exception) {
+                lastFailure = exception;
+                failureLog(
+                        provider, attempt, responseStatus.get(), emitted.get(), started, exception);
                 boolean retryable =
                         exception.kind() != AiProviderException.FailureKind.BUDGET
+                                && exception.kind() != AiProviderException.FailureKind.CANCELLED
                                 && (exception.statusCode() == 429
                                         || exception.statusCode() >= 500
                                         || exception.statusCode() == 0);
@@ -82,8 +115,29 @@ public class AiStreamHttpExecutor {
                 }
                 pause(provider, attempt);
             } catch (ResourceAccessException exception) {
+                String diagnostic = AiTransportDiagnostics.code(exception);
+                lastFailure =
+                        new AiProviderException(
+                                provider,
+                                0,
+                                diagnostic.endsWith("TIMEOUT")
+                                        ? "AI 服务响应超时，请稍后重试。"
+                                        : "AI 服务网络连接失败，请稍后重试。",
+                                exception,
+                                diagnostic.endsWith("TIMEOUT")
+                                        ? AiProviderException.FailureKind.TIMEOUT
+                                        : AiProviderException.FailureKind.NETWORK,
+                                diagnostic,
+                                responseStatus.get() > 0);
+                failureLog(
+                        provider,
+                        attempt,
+                        responseStatus.get(),
+                        emitted.get(),
+                        started,
+                        lastFailure);
                 if (emitted.get() || attempt == attempts) {
-                    throw new AiProviderException(provider, 0, "AI 服务响应超时，请稍后重试。", exception);
+                    throw lastFailure;
                 }
                 pause(provider, attempt);
             } finally {
@@ -101,7 +155,8 @@ public class AiStreamHttpExecutor {
             Map<String, Object> body,
             int timeoutSeconds,
             StreamEventHandler handler,
-            AtomicBoolean emitted) {
+            AtomicBoolean emitted,
+            AtomicInteger responseStatus) {
         RestClient client = client(timeoutSeconds);
         Boolean done =
                 client.post()
@@ -113,6 +168,7 @@ public class AiStreamHttpExecutor {
                         .exchange(
                                 (request, response) -> {
                                     int status = response.getStatusCode().value();
+                                    responseStatus.set(status);
                                     if (status < 200 || status >= 300) {
                                         throw failure(provider, status);
                                     }
@@ -144,7 +200,17 @@ public class AiStreamHttpExecutor {
             }
             return dispatch(provider, data, handler, emitted);
         } catch (IOException exception) {
-            throw new AiProviderException(provider, 0, "AI 流式响应读取失败。", exception);
+            String diagnostic = AiTransportDiagnostics.code(exception);
+            throw new AiProviderException(
+                    provider,
+                    0,
+                    "AI 流式响应读取失败。",
+                    exception,
+                    diagnostic.endsWith("TIMEOUT")
+                            ? AiProviderException.FailureKind.TIMEOUT
+                            : AiProviderException.FailureKind.NETWORK,
+                    diagnostic,
+                    true);
         }
     }
 
@@ -162,7 +228,14 @@ public class AiStreamHttpExecutor {
             }
             return false;
         } catch (JsonProcessingException exception) {
-            throw new AiProviderException(provider, 502, "AI 服务返回了无效的流式事件。", exception);
+            throw new AiProviderException(
+                    provider,
+                    502,
+                    "AI 服务返回了无效的流式事件。",
+                    exception,
+                    AiProviderException.FailureKind.PROTOCOL,
+                    "INVALID_SSE_JSON",
+                    true);
         }
     }
 
@@ -185,7 +258,43 @@ public class AiStreamHttpExecutor {
         } else {
             message = "AI 服务请求不被供应商接受，请联系管理员检查模型配置。";
         }
-        return new AiProviderException(provider, status, message, null);
+        return new AiProviderException(
+                provider,
+                status,
+                message,
+                null,
+                AiProviderException.FailureKind.HTTP,
+                "HTTP",
+                true);
+    }
+
+    private void failureLog(
+            String provider,
+            int attempt,
+            int http,
+            boolean emitted,
+            long started,
+            AiProviderException failure) {
+        // Fixed categories/class names only. Never log exception messages or HTTP/body contents.
+        LOG.warn(
+                "AI stream attempt failed: provider={}, attempt={}, http={}, kind={},"
+                    + " errorStatus={}, transport={}, contentEmitted={}, elapsedMs={},"
+                    + " causeTypes={}, traceId={}",
+                provider,
+                attempt,
+                http,
+                failure.kind(),
+                failure.statusCode(),
+                failure.diagnosticCode(),
+                emitted,
+                (System.nanoTime() - started) / 1_000_000L,
+                AiTransportDiagnostics.causeTypes(failure),
+                traceId());
+    }
+
+    private String traceId() {
+        String trace = MDC.get("traceId");
+        return trace != null && trace.matches("[A-Za-z0-9_-]{1,64}") ? trace : "UNAVAILABLE";
     }
 
     private String normalize(String baseUrl) {
@@ -197,7 +306,8 @@ public class AiStreamHttpExecutor {
             Thread.sleep(250L * attempt);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new AiProviderException(provider, 0, "AI 请求已取消。", exception);
+            throw new AiProviderException(
+                    provider, 0, "AI 请求已取消。", exception, AiProviderException.FailureKind.CANCELLED);
         }
     }
 

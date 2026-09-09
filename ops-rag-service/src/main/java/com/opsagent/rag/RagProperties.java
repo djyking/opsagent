@@ -19,6 +19,7 @@ public class RagProperties {
     private boolean rerankEnabled;
     private String rerankBaseUrl = "http://localhost:8010";
     private int rerankTimeoutSeconds = 3;
+    private int rerankFailureCooldownSeconds = 60;
     private int rerankTopN = 6;
     private int retrievalCandidates = 30;
     private int maxContextTokens = 6000;
@@ -79,6 +80,14 @@ public class RagProperties {
 
     public void setRerankTimeoutSeconds(int rerankTimeoutSeconds) {
         this.rerankTimeoutSeconds = rerankTimeoutSeconds;
+    }
+
+    public int getRerankFailureCooldownSeconds() {
+        return Math.max(1, Math.min(300, rerankFailureCooldownSeconds));
+    }
+
+    public void setRerankFailureCooldownSeconds(int value) {
+        this.rerankFailureCooldownSeconds = value;
     }
 
     public int getRerankTopN() {

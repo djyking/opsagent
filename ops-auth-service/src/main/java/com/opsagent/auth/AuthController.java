@@ -8,7 +8,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.Duration;
+import java.time.Instant;
 
 /**
  * 提供登录、令牌刷新、退出和当前用户查询接口。
@@ -46,8 +51,44 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    ApiResponse<TokenResponse> login(@Valid @RequestBody LoginRequest r) {
-        return ApiResponse.success(service.login(r));
+    ApiResponse<TokenResponse> login(
+            @Valid @RequestBody LoginRequest r,
+            @CookieValue(name = "opsagent_experience", required = false) String experience,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        var result = service.loginWithExperience(r, experience);
+        response.setHeader("Cache-Control", "no-store");
+        if (result.credential() != null) {
+            response.addHeader(
+                    HttpHeaders.SET_COOKIE,
+                    experienceCookie(
+                                    result.credential(),
+                                    Duration.between(Instant.now(), result.experienceExpiresAt()),
+                                    request)
+                            .toString());
+        }
+        return ApiResponse.success(result.tokens());
+    }
+
+    @PostMapping("/end-experience")
+    ApiResponse<Void> endExperience(HttpServletRequest request, HttpServletResponse response) {
+        service.endExperience();
+        response.addHeader(
+                HttpHeaders.SET_COOKIE, experienceCookie("", Duration.ZERO, request).toString());
+        return ApiResponse.success();
+    }
+
+    private ResponseCookie experienceCookie(
+            String value, Duration age, HttpServletRequest request) {
+        return ResponseCookie.from("opsagent_experience", value)
+                .httpOnly(true)
+                .secure(
+                        request.isSecure()
+                                || "https".equalsIgnoreCase(request.getHeader("X-Forwarded-Proto")))
+                .sameSite("Strict")
+                .path("/api/auth")
+                .maxAge(age.isNegative() ? Duration.ZERO : age)
+                .build();
     }
 
     @PostMapping("/register")

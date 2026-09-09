@@ -73,12 +73,13 @@ function setup(overrides = {}, isAdmin = true) {
     ...overrides,
   };
   const lifecycleVue = { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounting.push(fn) };
-  const read = (key, details) => { calls.push({ key, ...details }); return api[key](); };
+  const read = (key, details) => { calls.push({ key, ...details }); return api[key](details); };
   const imports = {
     vue: lifecycleVue,
     '@/components/observability/ServiceTopology.vue': SlotSurface,
+    '@/utils/load-topology-graph': { loadTopologyGraphRuntime: async () => ({}) },
     '@/components/events/EventActivityStrip.vue': SlotSurface,
-    '@/api/observability': { observabilityApi: { topology: () => read('topology') } },
+    '@/api/observability': { observabilityApi: { topology: (params, options) => read('topology', { params, options }) } },
     '@/stores/approval-inbox': { useApprovalInboxStore: () => inbox },
     '@/styles/pages/dashboard-overview.css': {},
     '@/utils/observability': evaluate(readFileSync(new URL('../src/utils/observability.ts', import.meta.url), 'utf8'), {}),
@@ -314,3 +315,44 @@ console.log('PASS homepage health expires using the shared observation validity 
   finally { app.stop(); }
 }
 console.log('PASS live approval decisions, account response isolation and explicitly archived legacy events');
+
+// Advance the real page timer through five visible minutes without waiting in wall time.
+{
+  const originals = { now: Date.now, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval, document: globalThis.document };
+  let clock = originals.now(); const timers = new Map(), listeners = new Map(); let timerId = 0;
+  Date.now = () => clock;
+  globalThis.setInterval = callback => { timers.set(++timerId, callback); return timerId; };
+  globalThis.clearInterval = id => timers.delete(id);
+  globalThis.document = { hidden: false, addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name) };
+  let sampleTime = clock, fail = false, pending;
+  const fresh = () => ({ nodes: [{ ciCode: 'live', ciName: 'Live', environment: 'PROD', health: 'HEALTHY', healthScope: 'BUSINESS_PROBE', observedAt: new Date(sampleTime).toISOString() }], edges: [], dataSources: [], checkedAt: new Date(clock).toISOString() });
+  const app = setup({ topology: async () => { if (pending) return pending.promise; if (fail) throw Error('sample transport timeout'); return fresh(); } });
+  const tick = async () => { for (const callback of timers.values()) callback(); await new Promise(setImmediate); await vue.nextTick(); };
+  try {
+    await app.ready;
+    for (let index = 0; index < 20; index++) { clock += 15_000; sampleTime = clock; await tick(); assert.equal(app.state.healthCount.value, 1); }
+    assert.equal(app.calls.filter(call => call.key === 'topology').length, 21, 'The actual 15s timer rereads topology throughout five minutes');
+    assert.equal(app.calls.filter(call => call.key === 'tickets').length, 1, 'Topology polling does not refetch unrelated work queues');
+    globalThis.document.hidden = true; const beforeHidden = app.calls.length; clock += 60_000; await tick(); assert.equal(app.calls.length, beforeHidden);
+    globalThis.document.hidden = false; sampleTime = clock; listeners.get('visibilitychange')(); await new Promise(setImmediate);
+    assert.equal(app.state.healthCount.value, 1, 'Returning to a visible tab immediately obtains a new sample');
+    pending = deferred(); const first = app.state.loadTopology(); const count = app.calls.length;
+    const second = app.state.loadTopology(); clock += 15_000; await tick(); assert.equal(app.calls.length, count, 'Manual/timer requests share one pending read');
+    const active = app.calls.filter(call => call.key === 'topology').at(-1);
+    app.state.environment.value = 'DEMO'; app.state.changeEnvironment();
+    assert.equal(active.options.signal.aborted, true, 'Changing environment aborts the old request');
+    pending.resolve(fresh()); await Promise.all([first, second]); await new Promise(setImmediate); pending = undefined;
+    fail = true; clock += 40_000; await app.state.loadTopology();
+    assert.equal(app.state.healthCount.value, 0); assert.equal(app.state.expiredHealthCount.value, 1);
+    assert.match(app.state.healthSummary.value, /刷新失败.*观测已过期/);
+    const failures = app.calls.length; clock += 15_000; await tick(); assert.equal(app.calls.length, failures, 'Failed reads back off instead of piling up');
+    fail = false; sampleTime = clock; await app.state.loadTopology(); assert.equal(app.state.healthCount.value, 1); assert.equal(app.state.topologyError.value, '');
+    pending = deferred(); const leaving = app.state.loadTopology(); const last = app.calls.filter(call => call.key === 'topology').at(-1);
+    app.stop(); assert(last.options.signal.aborted); assert.equal(timers.size, 0); assert.equal(listeners.size, 0);
+    pending.resolve(fresh()); await leaving;
+  } finally {
+    app.stop(); Date.now = originals.now; globalThis.setInterval = originals.setInterval; globalThis.clearInterval = originals.clearInterval;
+    if (originals.document === undefined) delete globalThis.document; else globalThis.document = originals.document;
+  }
+}
+console.log('PASS live Dashboard five-minute polling, no unrelated reads, visibility return, deduplication, abort, real expiry and failure backoff');

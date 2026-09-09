@@ -57,6 +57,10 @@ final class AgentReferenceCorrections {
                         .put("writePrepared", false)
                         .put("tokensAlreadyCharged", state.path("tokens").asInt());
         audit.set("rejectedCall", state.path("toolIntent").deepCopy());
+        String metricFeedback =
+                AgentMetricCorrectionFeedback.build(
+                        run, state.path("toolIntent").path("arguments"));
+        audit.put("metricFeedback", metricFeedback);
         ArrayNode cancelled = audit.putArray("unexecutedCalls");
         int index = 0;
         for (JsonNode pending : state.path("pendingCalls")) {
@@ -66,7 +70,8 @@ final class AgentReferenceCorrections {
                             ? "EVIDENCE_REFERENCE_INVALID："
                                     + reason
                                     + "。诊断未写入。bundle ID"
-                                    + " 和工具名不能替代证据条目；根据系统证据映射纠正引用并重新提出诊断。保持事实、候选原因、缺口区分，禁止为了通过校验编造证据。"
+                                    + " 和工具名不能替代证据条目；根据系统证据映射纠正引用并重新提出诊断。保持事实、候选原因、缺口区分，禁止为了通过校验编造证据。\n"
+                                    + metricFeedback
                             : "CANCELLED_BEFORE_EXECUTION：同批诊断引用校验失败；本工具未执行、未创建审批。需要在纠正诊断后重新提出。";
             ((ArrayNode) state.path("messages"))
                     .add(

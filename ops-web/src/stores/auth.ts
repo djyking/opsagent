@@ -23,7 +23,7 @@ export const useAuthStore = defineStore("auth", () => {
   async function login(username: string, password: string, captchaId: string, captchaCode: string) {
     const result = await authApi.login({ username, password, captchaId, captchaCode });
     saveLogin(result);
-    await fetchMe();
+    return result;
   }
 
   async function fetchMe() {

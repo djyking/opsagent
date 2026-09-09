@@ -3,7 +3,9 @@ package com.opsagent.rag;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.opsagent.common.core.BusinessException;
 import com.opsagent.common.core.ErrorCode;
 import com.opsagent.common.security.InternalActorTokens;
@@ -199,6 +201,116 @@ class ObservabilityEvidenceClientTest {
         long start = System.nanoTime();
         assertThat(client.load(context).available()).isFalse();
         assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)).isLessThan(2500);
+    }
+
+    @Test
+    void replaysCapturedGatewayBundleWithoutLosingWindowOrPartialSnapshotSemantics()
+            throws Exception {
+        var captured = capturedGatewayBundle();
+        var attached = attachCapturedGatewayBundle(captured);
+        assertThat(attached.sources()).hasSize(captured.path("entries").size());
+        assertThat(attached.degraded()).isTrue();
+        assertThat(AssistantTokenBudget.bytes(attached.block())).isLessThanOrEqualTo(2900);
+        for (var entry : captured.path("entries")) {
+            assertThat(attached.sources())
+                    .anySatisfy(
+                            source -> {
+                                assertThat(source.evidenceId()).isEqualTo(entry.path("id").asText());
+                                assertThat(source.evidenceBundleId())
+                                        .isEqualTo(captured.path("evidenceBundleId").asText());
+                            });
+        }
+        var observation = attachedEntry(attached, "OBSERVABILITY");
+        assertThat(observation.path("detailOmittedForBudget").asBoolean()).isTrue();
+        assertThat(observation.has("data")).isFalse();
+        var semantics = observation.path("retainedSemantics");
+        var original = captured.path("entries").get(0).path("data");
+        assertThat(semantics.path("healthScope")).isEqualTo(original.path("healthScope"));
+        var metrics = original.path("metrics").fields();
+        while (metrics.hasNext()) {
+            var metric = metrics.next();
+            var group = metricGroup(semantics, metric.getKey());
+            for (String field : List.of("scope", "windowSeconds", "aggregation")) {
+                assertThat(group.path(field)).isEqualTo(metric.getValue().path(field));
+            }
+        }
+        assertThat(metricGroup(semantics, "rps").path("windowSeconds").asInt()).isEqualTo(900);
+        var history = attachedEntry(attached, "TOPOLOGY_HISTORY");
+        assertThat(history.path("quality").asText()).isEqualTo("READY");
+        assertThat(history.path("retainedSemantics").path("returnedSnapshotCount").asInt())
+                .isEqualTo(5);
+        assertThat(history.path("retainedSemantics").path("snapshotDataQualities"))
+                .containsExactly(json.getNodeFactory().textNode("PARTIAL"));
+        assertThat(attached.block()).doesNotContain("ROUTES_TO", "workflowRunId", "graphVersion");
+    }
+
+    @Test
+    void retainedProjectionDoesNotInventMissingWindowsOrHideUnknownSnapshotQuality()
+            throws Exception {
+        var captured = capturedGatewayBundle();
+        var rps =
+                (ObjectNode)
+                        captured.path("entries").get(0).path("data").path("metrics").path("rps");
+        rps.remove("windowSeconds");
+        var snapshots = captured.path("entries").get(4).path("data").path("items");
+        ((ObjectNode) snapshots.get(0)).put("dataQuality", "READY");
+        ((ObjectNode) snapshots.get(1)).remove("dataQuality");
+
+        var attached = attachCapturedGatewayBundle(captured);
+
+        var observation = attachedEntry(attached, "OBSERVABILITY");
+        assertThat(metricGroup(observation.path("retainedSemantics"), "rps").has("windowSeconds"))
+                .isFalse();
+        assertThat(
+                        metricGroup(observation.path("retainedSemantics"), "errorRate")
+                                .path("windowSeconds")
+                                .asInt())
+                .isEqualTo(900);
+        assertThat(
+                        attachedEntry(attached, "TOPOLOGY_HISTORY")
+                                .path("retainedSemantics")
+                                .path("snapshotDataQualities"))
+                .containsExactly(
+                        json.getNodeFactory().textNode("READY"),
+                        json.getNodeFactory().textNode("UNKNOWN"),
+                        json.getNodeFactory().textNode("PARTIAL"));
+        assertThat(rps.has("windowSeconds")).isFalse();
+    }
+
+    private JsonNode capturedGatewayBundle() throws Exception {
+        try (var input =
+                getClass().getResourceAsStream("/observability/gateway-window-evidence.json")) {
+            return json.readTree(input);
+        }
+    }
+
+    private ObservabilityPromptContext.Attached attachCapturedGatewayBundle(JsonNode captured)
+            throws Exception {
+        server.enqueue(
+                new MockResponse()
+                        .setHeader("Content-Type", "application/json")
+                        .setBody(json.writeValueAsString(Map.of("code", 0, "data", captured))));
+        var scope = new ObservabilityContext("ops-gateway", "PROD", "15m", null);
+        return ObservabilityPromptContext.attach(client.load(scope), 5);
+    }
+
+    private JsonNode attachedEntry(ObservabilityPromptContext.Attached attached, String source)
+            throws Exception {
+        for (String line : attached.block().split("\n")) {
+            if (!line.startsWith("[S")) continue;
+            var entry = json.readTree(line.substring(line.indexOf(']') + 2));
+            if (source.equals(entry.path("source").asText())) return entry;
+        }
+        throw new AssertionError("Missing evidence source " + source);
+    }
+
+    private JsonNode metricGroup(JsonNode semantics, String metric) {
+        for (var group : semantics.path("metricGroups")) {
+            for (var name : group.path("metrics")) {
+                if (metric.equals(name.asText())) return group;
+            }
+        }
+        throw new AssertionError("Missing metric semantics " + metric);
     }
 
     private Map<String, Object> bundle(String environment, Map<String, Object> data) {

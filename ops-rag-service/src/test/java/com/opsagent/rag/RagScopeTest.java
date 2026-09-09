@@ -46,7 +46,8 @@ class RagScopeTest {
                                 "test"));
         var answer = rag().ask("目前有哪些服务？", 5, 1036L, 2053L);
         verify(knowledge).searchTicket("目前有哪些服务？", 30, 1036L, 2053L);
-        verifyNoInteractions(platform, llm);
+        verifyNoInteractions(platform);
+        verifyOnlyRetrievalBudget("目前有哪些服务？");
         assertThat(answer.answer()).contains("billing-service");
         assertThat(answer.references()).hasSize(1);
         assertThat(answer.references().get(0).sourceType()).isEqualTo("KNOWLEDGE_DOCUMENT");
@@ -61,7 +62,8 @@ class RagScopeTest {
         assertThat(answer.answer()).contains("不足以确认");
         assertThat(answer.references()).isEmpty();
         verify(knowledge, never()).search(anyString(), anyInt(), any());
-        verifyNoInteractions(llm, platform);
+        verifyNoInteractions(platform);
+        verifyOnlyRetrievalBudget("附件里写了什么？");
     }
 
     @Test
@@ -74,7 +76,7 @@ class RagScopeTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("不可访问")
                 .hasMessageNotContaining("secret");
-        verifyNoInteractions(llm);
+        verifyOnlyRetrievalBudget("附件问题");
     }
 
     @Test
@@ -108,5 +110,12 @@ class RagScopeTest {
                 metrics,
                 new CmdbAnswerService(platform),
                 mock(OperationsAnswerService.class));
+    }
+
+    private void verifyOnlyRetrievalBudget(String question) {
+        verify(llm)
+                .recordRetrievalBudget(
+                        question, com.opsagent.common.core.QueryEmbeddingBudget.reserve(question));
+        verifyNoMoreInteractions(llm);
     }
 }

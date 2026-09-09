@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { isNavigationFailure, useRoute, useRouter } from "vue-router";
 import {
   ArrowRight,
   LockKeyhole,
@@ -17,7 +17,7 @@ import InlineError from "@/components/InlineError.vue";
 import AuthMotionScene from "@/components/auth/AuthMotionScene.vue";
 import ActionButton from "@/components/feedback/ActionButton.vue";
 import { useToast } from "@/composables/useToast";
-import { safeReturnPath } from "@/api/session";
+import { safeReturnPath, SessionError } from "@/api/session";
 
 const auth = useAuthStore();
 const router = useRouter();
@@ -41,11 +41,18 @@ const showPassword = ref(false);
 const error = ref("");
 const busy = ref(false);
 const succeeded = ref(false);
+const phase = ref<'idle' | 'verifying' | 'loading' | 'load-failed'>('idle');
+const loadingHint = ref('');
+let loadingTimer: ReturnType<typeof setTimeout> | undefined;
 const toast = useToast();
 const formFocused = ref(false);
 const registrationEnabled = ref(false);
 async function selectLoginMode(mode: "demo" | "account") {
   if (busy.value || featuresLoading.value || (mode === "demo" && !demoEnabled.value)) return;
+  if (phase.value === 'load-failed') {
+    auth.logout(); phase.value = 'idle'; loadingHint.value = ''; succeeded.value = false;
+    await refreshCaptcha();
+  }
   loginMode.value = mode;
   error.value = "";
   showPassword.value = false;
@@ -77,6 +84,7 @@ async function refreshCaptcha() {
   }
 }
 async function submit() {
+  if (phase.value === 'load-failed') { await enterWorkbench(); return; }
   if (busy.value || captchaLoading.value || featuresLoading.value) return;
   if (!captchaId.value || captchaExpired.value) {
     await refreshCaptcha();
@@ -84,16 +92,49 @@ async function submit() {
   }
   error.value = "";
   busy.value = true;
+  phase.value = 'verifying';
+  loadingHint.value = '正在验证，请稍候…';
   try {
     const demo = loginMode.value === "demo" && demoEnabled.value;
-    await auth.login(demo ? "user" : username.value, demo ? "user" : password.value, captchaId.value, captchaCode.value);
-    succeeded.value = true;
-    toast.show(demo ? "已进入演示工作台，欢迎体验" : "登录成功，欢迎回到工作台");
-    await router.push(safeReturnPath(route.query.redirect));
+    const result = await auth.login(demo ? "user" : username.value, demo ? "user" : password.value, captchaId.value, captchaCode.value);
+    if (result?.visitorExperience === 'EXPIRED' || result?.visitorExperience === 'ENDED')
+      toast.show('原体验已到期或结束，已创建新体验；旧记录未删除，但不归属新的身份。');
+    await enterWorkbench();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "登录失败";
+    phase.value = 'idle';
+    loadingHint.value = '';
     await refreshCaptcha();
   } finally {
+    busy.value = false;
+  }
+}
+async function enterWorkbench() {
+  if (phase.value === 'loading') return;
+  busy.value = true;
+  phase.value = 'loading';
+  error.value = '';
+  loadingHint.value = '验证成功，正在加载工作台…';
+  clearTimeout(loadingTimer);
+  loadingTimer = setTimeout(() => { loadingHint.value = '登录已成功，工作台资源仍在加载，请稍候…'; }, 4000);
+  try {
+    await auth.fetchMe();
+    const navigation = await router.push(safeReturnPath(route.query.redirect));
+    if (isNavigationFailure(navigation)) throw new Error('页面跳转未完成，请重新打开工作台。');
+    succeeded.value = true;
+  } catch (cause) {
+    if (cause instanceof SessionError && cause.expired) {
+      phase.value = 'idle';
+      error.value = cause.message;
+      loadingHint.value = '';
+      await refreshCaptcha();
+      return;
+    }
+    phase.value = 'load-failed';
+    error.value = `登录已成功，工作台加载失败。${cause instanceof Error ? cause.message : '请重试打开页面。'}`;
+    loadingHint.value = '登录状态已保留，可重试打开工作台。';
+  } finally {
+    clearTimeout(loadingTimer);
     busy.value = false;
   }
 }
@@ -108,7 +149,7 @@ onMounted(async () => {
   catch { registrationEnabled.value = false; demoEnabled.value = false; }
   finally { featuresLoading.value = false; }
 });
-onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); });
+onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); clearTimeout(loadingTimer); });
 </script>
 <template>
   <main class="auth-page auth-page--login">
@@ -127,7 +168,7 @@ onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); });
         </div>
         <div v-if="loginMode === 'demo'" class="auth-demo-entry">
           <span class="auth-demo-entry-icon"><Sparkles :size="21" /></span>
-          <div><strong>无需记住账号密码</strong><p>输入下方验证码，即可进入演示工作台。</p><small>独立访客身份 · 本次体验 30 分钟</small></div>
+          <div><strong>无需记住账号密码</strong><p>输入下方验证码，即可进入演示工作台。</p><small>同浏览器体验保留 24 小时 · 每 30 分钟验证码续入</small></div>
         </div>
         <template v-else>
         <label
@@ -177,7 +218,8 @@ onBeforeUnmount(() => { ++captchaVersion; clearTimeout(expiryTimer); });
           <p id="captcha-status" class="auth-captcha-status" role="status" aria-live="polite">{{ captchaError || (captchaExpired ? '验证码已过期，请换一张' : '') }}</p>
         </div>
         <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
-        <ActionButton class="primary auth-submit" :disabled="featuresLoading || captchaLoading || !captchaId || captchaExpired" :loading="busy && !succeeded" :success="succeeded" loading-text="正在验证…" success-text="登录成功">{{ featuresLoading ? '正在加载登录方式…' : loginMode === 'demo' ? '进入演示工作台' : '登录工作台' }} <ArrowRight :size="18" /></ActionButton>
+        <p v-if="loadingHint" role="status" aria-live="polite">{{ loadingHint }}</p>
+        <ActionButton class="primary auth-submit" :type="phase === 'load-failed' ? 'button' : 'submit'" :disabled="phase !== 'load-failed' && (featuresLoading || captchaLoading || !captchaId || captchaExpired)" :loading="busy" :success="succeeded" :loading-text="phase === 'loading' ? '正在加载工作台…' : '正在验证…'" success-text="登录成功" @click="phase === 'load-failed' && enterWorkbench()">{{ phase === 'load-failed' ? '重新打开工作台' : featuresLoading ? '正在加载登录方式…' : loginMode === 'demo' ? '进入演示工作台' : '登录工作台' }} <ArrowRight :size="18" /></ActionButton>
         <p class="auth-switch">
           <template v-if="loginMode === 'demo'">管理配置与正式处置，请切换到账号登录</template>
           <template v-else-if="registrationEnabled">还没有账号？<RouterLink to="/register">创建账号</RouterLink></template>

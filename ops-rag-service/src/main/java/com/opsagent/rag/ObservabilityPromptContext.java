@@ -1,8 +1,12 @@
 package com.opsagent.rag;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +25,11 @@ final class ObservabilityPromptContext {
                     + "每个运行事实引用对应[S编号]并说明原始evidenceId；不得引用未提供的编号或把知识文档当作实时状态。"
                     + "必须陈述证据质量、gaps与不确定性；缺失值不等于0或健康，采集失败不等于业务宕机。"
                     + "collectedAt仅是取数时间；逐项使用observedAt判断采样新鲜度，过期证据不能证明当前状态。"
+                    + "采样新鲜不等于指标瞬时值；按scope/windowSeconds/aggregation描述口径，"
+                    + "REQUEST_WINDOW表示窗口聚合，不能把窗口错误率说成采样时刻的瞬时错误率；单个窗口聚合不能说明窗口内趋势。"
+                    + "TOPOLOGY_HISTORY的READY仅表示历史可读，快照存在或数量不能证明采集完整、全链路健康；"
+                    + "必须说明snapshotDataQualities中的PARTIAL或UNKNOWN限制。"
+                    + "detailOmittedForBudget为true时，详细data已省略，只能依据摘要和retainedSemantics，不能推断被省略内容。"
                     + "知识片段仅支持一般诊断建议；既往回答不能覆盖本轮新证据，也不能填补缺失的业务事实。";
 
     record Attached(
@@ -90,7 +99,9 @@ final class ObservabilityPromptContext {
             String serialized = data.toString();
             if (AssistantTokenBudget.bytes(serialized) > 1400) {
                 data.remove("data");
-                data.put("detailOmittedForBudget", "完整数据未加入本次模型上下文，请只依据本条摘要和原始采样时间；完整证据在证据包中。");
+                var semantics = retainedSemantics(entry);
+                if (!semantics.isEmpty()) data.set("retainedSemantics", semantics);
+                data.put("detailOmittedForBudget", true);
                 serialized = data.toString();
                 budgetLimited = true;
             }
@@ -189,5 +200,48 @@ final class ObservabilityPromptContext {
                 degraded,
                 reason,
                 Math.max(1, block.length() / 2));
+    }
+
+    private static ObjectNode retainedSemantics(ObservabilityEvidenceClient.Entry entry) {
+        var retained = JsonNodeFactory.instance.objectNode();
+        JsonNode detail = entry.data();
+        copyScalarFields(detail, retained, "healthScope");
+        var groups = new LinkedHashMap<String, ObjectNode>();
+        var metrics = detail.path("metrics").fields();
+        while (metrics.hasNext()) {
+            var metric = metrics.next();
+            var scope = JsonNodeFactory.instance.objectNode();
+            copyScalarFields(metric.getValue(), scope, "scope", "windowSeconds", "aggregation");
+            if (scope.isEmpty()) continue;
+            var group =
+                    groups.computeIfAbsent(
+                            scope.toString(),
+                            ignored -> {
+                                var value = scope.deepCopy();
+                                value.putArray("metrics");
+                                return value;
+                            });
+            group.withArray("metrics").add(metric.getKey());
+        }
+        if (!groups.isEmpty()) {
+            var array = retained.putArray("metricGroups");
+            groups.values().forEach(array::add);
+        }
+        if ("TOPOLOGY_HISTORY".equals(entry.source()) && detail.path("items").isArray()) {
+            retained.put("returnedSnapshotCount", detail.path("items").size());
+            var qualities = new LinkedHashSet<String>();
+            detail.path("items")
+                    .forEach(item -> qualities.add(item.path("dataQuality").asText("UNKNOWN")));
+            var array = retained.putArray("snapshotDataQualities");
+            qualities.forEach(array::add);
+        }
+        return retained;
+    }
+
+    private static void copyScalarFields(JsonNode source, ObjectNode target, String... fields) {
+        for (String field : fields) {
+            JsonNode value = source.path(field);
+            if (!value.isMissingNode() && value.isValueNode()) target.set(field, value);
+        }
     }
 }

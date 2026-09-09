@@ -35,36 +35,43 @@ function deferred() { let resolve, reject; const promise = new Promise((yes, no)
 async function settle() { await vue.nextTick(); await new Promise(setImmediate); await vue.nextTick(); }
 function run(id) { return { id, ownerId: 7, status: 'COMPLETED', nodeId: 'end', approvals: [],
   state: { ticketId: 2057, ticketResolved: false }, snapshot: { graph: { nodes: [], edges: [] } } }; }
-async function fixture(url, overrides = {}) {
+async function fixture(url, overrides = {}, visitor = false) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/automation', component: { render: () => null } }] });
   await router.push(url); await router.isReady();
   const route = vue.reactive({ ...router.currentRoute.value });
   const removeRouteListener = router.afterEach(to => Object.assign(route, to));
-  const calls = [];
+  const calls = [], reads = [];
   const implementation = {
+    models: async () => ({ models: [] }), definitions: async () => [], tools: async () => ({ limits: {}, tools: [], approvalRequired: [] }),
     target: async code => ({ targetCode: code, configured: true, canStart: true, status: 'BASELINE', business: { httpStatus: 200 } }),
     scenarios: async () => ({ incidents: [] }), runs: async () => ({ items: [], total: 0 }),
     run: async id => run(id), events: async () => [], ...overrides,
   };
   const api = {
-    models: async () => ({ models: [] }), definitions: async () => [], tools: async () => ({}),
-    target: code => implementation.target(code), scenarios: code => implementation.scenarios(code),
-    runs: (page, filters) => implementation.runs(page, filters),
+    models: () => { reads.push('models'); return implementation.models(); },
+    definitions: () => { reads.push('definitions'); return implementation.definitions(); },
+    tools: () => { reads.push('tools'); return implementation.tools(); },
+    target: code => { reads.push('target'); return implementation.target(code); },
+    scenarios: code => { reads.push('scenarios'); return implementation.scenarios(code); },
+    runs: (page, filters) => { reads.push('runs'); return implementation.runs(page, filters); },
     run: id => { calls.push(['run', id]); return implementation.run(id); },
     events: (id, after) => { calls.push(['events', id, after]); return implementation.events(id, after); },
+    start: code => { calls.push(['start', code]); return implementation.start(code); },
+    takeoverPreview: id => implementation.takeoverPreview(id),
+    takeover: (id, input) => implementation.takeover(id, input),
   };
   const component = evaluate(script.content, {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
     'vue-router': { useRoute: () => route, useRouter: () => router },
     '@lucide/vue': new Proxy({}, { get: () => ({ render: () => null }) }),
-    '@/stores/auth': { useAuthStore: () => ({ user: { userId: 7, roles: ['ADMIN'] }, isAdmin: true, isOps: true, isDemo: false }) },
+    '@/stores/auth': { useAuthStore: () => ({ user: { userId: 7, roles: [visitor ? 'DEMO' : 'ADMIN'] }, isAdmin: !visitor, isOps: !visitor, isDemo: visitor }) },
     '@/stores/approval-inbox': { useApprovalInboxStore: () => ({ decisionVersion: 0, isCurrent: () => true }) },
     '@/api/automation': { automationApi: api }, '@/utils/automation-presentation': presentation,
     '@/api/modules': { ticketApi: { detail: async id => ({ id }) } },
   }).default;
   const scope = vue.effectScope();
   const state = scope.run(() => component.setup({}, { expose() {} }));
-  return { state, calls, router, route, stop() { scope.stop(); removeRouteListener(); } };
+  return { state, calls, reads, router, route, stop() { scope.stop(); removeRouteListener(); } };
 }
 function visibleErrors(state) {
   const messages = [];
@@ -110,6 +117,19 @@ for (const outcome of ['fulfilled', 'rejected']) {
   } finally { app.stop(); }
 }
 console.log('PASS late successful and failed deep-link requests cannot replace a user-selected tab or its URL');
+
+for (const resource of ['runs', 'definitions']) {
+  const pending = deferred();
+  const app = await fixture('/automation?tab=runs', { [resource]: () => pending.promise });
+  try {
+    const initial = app.state.initial(); await settle();
+    app.state.selectTab('inspection'); await settle();
+    pending.reject(Error(`obsolete ${resource} request failed`));
+    await initial; await settle();
+    assert.equal(app.state.error.value, '', 'An obsolete list/catalog failure must not appear in the newly selected tab');
+  } finally { app.stop(); }
+}
+console.log('PASS obsolete operational and catalog read failures stay out of the current tab');
 
 {
   const old = deferred();
@@ -158,10 +178,11 @@ console.log('PASS paginated terminal histories and explicit late-receipt refresh
     await app.state.initial();
     assert.equal(app.state.error.value, '');
     assert.equal(app.state.runs.value[0].id, 'working-run');
-    assert.match(app.state.targetError.value, /演练目标尚未配置/);
-    assert.equal(app.state.scenariosError.value, '演练场景读取失败：场景服务请求超时');
+    assert.equal(app.state.targetError.value, '', 'Run tab does not read the unrelated demo target');
+    assert.equal(app.state.scenariosError.value, '', 'Run tab does not read unrelated scenarios');
     assert.deepEqual(visibleErrors(app.state), [], 'Run workspace must not render optional demo errors');
-    app.state.selectTab('experience'); await settle();
+    app.state.selectTab('experience'); await settle(); await app.state.refreshCurrentTab();
+    assert.match(app.state.targetError.value, /演练目标尚未配置/);
     assert.deepEqual(visibleErrors(app.state), app.state.experienceErrors.value);
     assert.equal(visibleErrors(app.state).length, 2);
     configured = true; await app.state.refresh();
@@ -196,7 +217,7 @@ for (const outcome of ['fulfilled', 'rejected']) {
       return { incidents: [] }; },
   });
   try {
-    const oldRefresh = app.state.refresh();
+    const oldRefresh = app.state.refresh('experience');
     await app.state.selectTarget('ops-demo-notification-service');
     if (outcome === 'fulfilled') old.resolve({ targetCode: 'ops-demo-order-service', configured: false });
     else old.reject(Error('DEMO_TARGET_NOT_CONFIGURED'));
@@ -215,7 +236,7 @@ console.log('PASS switching targets discards obsolete successful data and failed
     runs: async (_page, filters) => filters?.incidentId === 'old-incident' ? oldRuns.promise : { items: [], total: 0 },
   });
   try {
-    const oldRefresh = app.state.refresh(); await settle();
+    const oldRefresh = app.state.refresh('experience'); await settle();
     assert.equal(app.state.trackedIncidentId.value, 'old-incident');
     await app.state.selectTarget('ops-demo-notification-service');
     oldRuns.reject(Error('旧演练运行读取失败'));
@@ -226,3 +247,113 @@ console.log('PASS switching targets discards obsolete successful data and failed
   } finally { app.stop(); }
 }
 console.log('PASS an obsolete tracked-run failure cannot leak into the newly selected target');
+
+// A new visitor sees reviewed examples, while selecting one prepares impact confirmation only.
+{
+  const app = await fixture('/automation', { start: async code => ({ incidentId: 'visitor-new-incident', ownerId: 7, scenarioCode: code }) }, true);
+  try {
+    await app.state.initial();
+    assert.equal(app.state.tab.value, 'cases');
+    await app.state.prepareStart('RABBITMQ_CONSUMER_PAUSED', 'ops-demo-notification-service');
+    assert.equal(app.state.tab.value, 'experience');
+    assert.equal(app.state.targetCode.value, 'ops-demo-notification-service');
+    assert.equal(app.state.startScenario.value, 'RABBITMQ_CONSUMER_PAUSED');
+    assert.equal(app.calls.filter(call => call[0] === 'start').length, 0, 'Opening a historical case cannot inject a fault');
+    await app.state.start(app.state.startScenario.value);
+    assert.equal(app.calls.filter(call => call[0] === 'start').length, 1);
+    assert.equal(app.state.trackedIncidentId.value, 'visitor-new-incident');
+    assert.equal(app.router.currentRoute.value.query.incidentId, 'visitor-new-incident');
+    assert.equal(app.state.startScenario.value, '');
+  } finally { app.stop(); }
+}
+{
+  const app = await fixture('/automation?tab=experience&scenario=NACOS_REDIS_CONFIG_DRIFT', {}, true);
+  try {
+    await app.state.initial();
+    assert.equal(app.state.startScenario.value, 'NACOS_REDIS_CONFIG_DRIFT');
+    assert.equal(app.calls.filter(call => call[0] === 'start').length, 0, 'Scenario deep links require explicit confirmation');
+  } finally { app.stop(); }
+}
+console.log('PASS visitor public-case default, scenario impact confirmation, and newly owned run tracking');
+
+// Real API serialization must bind takeover to the reviewed incident/version and keep them on uncertain retries.
+{
+  const requests = [];
+  let fail = true;
+  const wireApi = evaluate(read('api/automation.ts'), { './http': { request: async config => {
+    requests.push(structuredClone(config));
+    if (fail) throw Error('response outcome unknown');
+    return { id: 'recovery-run' };
+  } } }).automationApi;
+  const preview = { sourceRunId: 'source-run', originalOwnerId: -77, incidentId: 'incident-reviewed', targetCode: 'ops-demo-order-service', expectedRevision: 'revision-reviewed', canTakeover: true, reasonCode: 'READY', hint: '可接管' };
+  const app = await fixture('/automation?tab=runs', { takeover: wireApi.takeover, takeoverPreview: async () => structuredClone(preview) });
+  try {
+    app.state.detail.value = { ...run('source-run'), state: { ticketId: 2057, incidentId: 'incident-reviewed', ticketResolved: false }, authorization: { canTakeover: true, canOperate: false } };
+    app.state.takeoverReason.value = '核对现场后接管';
+    assert.equal(app.state.canSubmitTakeover.value, false, 'No preview means no takeover');
+    await app.state.takeover(); assert.equal(requests.length, 0);
+    for (const invalid of [{ sourceRunId: 'other-run' }, { incidentId: 'other-incident' }, { expectedRevision: '' }, { targetCode: '' }, { canTakeover: false }]) {
+      app.state.takeoverPreview.value = { ...preview, ...invalid };
+      assert.equal(app.state.canSubmitTakeover.value, false);
+      await app.state.takeover();
+    }
+    assert.equal(requests.length, 0);
+    await app.state.prepareTakeover();
+    app.state.takeoverReason.value = '核对现场后接管';
+    assert.equal(app.state.canSubmitTakeover.value, true);
+    app.state.busy.value = 'other-operation';
+    assert.equal(app.state.canSubmitTakeover.value, false);
+    app.state.busy.value = '';
+    await app.state.takeover();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].method, 'POST');
+    assert.equal(requests[0].url, '/api/automation/runs/source-run/takeover');
+    assert.deepEqual(Object.keys(requests[0].data).sort(), ['expectedRevision', 'incidentId', 'reason', 'requestId']);
+    assert.equal(requests[0].data.incidentId, 'incident-reviewed');
+    assert.equal(requests[0].data.expectedRevision, 'revision-reviewed');
+    assert.equal(requests[0].data.reason, '核对现场后接管');
+    assert.ok(requests[0].data.requestId);
+    app.state.takeoverPreview.value = { ...preview, expectedRevision: 'revision-newer' };
+    app.state.takeoverOpen.value = false;
+    await app.state.prepareTakeover();
+    assert.equal(app.state.takeoverAttempt.value.input.requestId, requests[0].data.requestId);
+    fail = false;
+    await app.state.takeover();
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[1].data, requests[0].data, 'An uncertain retry must not silently change the reviewed revision or request identity');
+    assert.equal(app.state.takeoverAttempt.value, undefined);
+    assert.equal(app.state.takeoverOpen.value, false);
+  } finally { app.stop(); }
+}
+console.log('PASS actual takeover HTTP payload, reviewed scope gates and stable incident/version/idempotency across uncertain retries');
+for (const [tab, expected] of Object.entries({
+  cases: ['runs'], runs: ['definitions', 'models', 'runs', 'tools'], experience: ['scenarios', 'target'],
+  workflows: ['definitions'], tools: ['models', 'tools'], inspection: [],
+})) {
+  const app = await fixture(`/automation?tab=${tab}`);
+  try {
+    await app.state.initial(); assert.deepEqual([...app.reads].sort(), expected, `${tab} loads only its own sources`);
+    const before = app.reads.length; await app.state.loadTabCatalog(tab); assert.equal(app.reads.length, before, 'Repeated tab entry reuses loaded catalog data');
+    if (['tools', 'workflows', 'inspection'].includes(tab)) { await app.state.refresh(); assert.equal(app.reads.length, before, 'Static tab refresh does not poll demo targets or run lists'); }
+  } finally { app.stop(); }
+}
+{
+  const originalDocument = globalThis.document, originalNow = Date.now; let clock = originalNow();
+  globalThis.document = { hidden: false }; Date.now = () => clock;
+  const app = await fixture('/automation?tab=runs&run=active', {
+    runs: async () => ({ items: [{ id: 'active', owner_id: 7, status: 'RUNNING' }], total: 1 }),
+    run: async id => ({ ...run(id), status: 'RUNNING' }),
+  });
+  try {
+    await app.state.initial(); assert.equal(app.state.pollingDelay(), 4000);
+    const before = app.reads.length, detailBefore = app.calls.length; clock += 4000; await app.state.poll(); assert.equal(app.reads.length, before + 1, 'Active runs keep four-second refreshes');
+    assert.equal(app.calls.length, detailBefore + 2, 'The selected active run and new approval/event data keep their four-second refresh');
+    clock += 4000; await app.state.poll(); assert.equal(app.reads.length, before + 2);
+    globalThis.document.hidden = true; clock += 60_000; await app.state.poll(); assert.equal(app.reads.length, before + 2);
+    globalThis.document.hidden = false; await app.state.poll(true); assert.equal(app.reads.length, before + 3, 'Returning to a visible tab immediately refreshes active data');
+    app.state.runs.value = []; app.state.detail.value = undefined; assert.equal(app.state.pollingDelay(), 30_000, 'Idle run polling backs off');
+    assert.equal(app.state.modelStatus({ provider: 'KIMI', configured: false, toolCalling: false, verificationStatus: 'UNVERIFIED', configurationStatus: 'MISSING_API_KEY' }), '缺少 API 密钥');
+    assert.equal(app.state.modelStatus({ provider: 'KIMI', configured: false, toolCalling: false, verificationStatus: 'UNVERIFIED', configurationStatus: 'INVALID_ENDPOINT' }), '模型地址无效', 'Other missing configuration is not falsely called a missing key');
+  } finally { app.stop(); Date.now = originalNow; if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument; }
+}
+console.log('PASS Automation active-tab data scope, catalog reuse, active/idle polling, hidden-tab pause and truthful Kimi configuration reasons');

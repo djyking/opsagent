@@ -116,7 +116,7 @@ public class KnowledgeController {
         return ApiResponse.success(service.indexTask(id));
     }
 
-    @GetMapping("/internal/search")
+    @GetMapping({"/search", "/internal/search"})
     ApiResponse<List<Map<String, Object>>> search(
             @RequestParam String query,
             @RequestParam(defaultValue = "5") int topK,

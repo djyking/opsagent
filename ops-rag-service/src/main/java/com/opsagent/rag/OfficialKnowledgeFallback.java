@@ -39,24 +39,7 @@ class OfficialKnowledgeFallback {
     }
 
     boolean relevantKnowledge(String question, List<RetrievedChunk> chunks) {
-        if (chunks.isEmpty()) return false;
-        String topic = topic(question);
-        if (topic == null) return true;
-        String product = topic.substring(0, topic.indexOf('_')).toLowerCase(Locale.ROOT);
-        return chunks.stream()
-                .anyMatch(
-                        chunk -> {
-                            String content =
-                                    (chunk.documentName() + " " + chunk.content())
-                                            .toLowerCase(Locale.ROOT);
-                            if (topic.equals("SENTINEL_FLOW_CONTROL")
-                                    && content.contains("redis")
-                                    && !content.matches("(?s).*(?:alibaba|flowrule|qps|限流).*"))
-                                return false;
-                            return content.contains(product)
-                                    || topic.equals("KUBERNETES_TROUBLESHOOTING")
-                                            && content.contains("k8s");
-                        });
+        return !PublicKnowledgeRelevance.filter(question, chunks).isEmpty();
     }
 
     Result load(String question) {
@@ -87,12 +70,13 @@ class OfficialKnowledgeFallback {
                                         "OFFICIAL_WEB")));
             }
         }
+        List<RetrievedChunk> relevant = PublicKnowledgeRelevance.filter(question, chunks);
         return new Result(
-                List.copyOf(chunks),
+                relevant,
                 result.path("sourceUrl").asText(),
                 result.path("sourceTitle").asText(),
                 result.path("fetchedAt").asText(null),
-                chunks.isEmpty() ? "OFFICIAL_SOURCE_UNAVAILABLE" : null);
+                relevant.isEmpty() ? "OFFICIAL_SOURCE_UNAVAILABLE" : null);
     }
 
     /**

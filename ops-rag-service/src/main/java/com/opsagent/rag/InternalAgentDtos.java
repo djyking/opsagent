@@ -92,7 +92,18 @@ final class InternalAgentDtos {
             boolean configured,
             boolean toolCalling,
             String verificationStatus,
-            String verifiedAt) {}
+            String verifiedAt,
+            String configurationStatus) {
+        ModelCapability(
+                String provider,
+                String model,
+                boolean configured,
+                boolean toolCalling,
+                String verificationStatus,
+                String verifiedAt) {
+            this(provider, model, configured, toolCalling, verificationStatus, verifiedAt, null);
+        }
+    }
 
     /**
      * 可用模型清单。

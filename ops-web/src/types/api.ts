@@ -11,6 +11,7 @@ export interface PageResponse<T> {
   pageSize: number;
 }
 export interface LoginResponse {
+  visitorExperience?: 'NEW' | 'RESUMED' | 'EXPIRED' | 'ENDED';
   accessToken: string;
   refreshToken: string;
   tokenType: string;

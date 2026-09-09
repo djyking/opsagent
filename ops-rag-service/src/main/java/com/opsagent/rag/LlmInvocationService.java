@@ -54,15 +54,16 @@ public class LlmInvocationService {
     private Invocation invoke(
             LlmClient client, String question, LlmRequest request, AuditContext context) {
         long started = System.nanoTime();
-        try (AssistantTokenBudget tokens =
-                        AssistantTokenBudget.open(
-                                request.priorReservedTokens(),
-                                value ->
-                                        usageRepository.saveBudget(
-                                                context.traceId(),
-                                                context.userId(),
-                                                hash(question),
-                                                value));
+        AssistantTokenBudget tokens =
+                AssistantTokenBudget.open(
+                        request.priorReservedTokens(),
+                        value ->
+                                usageRepository.saveBudget(
+                                        context.traceId(),
+                                        context.userId(),
+                                        hash(question),
+                                        value));
+        try (tokens;
                 AiBudgetGuard.Permit permit = budget.acquire()) {
             LlmResult result = client.generate(request).withBudget(tokens);
             long latency = elapsedMillis(started);
@@ -81,8 +82,8 @@ public class LlmInvocationService {
             return new Invocation(result, latency);
         } catch (AiProviderException exception) {
             long latency = elapsedMillis(started);
-            String error =
-                    exception.statusCode() == 0 ? "CONNECTION" : "HTTP_" + exception.statusCode();
+            exception.recordInvocation(client.model(), latency, tokens);
+            String error = failureCode(exception);
             record(client, question, null, latency, false, error, context);
             metric(client.provider(), "failure", latency);
             throw exception;
@@ -102,15 +103,16 @@ public class LlmInvocationService {
             AuditContext context) {
         LlmClient client = provider == null ? router.selected() : router.selected(provider);
         long started = System.nanoTime();
-        try (AssistantTokenBudget tokens =
-                        AssistantTokenBudget.open(
-                                request.priorReservedTokens(),
-                                value ->
-                                        usageRepository.saveBudget(
-                                                context.traceId(),
-                                                context.userId(),
-                                                hash(question),
-                                                value));
+        AssistantTokenBudget tokens =
+                AssistantTokenBudget.open(
+                        request.priorReservedTokens(),
+                        value ->
+                                usageRepository.saveBudget(
+                                        context.traceId(),
+                                        context.userId(),
+                                        hash(question),
+                                        value));
+        try (tokens;
                 AiBudgetGuard.Permit permit = budget.acquire()) {
             LlmResult result = client.stream(request, onDelta).withBudget(tokens);
             long latency = elapsedMillis(started);
@@ -129,8 +131,8 @@ public class LlmInvocationService {
             return new Invocation(result, latency);
         } catch (AiProviderException exception) {
             long latency = elapsedMillis(started);
-            String error =
-                    exception.statusCode() == 0 ? "CONNECTION" : "HTTP_" + exception.statusCode();
+            exception.recordInvocation(client.model(), latency, tokens);
+            String error = failureCode(exception);
             record(client, question, null, latency, false, error, context);
             metric(client.provider(), "failure", latency);
             throw exception;
@@ -139,6 +141,12 @@ public class LlmInvocationService {
 
     AuditContext currentContext() {
         return new AuditContext(SecurityUsers.current().userId(), MDC.get("traceId"));
+    }
+
+    private String failureCode(AiProviderException failure) {
+        return failure.statusCode() > 0
+                ? "HTTP_" + failure.statusCode()
+                : failure.kind().name() + ":" + failure.diagnosticCode();
     }
 
     void recordRetrievalBudget(String question, int reservedTokens) {

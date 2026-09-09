@@ -12,6 +12,7 @@ public class AiProviderException extends RuntimeException {
     private final FailureKind kind;
     private final String diagnosticCode;
     private final boolean responseStarted;
+    private InvocationFailure invocation;
 
     AiProviderException(String provider, int statusCode, String message, Throwable cause) {
         this(provider, statusCode, message, cause, FailureKind.UNKNOWN);
@@ -57,6 +58,22 @@ public class AiProviderException extends RuntimeException {
     boolean responseStarted() {
         return responseStarted;
     }
+
+    void recordInvocation(String model, long latencyMs, AssistantTokenBudget budget) {
+        invocation =
+                new InvocationFailure(
+                        model, latencyMs, budget.charged(), budget.usageKnown(), budget.attempts());
+    }
+
+    InvocationFailure invocation() {
+        return invocation;
+    }
+
+    /**
+     * @author heyu
+     */
+    record InvocationFailure(
+            String model, long latencyMs, int chargedTokens, boolean usageKnown, int attempts) {}
 
     /**
      * @author heyu

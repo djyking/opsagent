@@ -57,10 +57,16 @@ public final class InternalActorAccess {
                 throw new BusinessException(ErrorCode.FORBIDDEN, "ACTOR_REVALIDATION_DENIED");
             }
             JsonNode actor = envelope.path("data");
-            if (!actor.path("active").asBoolean(false)
-                    || !actor.path("userId").canConvertToLong()
-                    || actor.path("userId").asLong() != claimed.userId()
-                    || !actor.path("roles").isArray()
+            if (!actor.path("userId").canConvertToLong()
+                    || actor.path("userId").asLong() != claimed.userId())
+                throw new BusinessException(ErrorCode.FORBIDDEN, "ACTOR_ID_MISMATCH");
+            if (!actor.path("active").asBoolean(false)) {
+                String reason = actor.path("reasonCode").asText();
+                if (!List.of("VISITOR_REVOKED", "VISITOR_LEASE_EXPIRED", "ACTOR_DISABLED")
+                        .contains(reason)) reason = "ACTOR_INACTIVE";
+                throw new BusinessException(ErrorCode.FORBIDDEN, reason);
+            }
+            if (!actor.path("roles").isArray()
                     || !actor.path("username").isTextual()
                     || actor.path("username").asText().isBlank()) {
                 throw new BusinessException(ErrorCode.FORBIDDEN, "ACTOR_INACTIVE");
@@ -85,10 +91,10 @@ public final class InternalActorAccess {
                             .filter(currentRoles::contains)
                             .distinct()
                             .toList();
-            if (intersection.isEmpty() || !until.isAfter(Instant.now())) {
-                throw new BusinessException(
-                        ErrorCode.FORBIDDEN, "ACTOR_PERMISSION_REVOKED_OR_EXPIRED");
-            }
+            if (intersection.isEmpty())
+                throw new BusinessException(ErrorCode.FORBIDDEN, "ACTOR_ROLE_REVOKED");
+            if (!until.isAfter(Instant.now()))
+                throw new BusinessException(ErrorCode.FORBIDDEN, "ACTOR_LEASE_EXPIRED");
             return new InternalActorTokens.Context(
                     claimed.userId(),
                     actor.path("username").asText(),

@@ -16,6 +16,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 编排文档 Embedding、Elasticsearch BM25、Qdrant 向量写入和混合检索。
@@ -34,6 +38,28 @@ public class KnowledgeIndexService {
     private final TokenCounter tokenCounter;
     private final QueryNormalizer queryNormalizer;
     private final MeterRegistry metrics;
+    private final ThreadPoolExecutor queryWorkers =
+            new ThreadPoolExecutor(
+                    2,
+                    4,
+                    30,
+                    TimeUnit.SECONDS,
+                    new ArrayBlockingQueue<>(4),
+                    runnable -> {
+                        Thread worker = new Thread(runnable, "knowledge-query");
+                        worker.setDaemon(true);
+                        return worker;
+                    },
+                    new ThreadPoolExecutor.AbortPolicy());
+
+    @jakarta.annotation.PreDestroy
+    void closeQueryWorkers() {
+        queryWorkers.shutdownNow();
+    }
+
+    QueryEmbedding queryEmbedding(String query) {
+        return new QueryEmbedding(embeddingClient, query);
+    }
 
     KnowledgeIndexService(
             VectorProperties properties,
@@ -74,6 +100,30 @@ public class KnowledgeIndexService {
 
     private int indexDocument(
             long documentId, String targetIndex, String targetCollection, boolean updateStatus) {
+        return indexDocument(
+                documentId, targetIndex, targetCollection, updateStatus, () -> {}, usage -> {});
+    }
+
+    void indexExperience(long documentId, Runnable guard, java.util.function.IntConsumer usage) {
+        guard.run();
+        if (!embeddingEnabled()) throw new IllegalStateException("Embedding Provider 尚未配置");
+        indexDocument(
+                documentId,
+                vectorStore.experienceIndex(),
+                qdrantStore.experienceCollection(),
+                true,
+                guard,
+                usage);
+    }
+
+    private int indexDocument(
+            long documentId,
+            String targetIndex,
+            String targetCollection,
+            boolean updateStatus,
+            Runnable guard,
+            java.util.function.IntConsumer usage) {
+        guard.run();
         if (!embeddingEnabled()) {
             throw new IllegalStateException("Embedding Provider 尚未配置");
         }
@@ -93,14 +143,20 @@ public class KnowledgeIndexService {
         Map<Integer, List<Double>> vectors = new LinkedHashMap<>();
         Map<Long, String> failures = new LinkedHashMap<>();
         for (List<Integer> batch : batches(chunks, texts)) {
+            guard.run();
+            boolean accounted = false;
             try {
                 EmbeddingBatchResult result =
                         embeddingClient.embedBatch(batch.stream().map(texts::get).toList());
+                usage.accept(result.tokenUsage());
+                accounted = true;
                 validateEmbeddingResult(result, batch.size());
                 for (int index = 0; index < batch.size(); index++) {
                     vectors.put(batch.get(index), result.vectors().get(index));
                 }
             } catch (RuntimeException exception) {
+                // A failed request may have reached the provider; do not invent zero usage.
+                if (!accounted) usage.accept(-1);
                 for (Integer index : batch) {
                     failures.put(
                             number(chunks.get(index), "id").longValue(), safeMessage(exception));
@@ -160,6 +216,7 @@ public class KnowledgeIndexService {
         List<Long> indexedChunkIds = new ArrayList<>();
         int bulkSize = Math.max(1, properties.getBulkSize());
         for (int start = 0; start < keywordDocuments.size(); start += bulkSize) {
+            guard.run();
             int end = Math.min(start + bulkSize, keywordDocuments.size());
             List<ElasticsearchVectorStore.IndexDocument> batch =
                     keywordDocuments.subList(start, end);
@@ -177,6 +234,7 @@ public class KnowledgeIndexService {
                                 List.of(), batchFailures(batch, "Elasticsearch", exception));
             }
             try {
+                guard.run();
                 vectorResult =
                         targetCollection == null
                                 ? qdrantStore.bulkUpsert(pointBatch)
@@ -194,6 +252,7 @@ public class KnowledgeIndexService {
                     .forEach(indexedChunkIds::add);
         }
         if (updateStatus) {
+            guard.run();
             repository.markIndexResults(
                     documentId, indexedChunkIds, failures, embeddingClient.model());
         }
@@ -201,6 +260,7 @@ public class KnowledgeIndexService {
             throw new IllegalStateException("部分知识切片索引失败，失败数量=" + failures.size());
         }
         if (targetIndex == null) {
+            guard.run();
             vectorStore.deleteOlderVersions(documentId, number(document, "version").intValue());
             qdrantStore.deleteOlderVersions(documentId, number(document, "version").intValue());
         }
@@ -208,6 +268,10 @@ public class KnowledgeIndexService {
     }
 
     HybridSearchResult search(RetrievalRequest rawRequest) {
+        return search(rawRequest, queryEmbedding(rawRequest.query()));
+    }
+
+    HybridSearchResult search(RetrievalRequest rawRequest, QueryEmbedding queryEmbedding) {
         String query = queryNormalizer.normalize(rawRequest.query());
         if (query.isBlank()) {
             throw new IllegalArgumentException("检索问题不能为空");
@@ -224,18 +288,34 @@ public class KnowledgeIndexService {
                         rawRequest.userId(),
                         rawRequest.administrator(),
                         rawRequest.resultSize());
-        Map<String, Long> durations = new LinkedHashMap<>();
+        Map<String, Long> durations = new java.util.concurrent.ConcurrentHashMap<>();
         long started = System.nanoTime();
-        List<RetrievalHit> bm25 =
-                vectorStore.bm25Search(query, request, Math.max(1, properties.getBm25TopK()));
-        recordStage("bm25", started, bm25.size(), durations);
+        Future<List<RetrievalHit>> keywordFuture = null;
+        List<RetrievalHit> bm25;
+        try {
+            keywordFuture =
+                    queryWorkers.submit(
+                            () -> {
+                                long keywordStarted = System.nanoTime();
+                                var rows =
+                                        vectorStore.bm25Search(
+                                                query,
+                                                request,
+                                                Math.max(1, properties.getBm25TopK()));
+                                recordStage("bm25", keywordStarted, rows.size(), durations);
+                                return rows;
+                            });
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            // Keep bounded resources; under contention use the original synchronous path.
+            metrics.counter("rag.retrieval.parallel.fallback").increment();
+        }
 
         List<RetrievalHit> vector = List.of();
         String degraded = null;
         if (embeddingEnabled()) {
             long embeddingStarted = System.nanoTime();
             try {
-                List<Double> queryVector = embeddingClient.embed(List.of(query)).get(0);
+                List<Double> queryVector = queryEmbedding.get(query).vectors().get(0);
                 recordStage("embedding", embeddingStarted, 1, durations);
                 long vectorStarted = System.nanoTime();
                 vector =
@@ -249,6 +329,31 @@ public class KnowledgeIndexService {
         } else {
             degraded = "EMBEDDING_UNAVAILABLE";
             metrics.counter("rag.retrieval.degraded", "reason", degraded).increment();
+        }
+
+        try {
+            if (keywordFuture == null) {
+                long keywordStarted = System.nanoTime();
+                bm25 =
+                        vectorStore.bm25Search(
+                                query, request, Math.max(1, properties.getBm25TopK()));
+                recordStage("bm25", keywordStarted, bm25.size(), durations);
+            } else {
+                long timeout =
+                        TimeUnit.SECONDS.toNanos(Math.max(1, properties.getTimeoutSeconds()));
+                bm25 =
+                        keywordFuture.get(
+                                Math.max(1, timeout - (System.nanoTime() - started)),
+                                TimeUnit.NANOSECONDS);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("知识检索已取消", interrupted);
+        } catch (java.util.concurrent.ExecutionException
+                | java.util.concurrent.TimeoutException unavailable) {
+            throw new IllegalStateException("关键词检索暂不可用", unavailable);
+        } finally {
+            if (keywordFuture != null && !keywordFuture.isDone()) keywordFuture.cancel(true);
         }
 
         long rrfStarted = System.nanoTime();

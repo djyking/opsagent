@@ -110,7 +110,7 @@ class AgentEventResultService {
         String summary =
                 "AI 处理结果 / 机器验证：已执行审批通过的受控修复，业务探针 HTTP 200，连续成功 "
                         + evidence.path("business").path("consecutiveSuccesses").asInt()
-                        + " 次，关联告警已恢复。待 admin 分别完成技术确认、业务确认与关闭。";
+                        + " 次，关联告警已恢复。待有权限的处置人分别完成技术确认、业务确认与关闭。";
         if ("ops-demo-notification-service".equals(ticket.getAffectedCiCode())) {
             reference.put("messageId", evidence.path("business").path("messageId").asText());
             summary += "通知已取得真实投递回执，隔离队列已排空。";

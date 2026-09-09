@@ -10,7 +10,9 @@ import com.opsagent.common.security.InternalActorTokens.Context;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -105,6 +107,357 @@ class AgentMetricClaimsTest {
             assertDoesNotThrow(
                     () -> AgentEvidenceRegistry.validate(run, diagnosis(run, text)), text);
         }
+    }
+
+    @Test
+    void realCloud2088CorrectionAcceptsChineseUnitLabelsButStillRejectsTruncation()
+            throws Exception {
+        JsonNode fixture =
+                AgentJson.MAPPER.readTree(
+                        getClass()
+                                .getResourceAsStream(
+                                        "/evidence/cloud-2088-chinese-metric-unit.json"));
+        var run = sample((ObjectNode) fixture.path("metrics"));
+        JsonNode original = fixture.path("correctedArgs");
+        String originalMetricId = original.path("evidenceIds").get(3).asText();
+        ObjectNode corrected =
+                (ObjectNode) AgentJson.read(original.toString().replace(originalMetricId, id(run)));
+        List<JsonNode> references = new ArrayList<>(AgentEvidenceRegistry.currentEntries(run));
+        for (int index = 0; index < 3; index++) {
+            ObjectNode other =
+                    AgentJson.object().put("id", original.path("evidenceIds").get(index).asText());
+            other.putObject("facts");
+            other.putObject("units");
+            references.add(other);
+        }
+        assertEquals(Set.of(id(run)), AgentMetricClaims.validate(run, corrected, references));
+        ObjectNode first =
+                (ObjectNode)
+                        AgentJson.read(
+                                fixture.path("firstArgs")
+                                        .toString()
+                                        .replace(originalMetricId, id(run)));
+        var rejected =
+                assertThrows(
+                        AgentEvidenceRegistry.ReferenceError.class,
+                        () -> AgentMetricClaims.validate(run, first, references));
+        assertTrue(rejected.getMessage().contains("不符"));
+        assertTrue(rejected.getMessage().contains("4.324973452508422"));
+    }
+
+    @Test
+    void realCloud2092ExposesIncompleteIdsWithoutAcceptingTheEarlierWrongValues() throws Exception {
+        JsonNode fixture =
+                AgentJson.MAPPER.readTree(
+                        getClass()
+                                .getResourceAsStream(
+                                        "/evidence/cloud-2092-incomplete-metric-reference.json"));
+        var run = sample((ObjectNode) fixture.path("metrics"));
+        List<JsonNode> references = new ArrayList<>(AgentEvidenceRegistry.currentEntries(run));
+        for (String field : List.of("originalProbeId", "originalChangeId")) {
+            ObjectNode other = AgentJson.object().put("id", fixture.path(field).asText());
+            other.putObject("facts");
+            other.putObject("units");
+            references.add(other);
+        }
+        List<String> errors = new ArrayList<>();
+        for (String field : List.of("firstArgs", "secondArgs", "finalArgs")) {
+            JsonNode args =
+                    AgentJson.read(
+                            fixture.path(field)
+                                    .toString()
+                                    .replace(fixture.path("originalMetricId").asText(), id(run)));
+            errors.add(
+                    assertThrows(
+                                    AgentEvidenceRegistry.ReferenceError.class,
+                                    () -> AgentMetricClaims.validate(run, args, references))
+                            .getMessage());
+        }
+        assertTrue(errors.get(0).contains("不符"), errors.get(0));
+        assertTrue(errors.get(1).contains("括号内"), errors.get(1));
+        assertTrue(errors.get(2).contains("ID 不完整"), errors.get(2));
+        JsonNode repaired =
+                AgentJson.read(
+                        fixture.path("finalArgs")
+                                .toString()
+                                .replace(fixture.path("originalMetricId").asText(), id(run))
+                                .replace("ev-7d3f...", id(run))
+                                .replace("ev-31a4...", fixture.path("originalProbeId").asText()));
+        assertDoesNotThrow(() -> AgentMetricClaims.validate(run, repaired, references));
+    }
+
+    @Test
+    void malformedInlineIdsNeverSilentlyFallBackToAnOtherwiseValidMetric() {
+        var run = sample(metrics());
+        for (String malformed :
+                List.of(
+                        "ev-abcd...",
+                        "ev-abcd…",
+                        "ev-12345678...",
+                        "ev-1234567",
+                        "ev-" + "a".repeat(25))) {
+            var failure =
+                    assertThrows(
+                            AgentEvidenceRegistry.ReferenceError.class,
+                            () ->
+                                    AgentEvidenceRegistry.validate(
+                                            run,
+                                            diagnosis(run, "errorRate=0.69% (" + malformed + ")")));
+            assertTrue(failure.getMessage().contains("ID 不完整"));
+        }
+    }
+
+    @Test
+    void correctionFeedbackChecksEveryFieldAndPreservesMissingMetricsAsUnknown() {
+        ObjectNode raw = metrics();
+        ((ObjectNode) raw.path("p95Ms")).remove("value");
+        var run = sample(raw);
+        ObjectNode args = diagnosis(run, "businessProbe=0.0; errorRate=69.39%");
+        args.put("summary", "错误率69.39%").put("knownFacts", "errorRate=0.69% (ev-abcd...)");
+        String before = args.toString();
+        String feedback = AgentMetricCorrectionFeedback.build(run, args);
+        assertTrue(feedback.contains("evidence：诊断数值核验失败"));
+        assertTrue(feedback.contains("summary：诊断数值核验失败"));
+        assertTrue(feedback.contains("knownFacts：指标所在行的证据 ID 不完整"));
+        assertTrue(feedback.contains(id(run) + " metrics.errorRate.value=" + ERROR_RATE + "%"));
+        assertTrue(feedback.contains("metrics.p95Ms 没有可核验的原值及原单位；保持未知"));
+        assertEquals(before, args.toString());
+        assertFalse(run.state().has("referenceCorrections"));
+        assertFalse(run.state().has("diagnosis"));
+        assertFalse(run.state().has("toolIntent"));
+    }
+
+    @Test
+    void correctionFeedbackDoesNotOfferTamperedEvidenceAsAValidCandidate() {
+        var run = sample(metrics());
+        String actual = id(run);
+        ((ObjectNode)
+                        run.state()
+                                .path("observations")
+                                .path("initial")
+                                .path("entries")
+                                .get(0)
+                                .path("data")
+                                .path("metrics")
+                                .path("errorRate"))
+                .put("value", 69.39);
+        String feedback =
+                AgentMetricCorrectionFeedback.build(run, diagnosis(run, "errorRate=0.69%"));
+        assertFalse(feedback.contains(actual + " metrics.errorRate.value="));
+    }
+
+    @Test
+    void chineseUnitPrefixesAreLimitedToExplicitSingleUnitsAfterTheSameNumber() {
+        var run = sample(metrics());
+        for (String prefix :
+                List.of(
+                        "单位", "单位=", "单位:", "单位为", "单位＝", "单位：", "单位 = ", "unit=", "unit:", "unit：",
+                        "UNIT : ")) {
+            assertDoesNotThrow(
+                    () ->
+                            AgentEvidenceRegistry.validate(
+                                    run,
+                                    diagnosis(
+                                            run,
+                                            "errorRate=0.69（"
+                                                    + prefix
+                                                    + "%）；RPS=1.45（"
+                                                    + prefix
+                                                    + "requests/s）")),
+                    prefix);
+        }
+        for (String text :
+                List.of(
+                        "errorRate=0.69（单位换算为%）",
+                        "errorRate=0.69（单位为0.69%）",
+                        "errorRate=0.69（单位%，另一数值69%）",
+                        "errorRate=0.69（单位%或ratio）",
+                        "errorRate=0.69（单位%/ratio）",
+                        "errorRate=0.69（单位%]",
+                        "errorRate=0.69（单位%",
+                        "errorRate=0.69说明文字（单位%）",
+                        "errorRate=0.69\n（单位%）",
+                        "errorRate=0.69（单位ms）",
+                        "errorRate=0.006939（单位ratio）",
+                        "RPS=1.45（单位换算为requests/s）",
+                        "RPS=1.45（单位requests/s，另附说明）",
+                        "RPS=1.45 (unit means requests/s)",
+                        "errorRate=0.69 (unit:%, another value=69%)",
+                        "RPS=1.45（单位requests/s]",
+                        "P95Ms=120（单位換算为ms）"))
+            assertThrows(
+                    AgentEvidenceRegistry.ReferenceError.class,
+                    () ->
+                            AgentEvidenceRegistry.validate(
+                                    run, diagnosis(run, "businessProbe=0.0; " + text)),
+                    text);
+    }
+
+    @Test
+    void plainReferenceParenthesesDoNotInvalidateAnAlreadyKnownMetricUnit() {
+        var run = sample(metrics());
+        for (String claim : List.of("RPS=1.45", "P95Ms=120", "errorRate(%)=0.69")) {
+            assertDoesNotThrow(
+                    () ->
+                            AgentEvidenceRegistry.validate(
+                                    run, diagnosis(run, claim + "（引用 " + id(run) + "）")),
+                    claim);
+            assertDoesNotThrow(
+                    () ->
+                            AgentEvidenceRegistry.validate(
+                                    run, diagnosis(run, claim + " (reference " + id(run) + ")")),
+                    claim);
+        }
+    }
+
+    @Test
+    void unitFailuresProvideAnExactRunnableExampleWithTheOriginalEvidenceId() {
+        ObjectNode raw = metrics();
+        ((ObjectNode) raw.path("errorRate")).put("value", 4.324973452508422);
+        ((ObjectNode) raw.path("rps")).put("value", 1.378274997557446);
+        var run = sample(raw);
+        for (String claim :
+                List.of(
+                        "errorRate=4.324973452508422",
+                        "errorRate=4.324973452508422ms",
+                        "errorRate(ms)=4.324973452508422%",
+                        "RPS=1.378274997557446（单位ms）",
+                        "RPS=1.378274997557446（单位换算为requests/s）")) {
+            var rejected =
+                    assertThrows(
+                            AgentEvidenceRegistry.ReferenceError.class,
+                            () -> AgentEvidenceRegistry.validate(run, diagnosis(run, claim)),
+                            claim);
+            String example = rejected.getMessage().split("合法示例：", 2)[1];
+            assertEquals(
+                    id(run)
+                            + (claim.startsWith("RPS")
+                                    ? " metrics.rps.value=1.378274997557446requests/s"
+                                    : " metrics.errorRate.value=4.324973452508422%"),
+                    example);
+            assertDoesNotThrow(() -> AgentEvidenceRegistry.validate(run, diagnosis(run, example)));
+        }
+    }
+
+    @Test
+    void realCloud2087CorrectionHasValidNumericClaimsWithoutRelaxingBadReferenceChecks()
+            throws Exception {
+        JsonNode fixture =
+                AgentJson.MAPPER.readTree(
+                        getClass()
+                                .getResourceAsStream(
+                                        "/evidence/cloud-2087-parenthesized-metric-unit.json"));
+        var run = sample((ObjectNode) fixture.path("metrics"));
+        JsonNode original = fixture.path("correctedArgs");
+        String originalMetricId = original.path("evidenceIds").get(2).asText();
+        ObjectNode corrected =
+                (ObjectNode)
+                        AgentJson.read(
+                                original.toString()
+                                        .replace(originalMetricId, id(run))
+                                        .replace(
+                                                originalMetricId.substring(0, 11),
+                                                id(run).substring(0, 11)));
+        List<JsonNode> references = new ArrayList<>(AgentEvidenceRegistry.currentEntries(run));
+        // Non-metric referenced entries cannot supply or change the measured error rate.
+        for (int index = 0; index < 2; index++) {
+            ObjectNode other =
+                    AgentJson.object().put("id", original.path("evidenceIds").get(index).asText());
+            other.putObject("facts");
+            other.putObject("units");
+            references.add(other);
+        }
+        assertEquals(
+                Set.of(id(run)),
+                AgentMetricClaims.validate(
+                        run,
+                        AgentJson.object().put("evidence", corrected.path("evidence").asText()),
+                        references));
+        assertDoesNotThrow(
+                () ->
+                        AgentMetricClaims.validate(
+                                run,
+                                AgentJson.object()
+                                        .put("summary", corrected.path("summary").asText()),
+                                references));
+        var firstRejected =
+                assertThrows(
+                        AgentEvidenceRegistry.ReferenceError.class,
+                        () ->
+                                AgentMetricClaims.validate(
+                                        run,
+                                        AgentJson.object()
+                                                .put(
+                                                        "summary",
+                                                        fixture.path("firstSummary").asText()),
+                                        references));
+        assertTrue(firstRejected.getMessage().contains("不符"));
+        // The historical payload also abbreviates another evidence ID incorrectly. Keep rejecting
+        // it.
+        var badReference =
+                assertThrows(
+                        AgentEvidenceRegistry.ReferenceError.class,
+                        () -> AgentMetricClaims.validate(run, corrected, references));
+        assertTrue(badReference.getMessage().contains("ev-287b6731"));
+    }
+
+    @Test
+    void explicitParenthesizedUnitsKeepRawValuesAndRoundingWithoutPercentageConversion() {
+        ObjectNode raw = metrics();
+        ((ObjectNode) raw.path("errorRate")).put("value", 0.865979381443299);
+        var run = sample(raw);
+        for (String suffix : List.of("%", "(%)", "（%）", "(unit=%)")) {
+            for (String value : List.of("0.865979381443299", "0.86598", "0.866"))
+                assertDoesNotThrow(
+                        () ->
+                                AgentEvidenceRegistry.validate(
+                                        run,
+                                        diagnosis(
+                                                run, "metrics.errorRate.value=" + value + suffix)),
+                        value + suffix);
+            assertThrows(
+                    AgentEvidenceRegistry.ReferenceError.class,
+                    () -> AgentEvidenceRegistry.validate(run, diagnosis(run, "错误率86.6" + suffix)),
+                    suffix);
+        }
+        assertDoesNotThrow(
+                () ->
+                        AgentEvidenceRegistry.validate(
+                                run, diagnosis(run, "错误率0.86598 ( unit = % )")));
+    }
+
+    @Test
+    void parenthesizedUnitMustBelongToTheSameValueAndCannotHideMissingOrConflictingUnits() {
+        var run = sample(metrics());
+        for (String text :
+                List.of(
+                        "errorRate=0.69; P95=120%",
+                        "errorRate=0.69（另一个指标为69%）",
+                        "errorRate=0.69(note=%)",
+                        "errorRate=0.69(unit=%，即0.69%)",
+                        "errorRate=0.69(%)ratio",
+                        "errorRate=0.69(%",
+                        "errorRate=0.69() %",
+                        "errorRate=0.69\n(%)",
+                        "errorRate=0.69(unit=ms)",
+                        "errorRate=0.006939(unit=ratio)",
+                        "errorRate(ms)=0.69(%)",
+                        "RPS=1.45(ms)",
+                        "P95=0.12(unit=s)"))
+            assertThrows(
+                    AgentEvidenceRegistry.ReferenceError.class,
+                    () ->
+                            AgentEvidenceRegistry.validate(
+                                    run, diagnosis(run, "businessProbe=0.0; " + text)),
+                    text);
+        ObjectNode missingUnit = metrics();
+        ((ObjectNode) missingUnit.path("errorRate")).remove("unit");
+        var runWithoutUnit = sample(missingUnit);
+        assertThrows(
+                AgentEvidenceRegistry.ReferenceError.class,
+                () ->
+                        AgentEvidenceRegistry.validate(
+                                runWithoutUnit, diagnosis(runWithoutUnit, "errorRate=0.69(%)")));
     }
 
     @Test
@@ -344,6 +697,7 @@ class AgentMetricClaimsTest {
         assertEquals(deadline, run.state().path("deadline").asText());
         assertEquals(0, fixture.clients.actions);
         assertEquals(0, fixture.store.approvals(runId).size());
+        assertTrue(fixture.clients.modelRequests.get(2).toString().contains("请一次核对并纠正全部诊断字段"));
         assertEquals(
                 1,
                 fixture.jdbc.queryForObject(

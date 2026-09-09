@@ -14,6 +14,7 @@ export interface ServiceMetricHistory { ciCode: string; environment: string; fro
 export interface LayoutPosition { ciCode: string; x: number; y: number }
 export interface TopologySnapshot { nodes: ServiceNode[]; edges: ServiceRelation[]; checkedAt: string; dataSources: DataSourceStatus[]; layout?: Record<string, { x: number; y: number }>; message?: string; relationMessage?: string; activeAlerts?: Record<string, unknown>[]; activeAlertCount?: number | null }
 export interface ObservabilityFilters { environment: string; timeRange: string; mode?: string }
+export interface ObservationRequestOptions { signal?: AbortSignal; expectedIdentity?: string }
 export interface ServiceDetail { node: ServiceNode; alerts: Record<string, unknown>[]; alertsAvailable?: boolean; relations: ServiceRelation[]; recentChanges: Record<string, unknown>[]; recentRuns: Record<string, unknown>[]; metricsUrl?: string; dataSources?: DataSourceStatus[]; checkedAt?: string }
 export interface ConfigSummary { status: string; configurationCount?: number | null; editableCount?: number | null; sources?: { source: string; count: number; status: string }[]; message?: string; observedAt?: string }
 export interface TrafficSummary { status: string; serviceId?: string; resourceCount?: number | null; ruleCount?: number | null; passQps?: number | null; blockQps?: number | null; avgRt?: number | null; activeThreads?: number | null; message?: string; observedAt?: string }
@@ -21,13 +22,13 @@ export interface InspectionItem { id: string | number; name: string; ciCode: str
 export interface InspectionSnapshot { items: InspectionItem[]; checkedAt: string; message?: string; today?: Record<string, number>; coverage?: string; schedule?: { enabled?: boolean; nextRunAt?: string; intervalMs?: number } }
 const base = '/api/platform/observability';
 export const observabilityApi = {
-  topology: (params: ObservabilityFilters) => request<TopologySnapshot>({ url: `${base}/v3/topology`, params }),
-  service: (ciCode: string, params: ObservabilityFilters) => request<ServiceDetail>({ url: `${base}/services/${encodeURIComponent(ciCode)}`, params }),
-  metricHistory: (ciCode: string, params: ObservabilityFilters) => request<ServiceMetricHistory>({ url: `${base}/services/${encodeURIComponent(ciCode)}/metric-history`, params }),
-  configSummary: (ciCode: string) => request<ConfigSummary>({ url: '/api/platform/config-center/summary', params: { ciCode } }),
-  trafficSummary: (ciCode: string) => request<TrafficSummary>({ url: '/api/platform/traffic/summary', params: { ciCode } }),
+  topology: (params: ObservabilityFilters, options: ObservationRequestOptions = {}) => request<TopologySnapshot>({ url: `${base}/v3/topology`, params, timeout: 20_000, ...options }),
+  service: (ciCode: string, params: ObservabilityFilters, options: ObservationRequestOptions = {}) => request<ServiceDetail>({ url: `${base}/services/${encodeURIComponent(ciCode)}`, params, timeout: 12_000, ...options }),
+  metricHistory: (ciCode: string, params: ObservabilityFilters, options: ObservationRequestOptions = {}) => request<ServiceMetricHistory>({ url: `${base}/services/${encodeURIComponent(ciCode)}/metric-history`, params, timeout: 12_000, ...options }),
+  configSummary: (ciCode: string, options: ObservationRequestOptions = {}) => request<ConfigSummary>({ url: '/api/platform/config-center/summary', params: { ciCode }, timeout: 12_000, ...options }),
+  trafficSummary: (ciCode: string, options: ObservationRequestOptions = {}) => request<TrafficSummary>({ url: '/api/platform/traffic/summary', params: { ciCode }, timeout: 12_000, ...options }),
   saveLayout: (environment: string, positions: LayoutPosition[]) => request<void>({ method: 'PUT', url: `${base}/topology/layout`, data: { environment, positions } }),
-  layout: (environment: string) => request<LayoutSnapshot>({ url: `${base}/topology/layout`, params: { environment } }),
+  layout: (environment: string, options: ObservationRequestOptions = {}) => request<LayoutSnapshot>({ url: `${base}/topology/layout`, params: { environment }, timeout: 12_000, ...options }),
   savePersonalLayout: (environment: string, positions: LayoutPosition[]) => request<void>({ method: 'PUT', url: `${base}/topology/layout/personal`, data: { environment, positions } }),
   resetPersonalLayout: (environment: string) => request<void>({ method: 'DELETE', url: `${base}/topology/layout/personal`, params: { environment } }),
   inspections: (params: ObservabilityFilters) => request<InspectionSnapshot>({ url: `${base}/inspections`, params }),

@@ -53,6 +53,22 @@ public final class TrafficGovernanceDtos {
 
     public record Workspace(Summary summary, List<Resource> resources, List<RuleSet> ruleSets) {}
 
+    public record Overview(
+            String source, int windowSeconds, Instant refreshedAt, List<Stream> streams) {}
+
+    public record Stream(
+            String id,
+            String label,
+            String serviceId,
+            String status,
+            Double requestsPerSecond,
+            Double requestCount,
+            Double blockedCount,
+            Double apiRequestsPerSecond,
+            Instant sampledAt,
+            String scope,
+            String message) {}
+
     public record Validate(@NotNull JsonNode rules) {}
 
     public record Validated(boolean valid, JsonNode rules, String message) {}

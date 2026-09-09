@@ -123,19 +123,35 @@ class RagConversationServiceTest {
                         10,
                         new RagService.AnswerMetadata("OPERATIONS", false, 1, 1, 20, false, null));
         var plan = RagService.StreamPlan.completed("当前服务健康", answer, 0);
-        org.mockito.Mockito.when(rag.prepareStream("当前服务健康", 5, null, null, "", "openai"))
+        org.mockito.Mockito.when(
+                        rag.prepareStream(
+                                org.mockito.ArgumentMatchers.eq("当前服务健康"),
+                                org.mockito.ArgumentMatchers.eq(5),
+                                org.mockito.ArgumentMatchers.eq(null),
+                                org.mockito.ArgumentMatchers.eq(null),
+                                org.mockito.ArgumentMatchers.eq(""),
+                                org.mockito.ArgumentMatchers.eq("openai"),
+                                org.mockito.ArgumentMatchers.eq(null),
+                                org.mockito.ArgumentMatchers.eq(null),
+                                org.mockito.ArgumentMatchers.any()))
                 .thenReturn(plan);
         org.mockito.Mockito.doAnswer(
                         call -> {
+                            java.util.function.Function<
+                                            java.util.function.Consumer<String>,
+                                            RagService.StreamPlan>
+                                    preparation = call.getArgument(0);
+                            preparation.apply(phase -> {});
                             java.util.function.Consumer<RagService.Answer> complete =
-                                    call.getArgument(2);
+                                    call.getArgument(3);
                             complete.accept(answer);
                             return new org.springframework.web.servlet.mvc.method.annotation
                                     .SseEmitter();
                         })
                 .when(streaming)
-                .open(
-                        org.mockito.ArgumentMatchers.eq(plan),
+                .openPrepared(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
@@ -146,7 +162,17 @@ class RagConversationServiceTest {
         assertThat(saved.provider()).isEqualTo("openai");
         assertThat(saved.model()).isEqualTo("selected-model");
         assertThat(saved.references()).containsExactly(source);
-        org.mockito.Mockito.verify(rag).prepareStream("当前服务健康", 5, null, null, "", "openai");
+        org.mockito.Mockito.verify(rag)
+                .prepareStream(
+                        org.mockito.ArgumentMatchers.eq("当前服务健康"),
+                        org.mockito.ArgumentMatchers.eq(5),
+                        org.mockito.ArgumentMatchers.eq(null),
+                        org.mockito.ArgumentMatchers.eq(null),
+                        org.mockito.ArgumentMatchers.eq(""),
+                        org.mockito.ArgumentMatchers.eq("openai"),
+                        org.mockito.ArgumentMatchers.eq(null),
+                        org.mockito.ArgumentMatchers.eq(null),
+                        org.mockito.ArgumentMatchers.any());
         org.mockito.Mockito.verify(requestScope).close();
         org.mockito.Mockito.verify(requestScope, org.mockito.Mockito.never())
                 .failure(org.mockito.ArgumentMatchers.any());
@@ -191,6 +217,26 @@ class RagConversationServiceTest {
                                 id,
                                 new RagConversationController.QuestionRequest(
                                         "不能追问", 5, null, null, "openai")));
+    }
+
+    @Test
+    void completedHistoryPreservesStyleAndMeasuredTimingWithoutSchemaChange() {
+        var conversation = service.create(1, "细节偏好");
+        long turn = service.begin(conversation.id(), 1, "分析运行状态");
+        var measured =
+                answer("已知事实与缺口", true)
+                        .withPresentation(
+                                AnswerStyle.DETAILED,
+                                new RagService.AnswerTiming(
+                                        1500,
+                                        700,
+                                        800,
+                                        1000L,
+                                        java.util.Map.of("retrieval", 600L)));
+        service.complete(conversation.id(), 1, turn, measured);
+        var restored = service.turns(conversation.id(), 1, null).records().get(0).result();
+        assertThat(restored.answerStyle()).isEqualTo(AnswerStyle.DETAILED);
+        assertThat(restored.timing()).isEqualTo(measured.timing());
     }
 
     @Test

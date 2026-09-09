@@ -40,7 +40,7 @@ async function html() {
   return renderToString(app);
 }
 try {
-  assert.deepEqual(calls, ['firing']);
+  assert.deepEqual(calls, [''], 'An unfiltered entry loads all alerts');
   const rows = [{ id: 1, serviceCode: 'rag', alertName: 'RAG Slow', severity: 'WARNING', currentStatus: 'firing' },
     { id: 2, affectedCiCode: 'redis', alertName: 'Redis Down', severity: 'CRITICAL', currentStatus: 'firing' },
     { id: 3, serviceCode: 'rag-other', alertName: 'Different service', severity: 'WARNING', currentStatus: 'firing' }];

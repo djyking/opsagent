@@ -387,6 +387,8 @@
 }
 
 .ticket-detail-tabs { width: 100%; display: flex; gap: 6px; height: auto; padding: 10px 20px; border-bottom: 0; overflow-x: auto; }
+.ticket-list-page .ticket-detail-tabs { padding:0; }
+.ticket-list-page .ticket-queue-tabs { gap:8px; margin:0; }
 
 .ticket-detail-tabs :is(button, a) { min-height: 36px; height: 36px; padding: 0 14px; flex: none; display: inline-flex; align-items: center; gap: 7px; border: 0; border-radius: var(--oa-radius-control); color: var(--oa-text-secondary); background: transparent; font-size: var(--oa-font-size-sm); text-decoration: none; }
 

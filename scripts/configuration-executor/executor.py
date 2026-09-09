@@ -218,6 +218,35 @@ def mask_all_values(value):
     return MASK
 
 
+def visitor_sensitive_name(key):
+    return sensitive_name(key) or bool(re.search(r"(?i)(authorization|access[-_]?key|client[-_]?key|cookie|session[-_]?id)", key))
+
+
+def visitor_value(value, key=""):
+    """Public values come from registered fields, without comments or credential payloads."""
+    if visitor_sensitive_name(key):
+        return "未设置" if value is None or value == "" else "已设置"
+    if isinstance(value, dict):
+        named_secret = visitor_sensitive_name(str(value.get("name", "")))
+        return {name: visitor_value(item, "secret" if named_secret and name == "value" else name)
+                for name, item in value.items()}
+    if isinstance(value, list):
+        return [visitor_value(item) for item in value]
+    if isinstance(value, str):
+        decoded = urllib.parse.unquote(value)
+        # A registered string may itself carry a JSON payload or a URL query credential.
+        if decoded.lstrip().startswith(("{", "[")):
+            try:
+                nested = json.loads(decoded)
+                return json.dumps(visitor_value(nested), ensure_ascii=False)
+            except (ValueError, TypeError):
+                return "已设置"
+        if (mask_document(decoded) != decoded or MASK in decoded
+                or re.search(r"(?i)(?:[?&;]|^)(?:[\w.-]*(?:password|passwd|secret|token|api[-_]?key|access[-_]?key|authorization|cookie))[\w.-]*\s*=", decoded)):
+            return "已设置"
+    return value
+
+
 def contains_mask(value):
     if isinstance(value, dict):
         return any(contains_mask(item) for item in value.values())
@@ -480,6 +509,61 @@ class Executor:
 
     def catalog(self):
         return {"items": [self.summary(file_id) for file_id in self.files], "executorStatus": "AVAILABLE"}
+
+    def visitor_catalog(self):
+        items = [{**self.summary(file_id), "editable": False, "reason": "访客可查看脱敏参数，不能修改配置。"}
+                 for file_id in self.files]
+        return {"items": items, "executorStatus": "AVAILABLE", "accessMode": "VISITOR_READ_ONLY"}
+
+    def visitor_detail(self, file_id):
+        with self.lock:
+            definition = self.definition(file_id)
+            raw, content = self.read_file(definition)
+            document = parse_document(content, definition.get("format", "yaml"))
+            fields, visible = [], {}
+            for specification in definition["fields"]:
+                key = specification["key"]
+                value = lookup(document, key)
+                sensitive = bool(specification.get("sensitive")) or visitor_sensitive_name(key)
+                shown = visitor_value(value, "secret" if sensitive else key)
+                field = {name: specification[name] for name in ("key", "label", "category", "type", "unit", "min", "max")
+                         if name in specification}
+                field.update(hasValue=value is not None and value != "", editable=False, sensitive=sensitive)
+                if not sensitive:
+                    field["value"] = shown
+                fields.append(field)
+                assign(visible, key, shown)
+            result = self.summary(file_id)
+            result.update(version=digest(raw), fields=fields, editable=False, rawEditable=False,
+                          reason="访客只读 · 敏感值仅显示设置状态。", accessMode="VISITOR_READ_ONLY",
+                          redactedContent=dump_document(visible, definition.get("format", "yaml")),
+                          contentScope="REGISTERED_FIELDS", loadedVersion="", publishedVersion="", lastTaskId="")
+            return result
+
+    def visitor_history(self, file_id):
+        definition = self.definition(file_id)
+        with self.lock:
+            history = self.history(file_id)
+            published = {task["draftId"]: task for task in history["tasks"] if task.get("filePublished")}
+            specifications = {field["key"]: field for field in definition["fields"]}
+            versions = []
+            for draft in history["drafts"]:
+                if draft["id"] not in published:
+                    continue
+                task = published[draft["id"]]
+                diff = []
+                for change in draft.get("diff", []):
+                    key = change.get("key", "")
+                    specification = specifications.get(key)
+                    if specification is None:
+                        continue
+                    sensitive = bool(specification.get("sensitive")) or visitor_sensitive_name(key)
+                    diff.append({"key": key, "label": specification.get("label", key), "sensitive": sensitive,
+                                 "before": "已设置" if sensitive else visitor_value(change.get("before"), key),
+                                 "after": "已设置" if sensitive else visitor_value(change.get("after"), key)})
+                versions.append({key: draft[key] for key in ("id", "baseVersion", "targetVersion", "action", "createdAt")})
+                versions[-1].update(status=task["status"], diff=diff)
+            return {"drafts": [], "tasks": [], "versions": versions, "accessMode": "VISITOR_READ_ONLY"}
 
     def detail(self, file_id):
         with self.lock:
@@ -1550,7 +1634,10 @@ def handler(executor):
                     raise Rejected("执行器身份验证失败", 403)
                 actor = int(self.headers.get("X-Ops-Actor-Id", "0"))
                 role = self.headers.get("X-Ops-Actor-Role", "")
-                if actor <= 0 or role not in {"ADMIN", "OPS"} or method == "POST" and role != "ADMIN":
+                visitor = role == "DEMO"
+                visitor_read = method == "GET" and bool(re.fullmatch(r"/files(?:/(?!drafts(?:/|$)|tasks(?:/|$))[A-Za-z0-9][A-Za-z0-9_.-]{0,95}(?:/history)?)?", self.path))
+                if (actor == 0 or actor < 0 and not visitor or role not in {"ADMIN", "OPS", "DEMO"}
+                        or visitor and not visitor_read or method == "POST" and role != "ADMIN"):
                     raise Rejected("当前身份不允许执行该配置动作", 403)
                 if self.headers.get("Origin") or self.headers.get("Transfer-Encoding"):
                     raise Rejected("执行器不接受浏览器直连或分块请求", 403)
@@ -1566,11 +1653,11 @@ def handler(executor):
                 if any(not IDENTIFIER.fullmatch(piece) for piece in pieces):
                     raise Rejected("不支持该请求路径", 404)
                 if pieces == ["files"] and method == "GET":
-                    result = executor.catalog()
+                    result = executor.visitor_catalog() if visitor else executor.catalog()
                 elif len(pieces) == 2 and pieces[0] == "files" and method == "GET":
-                    result = executor.detail(pieces[1])
+                    result = executor.visitor_detail(pieces[1]) if visitor else executor.detail(pieces[1])
                 elif len(pieces) == 3 and pieces[0] == "files" and pieces[2] == "history" and method == "GET":
-                    result = executor.history(pieces[1])
+                    result = executor.visitor_history(pieces[1]) if visitor else executor.history(pieces[1])
                 elif len(pieces) == 3 and pieces[0] == "files" and pieces[2] == "drafts" and method == "POST":
                     result = executor.create_draft(pieces[1], body, actor)
                 elif len(pieces) == 2 and pieces[0] == "drafts" and method == "GET":
@@ -1591,7 +1678,8 @@ def handler(executor):
                     raise Rejected("接口不存在", 404)
                 self.respond(200, {"code": 0, "message": "成功", "data": result})
             except Rejected as failure:
-                self.respond(failure.status, {"code": failure.status * 100, "message": str(failure), "data": None})
+                message = "配置只读请求未完成，请核对权限或稍后重试" if self.headers.get("X-Ops-Actor-Role") == "DEMO" else str(failure)
+                self.respond(failure.status, {"code": failure.status * 100, "message": message, "data": None})
             except (ValueError, TypeError):
                 self.respond(400, {"code": 40000, "message": "请求格式不正确", "data": None})
             except Exception:

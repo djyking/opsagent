@@ -102,7 +102,7 @@ class EventLifecycleService {
         audit.workRecord(
                 id,
                 "EVENT_" + action.action(),
-                action.content().trim(),
+                (actor.roles().contains("DEMO") ? "【访客演练确认】" : "") + action.content().trim(),
                 action.evidence() == null ? null : action.evidence().trim(),
                 actor.userId());
         audit.operation(
@@ -128,9 +128,16 @@ class EventLifecycleService {
         boolean operator =
                 actor.roles().contains("ADMIN")
                         || Objects.equals(ticket.getAssigneeId(), actor.userId());
-        boolean writable = !actor.roles().contains("DEMO");
+        boolean visitorOwner =
+                actor.roles().contains("DEMO")
+                        && TicketService.ownIsolatedDrill(ticket, actor)
+                        && ticket.getIncidentId() != null
+                        && !ticket.getIncidentId().isBlank();
+        boolean writable = !actor.roles().contains("DEMO") || visitorOwner;
         boolean businessActor =
-                actor.roles().contains("ADMIN") || (operator && actor.roles().contains("OPS"));
+                visitorOwner
+                        || actor.roles().contains("ADMIN")
+                        || (operator && actor.roles().contains("OPS"));
         List<String> allowed = new ArrayList<>();
         boolean workDone = Set.of("RESOLVED", "CLOSED").contains(ticket.getStatus());
         var episode = ticket.getEpisodeId() == null ? null : episodes.find(ticket.getEpisodeId());
@@ -181,14 +188,17 @@ class EventLifecycleService {
                 ticket.getVersion(),
                 stage,
                 required,
-                required ? "该服务未被明确豁免，默认需要业务确认；管理员可兼任并留痕" : "该服务明确列入技术验证类，无需独立业务确认",
+                visitorOwner
+                        ? "本人隔离演练确认；不代表生产业务负责人签字"
+                        : required ? "该服务未被明确豁免，默认需要业务确认；管理员可兼任并留痕" : "该服务明确列入技术验证类，无需独立业务确认",
                 state.result(),
                 state.technical(),
                 state.business(),
                 state.closed(),
                 allowed,
                 blockers,
-                records.stream().filter(row -> row.recordType().startsWith("EVENT_")).toList());
+                records.stream().filter(row -> row.recordType().startsWith("EVENT_")).toList(),
+                visitorOwner ? "VISITOR_DRILL" : "OPERATIONS");
     }
 
     static State reduce(List<TicketAuditMapper.WorkRecord> records) {
@@ -290,5 +300,6 @@ class EventLifecycleService {
             TicketAuditMapper.WorkRecord closed,
             List<String> allowedActions,
             List<String> blockers,
-            List<TicketAuditMapper.WorkRecord> history) {}
+            List<TicketAuditMapper.WorkRecord> history,
+            String confirmationScope) {}
 }

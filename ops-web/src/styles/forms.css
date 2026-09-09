@@ -1,5 +1,6 @@
-input, select, textarea { width: 100%; border: 1px solid var(--oa-border-default); border-radius: var(--oa-radius-control); color: var(--oa-text-primary); background: var(--oa-bg-surface); font-size: var(--oa-font-size-body); font-weight: 400; line-height: var(--oa-line-height-body); outline: none; transition: border-color var(--oa-duration-fast) ease, box-shadow var(--oa-duration-fast) ease; }
-input, select { height: var(--oa-control-default); padding: 0 10px; }
+input:where(:not([type=checkbox]):not([type=radio])), select, textarea { width: 100%; border: 1px solid var(--oa-border-default); border-radius: var(--oa-radius-control); color: var(--oa-text-primary); background: var(--oa-bg-surface); font-size: var(--oa-font-size-body); font-weight: 400; line-height: var(--oa-line-height-body); outline: none; transition: border-color var(--oa-duration-fast) ease, box-shadow var(--oa-duration-fast) ease; }
+input:where(:not([type=checkbox]):not([type=radio])), select { height: var(--oa-control-default); padding: 0 10px; }
+input[type=checkbox], input[type=radio] { width: 17px; height: 17px; min-height: 17px; margin: 0; padding: 0; flex: none; accent-color: var(--oa-primary); cursor: pointer; }
 textarea { min-height: 96px; padding: 8px 10px; line-height: var(--oa-line-height-body); resize: vertical; }
 input::placeholder, textarea::placeholder { color: var(--oa-text-tertiary); opacity: 1; font-weight: 400; }
 input:focus, select:focus, textarea:focus { border-color: var(--oa-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oa-primary) 12%, transparent); }

@@ -41,6 +41,12 @@ public class KnowledgeService {
     private final KnowledgeProperties properties;
     private final AtomicLong consistencyGap;
     private final TicketAccessClient ticketAccess;
+    private VisitorKnowledgeService visitorKnowledge;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void visitorKnowledge(VisitorKnowledgeService service) {
+        visitorKnowledge = service;
+    }
 
     KnowledgeService(
             KnowledgeRepository repo,
@@ -73,6 +79,7 @@ public class KnowledgeService {
     }
 
     List<Map<String, Object>> documents(long base) {
+        if (repo.experienceBase(base)) return visitorKnowledge.baseDocuments(base);
         return demoUser()
                 ? demoDocumentMetadata(filterLinkedTickets(repo.documents(base, true)))
                 : repo.documents(base);
@@ -170,6 +177,8 @@ public class KnowledgeService {
 
     long upload(long base, Long ticketId, MultipartFile file, String requestedVisibility) {
         try {
+            if (repo.experienceBase(base))
+                throw new BusinessException(ErrorCode.FORBIDDEN, "体验文档请从我的体验库上传");
             var principal = SecurityUsers.current();
             if (ticketId != null) ticketAccess.requireVisible(ticketId);
             String visibility = normalizeVisibility(requestedVisibility, principal.roles());
@@ -183,6 +192,7 @@ public class KnowledgeService {
     }
 
     long requestParse(long id) {
+        rejectExperienceMutation(repo.document(id));
         var principal = SecurityUsers.current();
         var reservation =
                 repo.reserveParseTask(id, principal.userId(), administrator(principal.roles()));
@@ -234,6 +244,7 @@ public class KnowledgeService {
     }
 
     private void requireDraftEditor(Map<String, Object> document) {
+        rejectExperienceMutation(document);
         var principal = SecurityUsers.current();
         if (demoUser()
                 || (!administrator(principal.roles())
@@ -256,6 +267,7 @@ public class KnowledgeService {
     @Transactional
     DeleteResult deleteDocument(long documentId) {
         Map<String, Object> document = repo.document(documentId);
+        rejectExperienceMutation(document);
         if (document == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
         }
@@ -285,6 +297,7 @@ public class KnowledgeService {
 
     ParsedDocument parseFile(long id) throws Exception {
         Map<String, Object> document = repo.document(id);
+        rejectExperienceMutation(document);
         if (document == null) throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
         repo.parsing(id);
         String extension = String.valueOf(document.get("file_type"));
@@ -297,6 +310,7 @@ public class KnowledgeService {
 
     @Transactional
     boolean completeParse(String eventId, long taskId, ParsedDocument parsed) {
+        rejectExperienceMutation(repo.document(parsed.documentId()));
         if (repo.consumeOnce("knowledge-document-parser", eventId) == 0) {
             return false;
         }
@@ -314,8 +328,17 @@ public class KnowledgeService {
     }
 
     List<Map<String, Object>> chunks(long id) {
+        readableDocument(id);
+        return repo.chunks(id);
+    }
+
+    Map<String, Object> readableDocument(long id) {
         Map<String, Object> document = repo.document(id);
         if (document == null) throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
+        if ("EXPERIENCE".equals(text(document, "review_status"))) {
+            visitorKnowledge.requireVisible(id);
+            return document;
+        }
         var principal = SecurityUsers.current();
         String visibility = String.valueOf(document.get("visibility"));
         long creator = number(document, "create_by", "createBy");
@@ -323,11 +346,11 @@ public class KnowledgeService {
                 && creator != principal.userId()
                 && !("PUBLIC".equals(visibility)
                         && "PUBLISHED".equals(text(document, "review_status")))) {
-            throw new BusinessException(ErrorCode.FORBIDDEN, "无权查看该文档切片");
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权查看该文档内容");
         }
         long linkedTicket = number(document, "ticket_id");
         if (linkedTicket > 0) ticketAccess.requireVisible(linkedTicket);
-        return repo.chunks(id);
+        return document;
     }
 
     List<Map<String, Object>> search(String query, int topK) {
@@ -352,9 +375,22 @@ public class KnowledgeService {
                 principal.roles().stream()
                         .anyMatch(role -> "ADMIN".equals(role) || "ROLE_ADMIN".equals(role));
         if (documentId != null || ticketId != null) {
+            if (documentId != null) {
+                var document = repo.document(documentId);
+                if (document != null && "EXPERIENCE".equals(text(document, "review_status"))) {
+                    if (ticketId != null)
+                        throw new BusinessException(ErrorCode.FORBIDDEN, "体验文档不属于工单附件范围");
+                    return visitorKnowledge.search(query, limit, documentId);
+                }
+            }
             return scopedSearch(
                     query, limit, documentId, ticketId, principal.userId(), administrator);
         }
+        QueryEmbedding queryEmbedding = indexService.queryEmbedding(query);
+        List<Map<String, Object>> privateRows =
+                visitorKnowledge == null
+                        ? List.of()
+                        : visitorKnowledge.search(query, limit, null, queryEmbedding);
         if (indexService.enabled()) {
             try {
                 HybridSearchResult hybrid =
@@ -369,13 +405,15 @@ public class KnowledgeService {
                                         false,
                                         principal.userId(),
                                         administrator,
-                                        limit));
+                                        limit),
+                                queryEmbedding);
                 if (!hybrid.candidates().isEmpty()) {
                     List<Map<String, Object>> visible =
                             filterGlobalResults(indexService.candidateRows(hybrid));
-                    if (!visible.isEmpty()) return visible;
+                    if (!visible.isEmpty()) return mergeExperience(privateRows, visible, limit);
                 }
             } catch (RuntimeException exception) {
+                if (Thread.currentThread().isInterrupted()) throw exception;
                 LOG.warn("Elasticsearch 检索失败，已安全降级到权限过滤后的 MySQL 文本检索");
             }
         }
@@ -390,7 +428,22 @@ public class KnowledgeService {
                 }
             }
         }
-        return filterGlobalResults(new ArrayList<>(unique.values())).stream().limit(limit).toList();
+        return mergeExperience(
+                privateRows, filterGlobalResults(new ArrayList<>(unique.values())), limit);
+    }
+
+    private List<Map<String, Object>> mergeExperience(
+            List<Map<String, Object>> privateRows,
+            List<Map<String, Object>> publicRows,
+            int limit) {
+        List<Map<String, Object>> rows = new ArrayList<>(privateRows);
+        rows.addAll(publicRows);
+        return rows.stream().limit(limit).toList();
+    }
+
+    private void rejectExperienceMutation(Map<String, Object> document) {
+        if (document != null && "EXPERIENCE".equals(text(document, "review_status")))
+            throw new BusinessException(ErrorCode.FORBIDDEN, "体验文档仅在我的体验库中处理，不可审核或公开发布");
     }
 
     private List<Map<String, Object>> scopedSearch(
@@ -661,6 +714,8 @@ public class KnowledgeService {
         if (document == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "文档不存在");
         }
+        if ("EXPERIENCE".equals(text(document, "review_status")))
+            visitorKnowledge.requireVisible(documentId);
         return document;
     }
 

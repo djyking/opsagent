@@ -29,7 +29,31 @@ final class TicketQueueDtos {
             Long assigneeId,
             @Pattern(regexp = "|OPEN|CLOSED|ARCHIVED|ALL") String eventScope,
             @Pattern(regexp = "|HANDLING|VERIFYING|READY_TO_CLOSE|CLOSED|LEGACY_ARCHIVED")
-                    String eventStage) {
+                    String eventStage,
+            @Pattern(regexp = "|mine") String scope) {
+        Query(
+                Integer pageNum,
+                Integer pageSize,
+                String keyword,
+                String status,
+                String priority,
+                String affectedCiCode,
+                Long assigneeId,
+                String eventScope,
+                String eventStage) {
+            this(
+                    pageNum,
+                    pageSize,
+                    keyword,
+                    status,
+                    priority,
+                    affectedCiCode,
+                    assigneeId,
+                    eventScope,
+                    eventStage,
+                    "");
+        }
+
         Query {
             pageNum = pageNum == null ? 1 : pageNum;
             pageSize = pageSize == null ? 10 : pageSize;
@@ -39,6 +63,7 @@ final class TicketQueueDtos {
             affectedCiCode = text(affectedCiCode);
             eventScope = text(eventScope);
             eventStage = text(eventStage);
+            scope = text(scope);
         }
 
         private static String text(String value) {

@@ -52,6 +52,8 @@
 .gov-metrics strong { color: #4d6b9b; font-size: 27px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .gov-metrics small { color: #9caac0; font-size: 11px; }
 .gov-resources,.gov-rules { overflow: hidden; }
+.traffic-current > summary { padding: 18px 22px; color: #516f9c; font-size: 13px; cursor: pointer; }
+.traffic-current[open] > summary { border-bottom: 1px solid #eaf0f8; }
 .gov-rule-types { display: flex; gap: 6px; padding: 12px 19px; background: #fafcff; border-bottom: 1px solid #e8eef8; flex-wrap: wrap; }
 .gov-rule-types button { display: flex; gap: 8px; align-items: center; padding: 10px 13px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: #8a9ab2; font-size: 12px; }
 .gov-rule-types button.active { color: #617ec5; background: #eff4ff; border-color: #dfe8fb; }

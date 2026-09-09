@@ -1,5 +1,7 @@
 package com.opsagent.rag;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import okhttp3.mockwebserver.MockResponse;
@@ -11,8 +13,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 /**
  * 验证可选 BGE 重排、超时降级、邻居扩展、去重、文档配额和 Token Budget。
  *
@@ -23,11 +23,10 @@ class RerankAndContextTest {
 
     @Test
     void shouldKeepRrfOrderWhenRerankIsDisabled() {
-        List<RerankDocument> candidates = List.of(
-                document(0, 10), document(1, 11), document(2, 12));
+        List<RerankDocument> candidates =
+                List.of(document(0, 10), document(1, 11), document(2, 12));
 
-        List<RerankResult> result = new NoOpRerankProvider()
-                .rerank("Redis", candidates, 2);
+        List<RerankResult> result = new NoOpRerankProvider().rerank("Redis", candidates, 2);
 
         assertThat(result).extracting(RerankResult::candidateIndex).containsExactly(0, 1);
     }
@@ -35,15 +34,18 @@ class RerankAndContextTest {
     @Test
     void shouldAlignRemoteResultsByCandidateIndexAndTopN() throws Exception {
         MockWebServer server = new MockWebServer();
-        server.enqueue(new MockResponse()
-                .addHeader("Content-Type", "application/json")
-                .setBody("{\"results\":[{\"index\":1,\"score\":0.95},"
-                        + "{\"index\":0,\"score\":0.82}]}"));
+        server.enqueue(
+                new MockResponse()
+                        .addHeader("Content-Type", "application/json")
+                        .setBody(
+                                "{\"results\":[{\"index\":1,\"score\":0.95},"
+                                        + "{\"index\":0,\"score\":0.82}]}"));
         server.start();
         try {
             RagProperties properties = properties(server, 3);
-            List<RerankResult> result = new BgeRemoteRerankProvider(properties)
-                    .rerank("Redis", List.of(document(0, 10), document(1, 11)), 2);
+            List<RerankResult> result =
+                    new BgeRemoteRerankProvider(properties)
+                            .rerank("Redis", List.of(document(0, 10), document(1, 11)), 2);
 
             assertThat(result).extracting(RerankResult::candidateIndex).containsExactly(1, 0);
             assertThat(result).extracting(RerankResult::score).containsExactly(0.95D, 0.82D);
@@ -55,25 +57,29 @@ class RerankAndContextTest {
     @Test
     void shouldFallbackToRrfOrderWhenRemoteTimesOut() throws Exception {
         MockWebServer server = new MockWebServer();
-        server.enqueue(new MockResponse()
-                .addHeader("Content-Type", "application/json")
-                .setBody("{\"results\":[{\"index\":1,\"score\":0.95}]}")
-                .setBodyDelay(1500, TimeUnit.MILLISECONDS));
+        server.enqueue(
+                new MockResponse()
+                        .addHeader("Content-Type", "application/json")
+                        .setBody("{\"results\":[{\"index\":1,\"score\":0.95}]}")
+                        .setBodyDelay(1500, TimeUnit.MILLISECONDS));
         server.start();
         try {
             RagProperties properties = properties(server, 1);
-            RerankService service = new RerankService(
-                    properties,
-                    new BgeRemoteRerankProvider(properties),
-                    new NoOpRerankProvider(),
-                    new SimpleMeterRegistry());
+            RerankService service =
+                    new RerankService(
+                            properties,
+                            new BgeRemoteRerankProvider(properties),
+                            new NoOpRerankProvider(),
+                            new SimpleMeterRegistry());
 
-            RerankService.Outcome outcome = service.rerank(
-                    "Redis", List.of(chunk(10, 1, 0, "主片段"), chunk(11, 1, 1, "邻居")), 2);
+            RerankService.Outcome outcome =
+                    service.rerank(
+                            "Redis", List.of(chunk(10, 1, 0, "主片段"), chunk(11, 1, 1, "邻居")), 2);
 
             assertThat(outcome.applied()).isFalse();
             assertThat(outcome.degradedReason()).isEqualTo("REMOTE_ERROR");
-            assertThat(outcome.chunks()).extracting(RetrievedChunk::chunkId)
+            assertThat(outcome.chunks())
+                    .extracting(RetrievedChunk::chunkId)
                     .containsExactly(10L, 11L);
         } finally {
             server.shutdown();
@@ -92,14 +98,72 @@ class RerankAndContextTest {
         RetrievedChunk duplicate = chunk(12, 1, 2, "Redis 故障主片段");
         RetrievedChunk other = chunk(20, 2, 0, "RabbitMQ 排查步骤");
 
-        ContextAssembler.AssembledContext context = assembler.assemble(
-                List.of(main, other), List.of(neighbor, main, duplicate, other), false);
+        ContextAssembler.AssembledContext context =
+                assembler.assemble(
+                        List.of(main, other), List.of(neighbor, main, duplicate, other), false);
 
-        assertThat(context.sources()).extracting(ContextAssembler.ContextSource::sourceId)
+        assertThat(context.sources())
+                .extracting(ContextAssembler.ContextSource::sourceId)
                 .containsExactly("S1", "S2", "S3");
-        assertThat(context.sources()).extracting(source -> source.chunk().chunkId())
+        assertThat(context.sources())
+                .extracting(source -> source.chunk().chunkId())
                 .containsExactly(11L, 10L, 20L);
         assertThat(context.text()).contains("[S1]", "[S2]", "[S3]");
+    }
+
+    @Test
+    void trickledResponseStillHasOneWholeBodyDeadlineAndKeepsRrfFallback() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(
+                    new MockResponse()
+                            .addHeader("Content-Type", "application/json")
+                            .setBody("{\"results\":[{\"index\":1,\"score\":0.95}]}")
+                            .throttleBody(10, 400, TimeUnit.MILLISECONDS));
+            server.start();
+            var properties = properties(server, 1);
+            var service =
+                    new RerankService(
+                            properties,
+                            new BgeRemoteRerankProvider(properties),
+                            new NoOpRerankProvider(),
+                            new SimpleMeterRegistry());
+            long started = System.nanoTime();
+            var outcome =
+                    service.rerank(
+                            "Redis", List.of(chunk(10, 1, 0, "主片段"), chunk(11, 1, 1, "邻居")), 2);
+            long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            assertThat(elapsed).isLessThan(1450);
+            assertThat(outcome.applied()).isFalse();
+            assertThat(outcome.degradedReason()).isEqualTo("REMOTE_ERROR");
+            assertThat(outcome.chunks())
+                    .extracting(RetrievedChunk::chunkId)
+                    .containsExactly(10L, 11L);
+        }
+    }
+
+    @Test
+    void repeatedCandidateCannotBeReportedAsSuccessfulRerank() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(
+                    new MockResponse()
+                            .setBody(
+                                    "{\"results\":[{\"index\":1,\"score\":0.9},{\"index\":1,\"score\":0.8}]}"));
+            server.start();
+            var properties = properties(server, 1);
+            var service =
+                    new RerankService(
+                            properties,
+                            new BgeRemoteRerankProvider(properties),
+                            new NoOpRerankProvider(),
+                            new SimpleMeterRegistry());
+            var outcome =
+                    service.rerank(
+                            "Redis", List.of(chunk(10, 1, 0, "主片段"), chunk(11, 1, 1, "邻居")), 2);
+            assertThat(outcome.applied()).isFalse();
+            assertThat(outcome.chunks())
+                    .extracting(RetrievedChunk::chunkId)
+                    .containsExactly(10L, 11L);
+        }
     }
 
     @Test
@@ -111,8 +175,8 @@ class RerankAndContextTest {
         RetrievedChunk first = chunk(10, 1, 0, "故".repeat(40));
         RetrievedChunk second = chunk(20, 2, 0, "障".repeat(40));
 
-        ContextAssembler.AssembledContext context = assembler.assemble(
-                List.of(first, second), List.of(first, second), false);
+        ContextAssembler.AssembledContext context =
+                assembler.assemble(List.of(first, second), List.of(first, second), false);
 
         assertThat(context.sources()).hasSize(1);
         assertThat(context.tokenCount()).isLessThanOrEqualTo(100);
@@ -120,6 +184,54 @@ class RerankAndContextTest {
 
     private RerankDocument document(int index, long chunkId) {
         return new RerankDocument(index, chunkId, "标题", "章节", "正文", null);
+    }
+
+    @Test
+    void oneActiveRerankAndFailureCooldownPreventAccumulatingSidecarRequests() throws Exception {
+        var remote = org.mockito.Mockito.mock(BgeRemoteRerankProvider.class);
+        org.mockito.Mockito.when(remote.available()).thenReturn(true);
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        org.mockito.Mockito.when(
+                        remote.rerank(
+                                org.mockito.ArgumentMatchers.anyString(),
+                                org.mockito.ArgumentMatchers.anyList(),
+                                org.mockito.ArgumentMatchers.anyInt()))
+                .thenAnswer(
+                        call -> {
+                            entered.countDown();
+                            release.await(2, TimeUnit.SECONDS);
+                            throw new IllegalStateException("sidecar client timed out");
+                        });
+        var service =
+                new RerankService(
+                        new RagProperties(),
+                        remote,
+                        new NoOpRerankProvider(),
+                        new SimpleMeterRegistry());
+        var candidates = List.of(chunk(10, 1, 0, "主片段"), chunk(11, 1, 1, "邻居"));
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            var first = executor.submit(() -> service.rerank("Redis", candidates, 2));
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            var busy = service.rerank("Another question", candidates, 2);
+            assertThat(busy.degradedReason()).isEqualTo("REMOTE_BUSY");
+            assertThat(busy.applied()).isFalse();
+            assertThat(busy.chunks()).extracting(RetrievedChunk::chunkId).containsExactly(10L, 11L);
+            release.countDown();
+            assertThat(first.get(2, TimeUnit.SECONDS).degradedReason()).isEqualTo("REMOTE_ERROR");
+            var cooling = service.rerank("Third question", candidates, 2);
+            assertThat(cooling.degradedReason()).isEqualTo("REMOTE_COOLDOWN");
+            assertThat(cooling.applied()).isFalse();
+            org.mockito.Mockito.verify(remote, org.mockito.Mockito.times(1))
+                    .rerank(
+                            org.mockito.ArgumentMatchers.anyString(),
+                            org.mockito.ArgumentMatchers.anyList(),
+                            org.mockito.ArgumentMatchers.anyInt());
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
 
     private RetrievedChunk chunk(long id, long documentId, int index, String content) {

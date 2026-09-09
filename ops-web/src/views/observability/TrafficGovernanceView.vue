@@ -3,6 +3,7 @@ import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { Activity, RefreshCw, Gauge, Plus, Pencil, Trash2, History, ShieldCheck, RotateCcw } from '@lucide/vue';
 import ObservabilityWorkspaceView from './ObservabilityWorkspaceView.vue';
+import TrafficGovernanceOverview from './TrafficGovernanceOverview.vue';
 import InlineError from '@/components/InlineError.vue';
 import LoadingState from '@/components/LoadingState.vue';
 import EmptyState from '@/components/EmptyState.vue';
@@ -15,7 +16,7 @@ import '@/styles/pages/observability-governance.css';
 const route = useRoute(); const auth = useAuthStore();
 const ciCode = computed(() => typeof route.query.ciCode === 'string' ? route.query.ciCode : '');
 const manager = useTrafficGovernance(() => ciCode.value);
-const { workspace, history, loading, busy, error, notice, selectedType, plan } = manager;
+const { workspace, overview, overviewLoading, overviewError, history, loading, busy, error, notice, selectedType, plan } = manager;
 const selected = computed(() => workspace.value?.ruleSets.find(s => s.type === selectedType.value));
 const section = ref<'rules' | 'history'>('rules'); const editing = ref(false); const editingIndex = ref(-1);
 const draft = ref<TrafficRule>({}); const comment = ref('');
@@ -50,23 +51,28 @@ function summary(rule: TrafficRule) {
   return Object.entries(rule).filter(([, value]) => typeof value === 'number' && value >= 0).map(([key, value]) => `${key}: ${value}`).join(' · ');
 }
 let timer: ReturnType<typeof setInterval>;
-onMounted(() => { void manager.load(); void manager.loadHistory(); timer = setInterval(() => { if (!document.hidden && !busy.value && !editing.value && !plan.value) void manager.load(); }, 15000); });
+onMounted(() => { void manager.load(); void manager.loadHistory(); timer = setInterval(() => { if (!document.hidden && !loading.value && !overviewLoading.value && !busy.value && !editing.value && !plan.value) void manager.load(); }, 15000); });
 onBeforeUnmount(() => clearInterval(timer));
 watch([() => auth.identity, ciCode, selectedType], () => { editing.value = false; draft.value = {}; comment.value = ''; });
 </script>
 <template>
   <ObservabilityWorkspaceView title="服务与观测" description="实时核对流量与保护规则，让每一次限制都有依据。">
-    <template #actions><button class="button secondary" :disabled="loading || busy" @click="manager.load"><RefreshCw :size="16" />刷新运行态</button></template>
-    <section class="gov-intro"><span class="gov-intro-icon"><Gauge :size="27" /></span><div><span class="gov-eyebrow">TRAFFIC GOVERNANCE</span><h2>看见流量，守住服务边界。</h2><p>{{ ciCode || 'ops-rag-service' }} · Sentinel 运行态与 Nacos 持久化规则</p></div><span class="gov-access"><ShieldCheck :size="16" />{{ auth.isAdmin ? '管理员受控发布' : '当前账号只读' }}</span></section>
+    <template #actions><button class="button secondary" :disabled="loading || overviewLoading || busy" @click="manager.load"><RefreshCw :size="16" />刷新流量与规则</button></template>
+    <section class="gov-intro"><span class="gov-intro-icon"><Gauge :size="27" /></span><div><span class="gov-eyebrow">TRAFFIC GOVERNANCE</span><h2>平台流量与问答保护</h2><p>分别查看平台接口与问答入口；规则范围：{{ ciCode || 'ops-rag-service' }}</p></div><span class="gov-access"><ShieldCheck :size="16" />{{ auth.isAdmin ? '管理员受控发布' : '当前账号只读' }}</span></section>
+    <LoadingState v-if="overviewLoading && !overview" text="正在读取最近5分钟流量…" />
+    <InlineError v-if="overviewError" :message="overviewError" />
+    <TrafficGovernanceOverview v-if="overview" :overview="overview" />
     <InlineError v-if="error" :message="error" />
     <p v-if="notice" class="gov-note" role="status">{{ notice }}</p>
     <LoadingState v-if="loading && !workspace" text="正在核对流量与规则源…" />
     <template v-if="workspace">
       <div v-if="workspace.summary.status === 'NOT_INTEGRATED'" class="panel gov-detail-body"><EmptyState :icon="Gauge" title="该服务尚未接入流量治理" :description="workspace.summary.message" /><RouterLink :to="{ path: '/observability/traffic', query: { ...route.query, ciCode: 'ops-rag-service' } }" class="button secondary">查看已接入的 RAG 服务</RouterLink></div>
       <template v-else>
+        <details class="panel traffic-current"><summary>Sentinel 瞬时保护与纳管资源 · {{ workspace.summary.serviceId }}</summary><div class="gov-detail-body">
         <div class="gov-metrics"><article v-for="item in metrics" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong><small>{{ item.hint }}</small></article></div>
         <p class="gov-note" :class="{ warning: workspace.summary.status !== 'AVAILABLE' }">{{ workspace.summary.message }} · 每 15 秒刷新 · {{ status(workspace.summary.status) }}</p>
-        <section class="panel gov-resources"><header class="gov-section-heading"><div><h3>纳管资源</h3><p>入口校验和完整问答各自计量，避免把校验耗时当成模型响应。</p></div><span class="gov-badge">{{ workspace.resources.length }} 个资源</span></header><div class="obs-table-scroll"><table class="obs-table"><thead><tr><th>资源</th><th>通过 QPS</th><th>拦截 QPS</th><th>平均 RT</th><th>并发</th><th>状态</th></tr></thead><tbody><tr v-for="resource in workspace.resources" :key="resource.resource"><td><strong>{{ resource.label }}</strong><small>{{ resource.resource }}</small><small>{{ resource.measurement }}</small></td><td>{{ metric(resource.passQps) }}</td><td>{{ metric(resource.blockQps) }}</td><td>{{ metric(resource.avgRt, ' ms') }}</td><td>{{ metric(resource.activeThreads) }}</td><td><span class="gov-badge">{{ status(resource.status) }}</span></td></tr><tr v-if="!workspace.resources.length"><td colspan="6">运行态暂不可读，未填充示例数据。</td></tr></tbody></table></div></section>
+        <section class="panel gov-resources"><header class="gov-section-heading"><div><h3>纳管资源</h3><p>短滑动窗口会很快归零；近期流量见上方5分钟总览。入口校验耗时不代表模型响应。</p></div><span class="gov-badge">{{ workspace.resources.length }} 个资源</span></header><div class="obs-table-scroll"><table class="obs-table"><thead><tr><th>资源</th><th>通过 QPS</th><th>拦截 QPS</th><th>平均 RT</th><th>并发</th><th>状态</th></tr></thead><tbody><tr v-for="resource in workspace.resources" :key="resource.resource"><td><strong>{{ resource.label }}</strong><small>{{ resource.resource }}</small><small>{{ resource.measurement }}</small></td><td>{{ metric(resource.passQps) }}</td><td>{{ metric(resource.blockQps) }}</td><td>{{ metric(resource.avgRt, ' ms') }}</td><td>{{ metric(resource.activeThreads) }}</td><td><span class="gov-badge">{{ status(resource.status) }}</span></td></tr><tr v-if="!workspace.resources.length"><td colspan="6">运行态暂不可读，未填充示例数据。</td></tr></tbody></table></div></section>
+        </div></details>
         <section class="panel gov-rules"><header class="gov-section-heading"><div><h3>保护规则</h3><p>发布前检查差异，发布后分别核对持久化与客户端状态。</p></div><span class="gov-badge">Nacos → Sentinel</span></header>
           <nav class="gov-rule-types" aria-label="规则类型"><button v-for="set in workspace.ruleSets" :key="set.type" :class="{ active: selectedType === set.type }" @click="selectedType = set.type"><span>{{ set.label }}</span><small>{{ set.supported ? set.persistedRules.length : '未接入' }}</small></button></nav>
           <div v-if="selected" class="gov-detail-body"><div class="gov-rule-heading"><div><h3>{{ selected.label }}</h3><p>{{ selected.dataId || selected.message }}</p></div><span class="gov-badge" :class="{ positive: selected.applicationStatus === 'APPLIED' }">{{ status(selected.applicationStatus) }}</span></div>

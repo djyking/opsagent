@@ -1,5 +1,10 @@
 package com.opsagent.common.security;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.opsagent.common.core.ApiResponse;
+import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.core.ErrorCode;
+
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
 
@@ -18,9 +23,12 @@ import java.io.IOException;
  */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwt;
+    private final VisitorSessionVerifier visitorSessions;
+    private static final ObjectMapper JSON = new ObjectMapper();
 
-    public JwtAuthenticationFilter(JwtService jwt) {
+    public JwtAuthenticationFilter(JwtService jwt, VisitorSessionVerifier visitorSessions) {
         this.jwt = jwt;
+        this.visitorSessions = visitorSessions;
     }
 
     protected void doFilterInternal(
@@ -35,8 +43,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (h != null && h.startsWith("Bearer "))
             try {
                 OpsPrincipal p = jwt.parse(h.substring(7));
-                if ((p.roles().contains("DEMO") || p.roles().contains("ROLE_DEMO"))
-                        && !DemoAccessPolicy.allows(req.getMethod(), req.getRequestURI())) {
+                boolean visitor = p.roles().contains("DEMO") || p.roles().contains("ROLE_DEMO");
+                if (visitor && !DemoAccessPolicy.allows(req.getMethod(), req.getRequestURI())) {
                     res.setStatus(403);
                     res.setContentType("application/json;charset=UTF-8");
                     res.getWriter()
@@ -45,6 +53,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                             + " 会话\",\"data\":null}");
                     return;
                 }
+                if (visitor && !localAuthLeaseEndpoint(req)) visitorSessions.verify(p);
                 var auths =
                         p.roles().stream()
                                 .map(r -> r.startsWith("ROLE_") ? r : "ROLE_" + r)
@@ -52,9 +61,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                                 .toList();
                 SecurityContextHolder.getContext()
                         .setAuthentication(new UsernamePasswordAuthenticationToken(p, null, auths));
+            } catch (BusinessException failure) {
+                SecurityContextHolder.clearContext();
+                res.setStatus(
+                        failure.getErrorCode() == ErrorCode.MIDDLEWARE_UNAVAILABLE ? 503 : 403);
+                res.setContentType("application/json;charset=UTF-8");
+                JSON.writeValue(
+                        res.getWriter(),
+                        ApiResponse.failure(failure.getErrorCode().code(), failure.getMessage()));
+                return;
             } catch (RuntimeException ignored) {
                 SecurityContextHolder.clearContext();
             }
         chain.doFilter(req, res);
+    }
+
+    private boolean localAuthLeaseEndpoint(HttpServletRequest request) {
+        // Auth reads the same lease from its own database; its internal controller skips this
+        // filter.
+        return "GET".equals(request.getMethod()) && "/api/auth/me".equals(request.getRequestURI())
+                || "POST".equals(request.getMethod())
+                        && java.util.Set.of("/api/auth/logout", "/api/auth/end-experience")
+                                .contains(request.getRequestURI());
     }
 }

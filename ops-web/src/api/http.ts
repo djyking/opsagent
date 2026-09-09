@@ -7,6 +7,7 @@ declare module "axios" {
     sessionToken?: string;
     sessionId?: string;
     sessionRetried?: boolean;
+    expectedIdentity?: string;
   }
 }
 
@@ -31,7 +32,11 @@ const client = axios.create({
 
 client.interceptors.request.use(async (config) => {
   if (publicAuth(config.url)) return config;
+  if (config.expectedIdentity && readSession()?.identity !== config.expectedIdentity)
+    throw new SessionError("登录身份已变化，请重新确认当前操作。", false);
   const token = await ensureAccessToken();
+  if (config.expectedIdentity && readSession()?.identity !== config.expectedIdentity)
+    throw new SessionError("登录身份已变化，请重新确认当前操作。", false);
   config.headers.Authorization = `Bearer ${token}`;
   config.sessionToken = token;
   config.sessionId = readSession()?.sessionId;

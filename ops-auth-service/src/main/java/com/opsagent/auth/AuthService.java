@@ -58,24 +58,79 @@ public class AuthService {
 
     @Transactional
     TokenResponse login(LoginRequest req) {
+        return loginWithExperience(req, null).tokens();
+    }
+
+    @Transactional
+    LoginResult loginWithExperience(LoginRequest req, String experienceCredential) {
         captcha.verify(req.captchaId(), req.captchaCode());
         if (demoEnabled && "user".equals(req.username()) && "user".equals(req.password())) {
-            // Each visitor gets a separate identity; a public credential must not share chat
-            // history.
-            long visitorId = -new java.security.SecureRandom().nextLong(1, 9_007_199_254_740_991L);
-            IssuedToken access =
-                    jwt.issue(visitorId, "访客", List.of("DEMO"), Duration.ofMinutes(30));
-            users.createVisitor(
-                    visitorId, LocalDateTime.ofInstant(access.expiresAt(), ZoneOffset.UTC));
-            return new TokenResponse(access.token(), "", "Bearer", access.expiresAt());
+            return visitorLogin(experienceCredential);
         }
         User u = find(req.username());
         if (u == null
                 || !"enable".equalsIgnoreCase(u.getStatus())
                 || !encoder.matches(req.password(), u.getPassword()))
             throw new BusinessException(ErrorCode.UNAUTHENTICATED, "用户名或密码错误");
-        return issue(u);
+        return new LoginResult(issue(u), null, null);
     }
+
+    private LoginResult visitorLogin(String credential) {
+        Instant now = Instant.now();
+        String continuity = "NEW";
+        if (credential != null && credential.matches("[A-Za-z0-9_-]{43}")) {
+            UserMapper.ExperienceLease experience = users.lockExperience(hash(credential));
+            if (experience != null) {
+                ActorView actor = actor(experience.userId());
+                Instant expiry = experience.expiresAt().toInstant(ZoneOffset.UTC);
+                if (experience.revokedAt() == null && expiry.isAfter(now) && actor.active()) {
+                    return visitorTokens(experience.userId(), credential, expiry, "RESUMED");
+                }
+                continuity = experience.revokedAt() != null ? "ENDED" : "EXPIRED";
+            }
+        }
+        java.security.SecureRandom random = new java.security.SecureRandom();
+        long visitorId = -random.nextLong(1, 9_007_199_254_740_991L);
+        byte[] secret = new byte[32];
+        random.nextBytes(secret);
+        String raw = Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
+        Instant expiry =
+                now.truncatedTo(java.time.temporal.ChronoUnit.MICROS).plus(Duration.ofHours(24));
+        users.createVisitor(visitorId, LocalDateTime.ofInstant(expiry, ZoneOffset.UTC));
+        users.createExperience(
+                hash(raw),
+                visitorId,
+                LocalDateTime.ofInstant(expiry, ZoneOffset.UTC),
+                LocalDateTime.ofInstant(now, ZoneOffset.UTC));
+        return visitorTokens(visitorId, raw, expiry, continuity);
+    }
+
+    private LoginResult visitorTokens(
+            long userId, String credential, Instant expiry, String continuity) {
+        Instant now = Instant.now();
+        Duration remaining = Duration.between(now, expiry);
+        Duration accessLifetime =
+                remaining.compareTo(Duration.ofMinutes(30)) < 0
+                        ? remaining
+                        : Duration.ofMinutes(30);
+        IssuedToken access = jwt.issue(userId, "访客", List.of("DEMO"), accessLifetime);
+        return new LoginResult(
+                new TokenResponse(
+                        access.token(),
+                        "",
+                        "Bearer",
+                        access.expiresAt(),
+                        "visitor-" + userId,
+                        expiry.minus(Duration.ofHours(24)),
+                        expiry,
+                        access.expiresAt(),
+                        now,
+                        continuity),
+                credential,
+                expiry);
+    }
+
+    record LoginResult(TokenResponse tokens, String credential, Instant experienceExpiresAt) {}
 
     @Transactional
     void register(RegisterRequest request) {
@@ -158,12 +213,8 @@ public class AuthService {
 
     @Transactional
     void logout(String token) {
-        var authentication =
-                org.springframework.security.core.context.SecurityContextHolder.getContext()
-                        .getAuthentication();
-        if (authentication != null
-                && authentication.getPrincipal() instanceof OpsPrincipal actor
-                && actor.roles().contains("DEMO")) users.revokeVisitor(actor.userId());
+        // Leaving the workbench keeps the independent 24h experience. Only explicit termination
+        // revokes its execution identity, so switching accounts cannot silently break a workflow.
         if (token != null && !token.isBlank()) {
             String hash = hash(token);
             RefreshTokenMapper.RefreshLease lease = refreshTokens.lockLease(hash);
@@ -171,6 +222,16 @@ public class AuthService {
                 refreshTokens.revokeSession(lease.sessionId());
             else refreshTokens.revoke(hash);
         }
+    }
+
+    @Transactional
+    void endExperience() {
+        OpsPrincipal actor = SecurityUsers.current();
+        if (!actor.roles().contains("DEMO") || actor.userId() >= 0) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "只有当前访客可以结束本人的体验");
+        }
+        users.revokeExperience(actor.userId(), LocalDateTime.now(ZoneOffset.UTC));
+        users.revokeVisitor(actor.userId());
     }
 
     CurrentUser current() {
@@ -240,7 +301,23 @@ public class AuthService {
                             && !visitor.revoked()
                             && expiry.isAfter(Instant.now());
             return new ActorView(
-                    active, userId, "访客", active ? List.of("DEMO") : List.of(), expiry);
+                    active,
+                    userId,
+                    "访客",
+                    active ? List.of("DEMO") : List.of(),
+                    expiry,
+                    active
+                            ? null
+                            : !demoEnabled
+                                    ? "DEMO_DISABLED"
+                                    : visitor == null
+                                            ? "VISITOR_NOT_FOUND"
+                                            : visitor.revoked()
+                                                    ? "VISITOR_REVOKED"
+                                                    : "VISITOR_LEASE_EXPIRED",
+                    visitor == null || visitor.revokedAt() == null
+                            ? null
+                            : visitor.revokedAt().toInstant(ZoneOffset.UTC));
         }
         User user = users.selectById(userId);
         boolean active =
@@ -252,11 +329,19 @@ public class AuthService {
                 userId,
                 active ? user.getUsername() : "",
                 active ? users.roles(userId) : List.of(),
+                null,
+                active ? null : "ACTOR_DISABLED",
                 null);
     }
 
     record ActorView(
-            boolean active, long userId, String username, List<String> roles, Instant expiresAt) {}
+            boolean active,
+            long userId,
+            String username,
+            List<String> roles,
+            Instant expiresAt,
+            String reasonCode,
+            Instant revokedAt) {}
 
     private User find(String username) {
         return users.selectOne(

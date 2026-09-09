@@ -61,40 +61,54 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
             if (!configured()) {
                 throw new IllegalStateException("Embedding 服务未配置");
             }
-            Map<String, Object> body = Map.of(
-                    "model", model(),
-                    "input", texts,
-                    "dimensions", properties.getDimensions(),
-                    "encoding_format", "float");
+            Map<String, Object> body =
+                    Map.of(
+                            "model",
+                            model(),
+                            "input",
+                            texts,
+                            "dimensions",
+                            properties.getDimensions(),
+                            "encoding_format",
+                            "float");
             JsonNode response = request(body);
             List<JsonNode> rows = new ArrayList<>();
             response.path("data").forEach(rows::add);
             rows.sort(Comparator.comparingInt(row -> row.path("index").asInt()));
-            List<List<Double>> vectors = rows.stream()
-                    .map(row -> {
-                        List<Double> vector = new ArrayList<>();
-                        row.path("embedding").forEach(value -> vector.add(value.asDouble()));
-                        return List.copyOf(vector);
-                    })
-                    .toList();
+            List<List<Double>> vectors =
+                    rows.stream()
+                            .map(
+                                    row -> {
+                                        List<Double> vector = new ArrayList<>();
+                                        row.path("embedding")
+                                                .forEach(value -> vector.add(value.asDouble()));
+                                        return List.copyOf(vector);
+                                    })
+                            .toList();
             if (vectors.size() != texts.size()
                     || vectors.stream()
                             .anyMatch(vector -> vector.size() != properties.getDimensions())) {
                 throw new IllegalStateException("Embedding 返回数量或维度不正确");
             }
-            EmbeddingBatchResult result = new EmbeddingBatchResult(
-                    vectors,
-                    model(),
-                    properties.getDimensions(),
-                    response.path("usage").path("total_tokens").asInt(0));
+            EmbeddingBatchResult result =
+                    new EmbeddingBatchResult(
+                            vectors,
+                            model(),
+                            properties.getDimensions(),
+                            response.path("usage").path("total_tokens").asInt(-1));
             metrics.counter("rag.embedding.request", "status", "success").increment();
-            metrics.counter("rag.embedding.tokens").increment(result.tokenUsage());
+            if (result.tokenUsage() >= 0)
+                metrics.counter("rag.embedding.tokens").increment(result.tokenUsage());
+            else metrics.counter("rag.embedding.usage.unknown").increment();
             return result;
         } catch (RuntimeException exception) {
             metrics.counter("rag.embedding.request", "status", "failure").increment();
-            LOG.warn("Embedding request failed: exceptionType={}, rootCauseType={}",
+            LOG.warn(
+                    "Embedding request failed: exceptionType={}, rootCauseType={}",
                     exception.getClass().getSimpleName(),
-                    NestedExceptionUtils.getMostSpecificCause(exception).getClass().getSimpleName());
+                    NestedExceptionUtils.getMostSpecificCause(exception)
+                            .getClass()
+                            .getSimpleName());
             throw exception;
         } finally {
             metrics.timer("rag.embedding.duration")
@@ -105,8 +119,8 @@ public class OpenAiEmbeddingClient implements EmbeddingClient {
     private JsonNode request(Map<String, Object> body) {
         RestClient client = client();
         String base = properties.getEmbeddingBaseUrl();
-        String url = (base.endsWith("/") ? base.substring(0, base.length() - 1) : base)
-                + "/embeddings";
+        String url =
+                (base.endsWith("/") ? base.substring(0, base.length() - 1) : base) + "/embeddings";
         for (int attempt = 1; attempt <= MAXIMUM_ATTEMPTS; attempt++) {
             try {
                 return client.post()

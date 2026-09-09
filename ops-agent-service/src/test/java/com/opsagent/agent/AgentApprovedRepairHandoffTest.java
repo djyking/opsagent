@@ -40,7 +40,7 @@ class AgentApprovedRepairHandoffTest {
         assertEquals(8, fixture.store.get(id).state().path("toolCount").asInt());
         assertEquals(4, fixture.store.get(id).state().path("turns").asInt());
         assertEquals(
-                17580 + com.opsagent.common.core.QueryEmbeddingBudget.reserve("Redis连接故障如何核验"),
+                17580 + 2 * com.opsagent.common.core.QueryEmbeddingBudget.reserve("Redis连接故障如何核验"),
                 fixture.store.get(id).state().path("tokens").asInt());
         assertEquals(1, fixture.store.get(id).state().path("toolAiReservations").size());
         fixture.step();

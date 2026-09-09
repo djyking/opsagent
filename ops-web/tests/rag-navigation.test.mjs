@@ -127,7 +127,7 @@ function setup(query = {}, overrides = {}) {
   await app.state.ask();
   await flush();
   assert.equal(app.calls.create, 1);
-  assert.deepEqual(app.calls.stream, [{ question: '排查 Redis', topK: 5, conversationId: 'created', provider: 'deepseek', observabilityContext: undefined }]);
+  assert.deepEqual(app.calls.stream, [{ question: '排查 Redis', topK: 5, conversationId: 'created', provider: 'deepseek', answerStyle: 'concise', observabilityContext: undefined }]);
   assert.equal(app.state.sessionId.value, 'created');
   assert.deepEqual(app.route.query, { conversation: 'created' });
   app.stop();
@@ -323,3 +323,46 @@ console.log('PASS shared AI session, current context, frozen request scope, no a
   app.stop();
 }
 console.log('PASS backend-only observation facts, frozen structured service scope and identity abort before model submission');
+
+// Pure exchanges and technical teaching ignore automatic page evidence, while document scopes are retained.
+for (const prompt of ['你好！', '什么是布隆过滤器？', '如何解析 JSON', '系统怎么用']) {
+  const app = setup({}); await flush();
+  app.assistant.setContext({ service: 'ops-rag-service', ticketId: 2068, environment: 'PROD' });
+  await app.assistant.ask(prompt);
+  assert.equal(app.calls.stream[0].question, prompt);
+  assert.equal(app.calls.stream[0].observabilityContext, undefined);
+  assert.equal(app.calls.stream[0].ticketId, undefined);
+  app.stop();
+}
+{
+  const app = setup({}); await flush();
+  app.assistant.setContext({ documentId: 91, service: 'ops-rag-service' });
+  await app.assistant.ask('解释这个文档的第一步');
+  assert.equal(app.calls.stream[0].documentId, 91);
+  assert.equal(app.calls.stream[0].observabilityContext, undefined);
+  assert.equal(app.calls.stream[0].question, '解释这个文档的第一步');
+  assert.match(app.assistant.contextSummary, /所选文档 #91/);
+  const count = app.calls.stream.length;
+  await app.assistant.retry(app.assistant.turns[0]);
+  assert.equal(app.assistant.question, '解释这个文档的第一步');
+  assert.equal(app.calls.stream.length, count, 'Retry only imports a draft for explicit send');
+  app.stop();
+}
+{
+  const discovery = deferred();
+  const app = setup({}, { providers: () => discovery.promise }); await flush();
+  assert.equal(app.assistant.canAsk('系统怎么用'), true);
+  assert.equal(app.assistant.canAsk('你好'), false);
+  await app.assistant.ask('访客能做什么');
+  assert.equal(app.calls.stream[0].provider, undefined, 'Built-in help does not depend on a model');
+  discovery.reject(new Error('目录不可用')); await flush();
+  await app.assistant.ask('系统使用指南');
+  assert.equal(app.calls.stream.length, 2);
+  app.stop();
+}
+for (const prompt of ['当前系统有哪些异常', '根据文档介绍系统如何使用', '文档里记载的访客权限是什么', '如何解析 JSON', '如何上传文件到 S3', '如何实现文档向量化']) {
+  assert.equal(contextModule.isProductGuideQuestion(prompt), false);
+}
+assert.equal(contextModule.contextFromRoute({ path: '/knowledge', params: {}, query: { documentId: '91' } }).documentId, 91);
+assert.equal(contextModule.requestContextForQuestion({ ticketId: 2068 }, '解释这个事件').ticketId, 2068);
+console.log('PASS intent before page context, scoped document retrieval, manual retry and product help without model discovery');

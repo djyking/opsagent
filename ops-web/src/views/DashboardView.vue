@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { Activity, AlertTriangle, ArrowUpRight, CheckCircle2, Clock3, Radio, RefreshCw, ShieldAlert, UserRoundCheck } from "@lucide/vue";
 import PageHeader from "@/components/PageHeader.vue";
 import MetricStrip, { type MetricStripItem } from "@/components/MetricStrip.vue";
@@ -8,7 +8,14 @@ import PriorityIndicator from "@/components/PriorityIndicator.vue";
 import LoadingState from "@/components/LoadingState.vue";
 import EmptyState from "@/components/EmptyState.vue";
 import EventActivityStrip from '@/components/events/EventActivityStrip.vue';
-import ServiceTopology from "@/components/observability/ServiceTopology.vue";
+import { loadTopologyGraphRuntime } from '@/utils/load-topology-graph';
+const loadTopologyComponent = () => import("@/components/observability/ServiceTopology.vue");
+const ServiceTopology = defineAsyncComponent({
+  loader: loadTopologyComponent,
+  loadingComponent: LoadingState,
+  delay: 150,
+  timeout: 30000,
+});
 import { observabilityApi, type TopologySnapshot } from "@/api/observability";
 import { useApprovalInboxStore } from "@/stores/approval-inbox";
 import { effectiveHealth } from '@/utils/observability';
@@ -34,6 +41,12 @@ const approvalTotal = ref(0);
 const approvalError = ref('');
 const abnormalOnly = ref(false);
 let topologyVersion = 0;
+let topologyController: AbortController | undefined;
+let topologyPending: Promise<void> | undefined;
+let topologyRequestScope = '';
+let topologyFailures = 0;
+let nextTopologyAttempt = 0;
+const topologyReadAt = ref('');
 let approvalVersion = 0;
 const environments = ref<string[]>([]);
 const healthNodes = computed(() => (topology.value?.nodes || []).filter(node => !node.virtual));
@@ -57,21 +70,66 @@ const coreEdges = computed(() => {
 });
 const myTickets = computed(() => activeTickets.value.filter(ticket => ticket.assigneeId === auth.user?.userId));
 const pendingCount = computed(() => myTickets.value.length + approvalTotal.value);
-async function loadTopology() {
-  const epoch = ++topologyVersion;
+function loadTopology(): Promise<void> {
   const scope = environment.value;
-  topologyLoading.value = true; topologyError.value = '';
-  try {
-    const result = await observabilityApi.topology({ environment: scope, timeRange: '15m', mode: 'CONFIGURED' });
-    if (epoch !== topologyVersion) return;
-    topology.value = result;
-    observationClock.value = Date.now();
-    if (scope === 'ALL') environments.value = [...new Set(result.nodes.map(node => node.environment).filter(Boolean))].sort();
-  } catch (cause) {
-    if (epoch === topologyVersion) topologyError.value = cause instanceof Error ? cause.message : '服务观测读取失败';
-  } finally { if (epoch === topologyVersion) topologyLoading.value = false; }
+  const identity = auth.identity;
+  const key = `${identity}:${scope}`;
+  if (topologyPending && topologyRequestScope === key) return topologyPending;
+  topologyController?.abort();
+  const controller = new AbortController();
+  topologyController = controller; topologyRequestScope = key;
+  const epoch = ++topologyVersion;
+  topologyLoading.value = true;
+  const task = (async () => {
+    try {
+      const result = await observabilityApi.topology({ environment: scope, timeRange: '15m', mode: 'CONFIGURED' },
+        { signal: controller.signal, expectedIdentity: identity ?? undefined });
+      if (controller.signal.aborted || epoch !== topologyVersion || identity !== auth.identity) return;
+      topology.value = result; topologyError.value = ''; topologyFailures = 0;
+      topologyReadAt.value = new Date().toISOString();
+      observationClock.value = Date.now();
+      if (scope === 'ALL') environments.value = [...new Set(result.nodes.map(node => node.environment).filter(Boolean))].sort();
+    } catch (cause) {
+      if (!controller.signal.aborted && epoch === topologyVersion) {
+        topologyFailures++;
+        topologyError.value = cause instanceof Error ? cause.message : '服务观测读取失败';
+      }
+    } finally {
+      if (epoch === topologyVersion) {
+        topologyLoading.value = false; topologyPending = undefined; observationClock.value = Date.now();
+        nextTopologyAttempt = topologyFailures ? Date.now() + Math.min(60_000, 15_000 * 2 ** Math.min(topologyFailures, 2)) : 0;
+      }
+    }
+  })();
+  topologyPending = task;
+  return task;
 }
-function changeEnvironment() { topology.value = undefined; void loadTopology(); }
+function resetTopologyRequest() {
+  topologyVersion++; topologyController?.abort(); topologyController = undefined;
+  topologyPending = undefined; topologyRequestScope = ''; topologyFailures = 0; nextTopologyAttempt = 0;
+  topologyLoading.value = false; topologyReadAt.value = '';
+}
+function changeEnvironment() { resetTopologyRequest(); topology.value = undefined; topologyError.value = ''; void loadTopology(); }
+const expiredHealthCount = computed(() => healthNodes.value.filter(node => {
+  const sampled = Date.parse(node.observedAt || '');
+  const age = node.healthScope === 'BUSINESS_PROBE' ? 30 : node.observation?.maximumSampleAgeSeconds || 90;
+  return node.health !== 'MAINTENANCE' && Number.isFinite(sampled) && observationClock.value - sampled >= age * 1000;
+}).length);
+const healthSummary = computed(() => {
+  if (topologyError.value) return topology.value
+    ? `刷新失败 · ${expiredHealthCount.value ? '观测已过期' : '保留上次观测'}` : '服务观测未获取';
+  return `${expiredHealthCount.value ? `观测已过期 ${expiredHealthCount.value} · ` : ''}异常 ${abnormalCount.value} · 未确认 ${unknownCount.value}`;
+});
+const latestHealthSample = computed(() => {
+  const times = healthNodes.value.map(node => Date.parse(node.observedAt || '')).filter(Number.isFinite);
+  return times.length ? new Date(Math.max(...times)).toLocaleTimeString('zh-CN', { hour12: false }) : '暂无有效样本';
+});
+function refreshVisibleTopology() {
+  if (typeof document !== 'undefined' && document.hidden) return;
+  observationClock.value = Date.now();
+  if (auth.user) { nextTopologyAttempt = 0; void loadTopology(); }
+}
+
 async function loadApprovalSummary() {
   const epoch = ++approvalVersion;
   try {
@@ -191,17 +249,33 @@ async function load() {
   if (failedSources.value.length) error.value = `${failedSources.value.map(key => dataLabels[key]).join("、")}数据未更新。已获取的数据保留上次结果，未获取的数据标记为未知。`;
   loading.value = false;
 }
-onMounted(() => { observationTimer = setInterval(() => { observationClock.value = Date.now(); }, 15000); return refreshOverview(); });
+onMounted(() => {
+  // Start the graph download alongside API reads, before its data-gated mount.
+  // The mounted async component owns user-facing load failure reporting.
+  void loadTopologyComponent().catch(() => {});
+  void loadTopologyGraphRuntime().catch(() => {});
+  observationTimer = setInterval(() => {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    observationClock.value = Date.now();
+    if (auth.user && !topologyLoading.value && observationClock.value >= nextTopologyAttempt) void loadTopology();
+  }, 15_000);
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', refreshVisibleTopology);
+  return refreshOverview();
+});
 watch(() => approvals.decisionVersion, () => { void loadApprovalSummary(); });
-watch(() => `${auth.user?.userId}:${auth.user?.roles?.join(',')}`, () => {
-  loadVersion++; topologyVersion++; approvalVersion++;
+watch(() => `${auth.identity}:${auth.user?.userId}:${auth.user?.roles?.join(',')}`, () => {
+  loadVersion++; resetTopologyRequest(); approvalVersion++;
   tickets.value = []; slaSummary.value = undefined; monitor.value = undefined; alerts.value = []; currentOnCall.value = undefined;
   topology.value = undefined; environments.value = []; approvalKnown.value = false; approvalTotal.value = 0;
   loading.value = false; checkedAt.value = ''; failedSources.value = [];
   for (const key of Object.keys(loaded) as DataKey[]) { loaded[key] = false; sourceCheckedAt[key] = ''; }
   if (auth.user) void refreshOverview();
 }, { flush: 'sync' });
-onBeforeUnmount(() => { loadVersion++; topologyVersion++; approvalVersion++; if (observationTimer) clearInterval(observationTimer); });
+onBeforeUnmount(() => {
+  loadVersion++; resetTopologyRequest(); approvalVersion++;
+  if (observationTimer) clearInterval(observationTimer);
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', refreshVisibleTopology);
+});
 </script>
 
 <template>
@@ -211,7 +285,7 @@ onBeforeUnmount(() => { loadVersion++; topologyVersion++; approvalVersion++; if 
     </PageHeader>
     <p v-if="error" class="inline-error dashboard-sync-error" role="status">{{ error }}</p>
     <div class="overview-cards">
-      <RouterLink class="panel overview-card" to="/observability/topology"><span class="overview-card-icon"><Activity :size="26" /></span><div><span>服务健康</span><strong>{{ topology ? `${healthCount} / ${healthNodes.length}` : topologyLoading ? '获取中' : '未获取' }}</strong><small>{{ topologyError ? (topology ? '刷新失败 · 显示上次观测' : '服务观测未获取') : `异常 ${abnormalCount} · 未确认 ${unknownCount}` }}</small></div><ArrowUpRight :size="17" /></RouterLink>
+      <RouterLink class="panel overview-card" to="/observability/topology"><span class="overview-card-icon"><Activity :size="26" /></span><div><span>服务健康</span><strong>{{ topology ? `${healthCount} / ${healthNodes.length}` : topologyLoading ? '获取中' : '未获取' }}</strong><small>{{ healthSummary }}</small></div><ArrowUpRight :size="17" /></RouterLink>
       <RouterLink class="panel overview-card" to="/tickets"><span class="overview-card-icon warning"><Radio :size="26" /></span><div><span>未关闭事件</span><strong>{{ metricValue('tickets', activeTickets.length) }}</strong><small>{{ metricMeta('tickets', `全部可见事件 · 高优先级 ${priorityTickets.length}`) }}</small></div><ArrowUpRight :size="17" /></RouterLink>
       <div class="panel overview-card"><span class="overview-card-icon"><UserRoundCheck :size="26" /></span><div><span>待我处理</span><strong>{{ loaded.tickets && approvalKnown ? pendingCount : '未确认' }}</strong><small><RouterLink to="/tickets?scope=mine">负责事件 {{ loaded.tickets ? myTickets.length : '—' }}</RouterLink> · <button class="text-button" @click="approvals.show()">待审批 {{ approvalKnown ? approvalTotal : '—' }}</button></small><small v-if="approvalError || failedSources.includes('tickets')">部分数据未更新</small></div></div>
     </div>
@@ -222,7 +296,7 @@ onBeforeUnmount(() => { loadVersion++; topologyVersion++; approvalVersion++; if 
       <EmptyState v-else-if="!topology" title="服务观测未获取" description="请刷新后查看服务状态与链路。" />
       <EmptyState v-else-if="!coreNodes.length" :title="abnormalOnly ? '当前快照没有异常链路' : '当前环境暂无服务节点'" description="未接入、未知或过期的观测不代表正常。" />
       <ServiceTopology v-else ref="overviewGraph" :nodes="coreNodes" :edges="coreEdges" :scope-key="`dashboard:${auth.user?.userId}:${environment}`" compact @select="$router.push({ path: '/observability/topology', query: { ciCode: $event, environment } })" />
-      <footer v-if="topology" class="overview-source-note overview-map-footer"><span>{{ overviewGraph?.interactionActive ? '滚轮缩放已启用 · 点击外部或 Esc 退出' : '点击画布启用滚轮缩放' }}</span><details><summary>观测 {{ formatTime(topology.checkedAt) }} · 关系来源</summary><p>{{ topology.relationMessage || '关系来自服务登记与配置，不代表每条边均有实时流量。' }}<span v-for="source in topology.dataSources.filter(item => !item.healthy)" :key="source.name"> · {{ source.name }}：{{ source.message || '采集不可用' }}</span></p></details></footer>
+      <footer v-if="topology" class="overview-source-note overview-map-footer"><span>{{ overviewGraph?.interactionActive ? '滚轮缩放已启用 · 点击外部或 Esc 退出' : '点击画布启用滚轮缩放' }} · 可见时每 15 秒刷新 · 最新采样 {{ latestHealthSample }}</span><details><summary>最近取数 {{ formatTime(topologyReadAt || topology.checkedAt) }} · 关系来源</summary><p>{{ topology.relationMessage || '关系来自服务登记与配置，不代表每条边均有实时流量。' }}<span v-for="source in topology.dataSources.filter(item => !item.healthy)" :key="source.name"> · {{ source.name }}：{{ source.message || '采集不可用' }}</span></p></details></footer>
     </section>
     <EventActivityStrip :tickets="tickets" :ready="loaded.tickets" />
     <details class="dashboard-support"><summary>事件队列与协作详情<span>优先级、SLA、值班及服务采集</span></summary>

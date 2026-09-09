@@ -11,13 +11,13 @@ function component(path, imports = {}) {
   return module.exports.default;
 }
 const Budget = component('components/RagBudgetEvidence.vue');
-const evidence = await renderToString(vue.createSSRApp(Budget, { result: { metadata: { budgetLimit: 10000, budgetChargedTokens: 9600, budgetUsageKnown: false, requestAttempts: 2 } } }));
-assert.match(evidence, /10,000 token/); assert.match(evidence, /含未知用量的保守预留/); assert.match(evidence, /不代表精确计费用量/); assert.doesNotMatch(evidence, /<details[^>]* open/);
+const evidence = await renderToString(vue.createSSRApp(Budget, { result: { metadata: { budgetLimit: 50000, budgetChargedTokens: 9600, budgetUsageKnown: false, requestAttempts: 2 } } }));
+assert.match(evidence, /50,000 token/); assert.match(evidence, /含未知用量的保守预留/); assert.match(evidence, /不代表精确计费用量/); assert.doesNotMatch(evidence, /<details[^>]* open/);
 const slot = { setup: (_, { slots }) => () => vue.h('section', slots.default?.()) };
 const conversation = { question: '', sessions: [], turns: [{ id: 1, status: 'PROCESSING', question: '问题', answer: '已经开始返回的内容' }], providers: [], references: [], total: 0, busy: true, turnLabel: () => '生成中' };
 const Workspace = component('views/RagWorkspaceView.vue', {
   '@/api/rag-stream': { ragAnswerLabel: () => '实际配置模型' }, '@/composables/useRagConversations': { useRagConversations: () => conversation },
-  '@/stores/ai-assistant': { useAiAssistantStore: () => ({}) }, '@/utils/ai-context': { assistantQuestionBody: value => value, assistantQuestionEvidence: () => '' },
+  '@/stores/ai-assistant': { useAiAssistantStore: () => ({ canAsk: () => false }) }, '@/utils/ai-context': { assistantQuestionBody: value => value, assistantQuestionEvidence: () => '' },
   '@/components/PageHeader.vue': { default: slot }, '@/components/BaseModal.vue': { default: slot }, '@/components/AnswerContent.vue': { default: { props: ['content'], setup: props => () => vue.h('p', props.content) } }, '@/components/RagSources.vue': { default: slot }, '@/components/RagBudgetEvidence.vue': { default: Budget },
 });
 const app = vue.createSSRApp(Workspace); app.component('RouterLink', slot); app.config.warnHandler = () => {};

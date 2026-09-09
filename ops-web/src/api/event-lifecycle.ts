@@ -5,6 +5,7 @@ export interface EventDecision { id: number; recordType: string; content: string
 export interface EventLifecycle {
   eventId: string; ticketId: number; version: number; stage: 'HANDLING' | 'VERIFYING' | 'READY_TO_CLOSE' | 'CLOSED' | 'LEGACY_ARCHIVED';
   businessRequired: boolean; businessRule: string; result?: EventDecision; technical?: EventDecision;
+  confirmationScope?: 'VISITOR_DRILL' | 'OPERATIONS';
   business?: EventDecision; closed?: EventDecision; allowedActions: EventAction[]; blockers: string[]; history: EventDecision[];
 }
 export interface RecoveryBinding {

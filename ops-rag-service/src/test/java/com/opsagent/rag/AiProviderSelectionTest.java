@@ -120,10 +120,13 @@ class AiProviderSelectionTest {
         when(invocation.invoke(
                         eq("openai"),
                         anyString(),
-                        eq(
-                                request.withPriorReservedTokens(
-                                        com.opsagent.common.core.QueryEmbeddingBudget.reserve(
-                                                "解释连接池")))))
+                        argThat(
+                                actual ->
+                                        actual.priorReservedTokens()
+                                                        == com.opsagent.common.core
+                                                                .QueryEmbeddingBudget.reserve(
+                                                                "解释连接池")
+                                                && actual.systemPrompt().contains("通用 AI 回答"))))
                 .thenReturn(result);
         when(invocation.stream(eq("openai"), anyString(), any(LlmRequest.class), any(), any()))
                 .thenReturn(result);

@@ -255,7 +255,7 @@ public class TicketService {
         if (user.roles().contains("DEMO")) demoActors.verify(user, ticket);
     }
 
-    private boolean ownIsolatedDrill(Ticket ticket, OpsPrincipal user) {
+    static boolean ownIsolatedDrill(Ticket ticket, OpsPrincipal user) {
         return Objects.equals(ticket.getOwnerActorId(), user.userId())
                 && "ISOLATED_DRILL".equals(ticket.getSourceType())
                 && "ISOLATED".equals(ticket.getEnvironment())

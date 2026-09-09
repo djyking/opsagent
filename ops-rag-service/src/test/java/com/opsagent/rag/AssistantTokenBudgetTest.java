@@ -29,10 +29,10 @@ class AssistantTokenBudgetTest {
     @Test
     void reservesInputAndOutputAndBlocksRetryAfterUnknownUsage() {
         try (var budget = AssistantTokenBudget.open()) {
-            var first = AssistantTokenBudget.reserve("deepseek", request(20_000));
-            assertThat((int) first.body().get("max_tokens")).isLessThan(10_000);
+            var first = AssistantTokenBudget.reserve("deepseek", request(100_000));
+            assertThat((int) first.body().get("max_tokens")).isLessThan(50_000);
             first.finish(null);
-            assertThat(budget.charged()).isEqualTo(10_000);
+            assertThat(budget.charged()).isEqualTo(50_000);
             assertThat(budget.usageKnown()).isFalse();
             assertThatThrownBy(() -> AssistantTokenBudget.reserve("deepseek", request(100)))
                     .isInstanceOf(AiProviderException.class)
@@ -47,9 +47,9 @@ class AssistantTokenBudgetTest {
             first.finish(json.readTree("{\"prompt_tokens\":1400,\"completion_tokens\":1600}"));
             first.finish(null);
             assertThat(budget.charged()).isEqualTo(3000);
-            var next = AssistantTokenBudget.reserve("deepseek", request(9000));
-            assertThat((int) next.body().get("max_tokens")).isLessThan(7000);
-            assertThat(budget.charged()).isEqualTo(10_000);
+            var next = AssistantTokenBudget.reserve("deepseek", request(100_000));
+            assertThat((int) next.body().get("max_tokens")).isLessThan(47000);
+            assertThat(budget.charged()).isEqualTo(50_000);
             assertThat(budget.attempts()).isEqualTo(2);
         }
         try (var nextAnswer = AssistantTokenBudget.open()) {
@@ -80,7 +80,7 @@ class AssistantTokenBudgetTest {
                                                     100,
                                                     "messages",
                                                     java.util.List.of(
-                                                            Map.of("content", "甲".repeat(4000))))))
+                                                            Map.of("content", "甲".repeat(20000))))))
                     .isInstanceOf(AiProviderException.class);
             assertThat(budget.attempts()).isZero();
         }
@@ -132,8 +132,8 @@ class AssistantTokenBudgetTest {
             var reservation = AssistantTokenBudget.reserve("deepseek", request(4096));
             reservation.finish(
                     json.readTree(
-                            "{\"prompt_tokens\":9000,\"completion_tokens\":3000,\"total_tokens\":12000}"));
-            assertThat(budget.charged()).isEqualTo(12000);
+                            "{\"prompt_tokens\":49000,\"completion_tokens\":3000,\"total_tokens\":52000}"));
+            assertThat(budget.charged()).isEqualTo(52000);
             assertThat(budget.usageKnown()).isTrue();
             assertThatThrownBy(() -> AssistantTokenBudget.reserve("deepseek", request(64)))
                     .isInstanceOf(AiProviderException.class);
@@ -148,21 +148,21 @@ class AssistantTokenBudgetTest {
         try (var budget = AssistantTokenBudget.open(prior, null)) {
             assertThat(budget.charged()).isEqualTo(prior);
             assertThat(budget.usageKnown()).isFalse();
-            var first = AssistantTokenBudget.reserve("deepseek", request(20_000));
+            var first = AssistantTokenBudget.reserve("deepseek", request(100_000));
             assertThat((int) first.body().get("max_tokens"))
-                    .isEqualTo(10_000 - prior - AssistantTokenBudget.upperBound(request(20_000)));
+                    .isEqualTo(50_000 - prior - AssistantTokenBudget.upperBound(request(100_000)));
             first.finish(json.readTree("{\"prompt_tokens\":100,\"completion_tokens\":200}"));
             assertThat(budget.charged()).isEqualTo(prior + 300);
             assertThat(budget.usageKnown()).isFalse();
-            var retry = AssistantTokenBudget.reserve("deepseek", request(20_000));
+            var retry = AssistantTokenBudget.reserve("deepseek", request(100_000));
             retry.finish(null);
-            assertThat(budget.charged()).isEqualTo(10_000);
+            assertThat(budget.charged()).isEqualTo(50_000);
             assertThatThrownBy(() -> AssistantTokenBudget.reserve("deepseek", request(64)))
                     .isInstanceOf(AiProviderException.class);
         }
         assertThatThrownBy(() -> AssistantTokenBudget.open(-1, null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LlmRequest("system", "user", 100, 10_001))
+        assertThatThrownBy(() -> new LlmRequest("system", "user", 100, 50_001))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

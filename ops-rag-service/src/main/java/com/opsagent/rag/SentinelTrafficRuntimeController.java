@@ -1,6 +1,7 @@
 package com.opsagent.rag;
 
 import com.alibaba.csp.sentinel.node.ClusterNode;
+import com.alibaba.csp.sentinel.node.IntervalProperty;
 import com.alibaba.csp.sentinel.slots.block.degrade.DegradeRuleManager;
 import com.alibaba.csp.sentinel.slots.block.flow.FlowRuleManager;
 import com.alibaba.csp.sentinel.slots.clusterbuilder.ClusterBuilderSlot;
@@ -72,7 +73,10 @@ class SentinelTrafficRuntimeController {
                 node == null ? null : node.blockQps(),
                 node == null || !duration || node.successQps() <= 0 ? null : node.avgRt(),
                 node == null ? null : node.curThreadNum(),
-                duration ? "完整请求生命周期；流式响应直到完成/失败/断开" : "仅入口校验；不代表模型响应耗时");
+                "Sentinel "
+                        + IntervalProperty.INTERVAL
+                        + " ms滑动窗口；"
+                        + (duration ? "完整请求生命周期；流式响应直到完成/失败/断开" : "仅入口校验；不代表模型响应耗时"));
     }
 
     private boolean managed(String name) {

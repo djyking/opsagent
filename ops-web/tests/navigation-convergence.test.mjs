@@ -90,6 +90,8 @@ function fixture(path, props = {}) {
     '@/components/AppBreadcrumb.vue': { default: Stub }, '@/components/ai/AiAssistantOrb.vue': { default: Stub }, '@/components/ai/AiAssistantDock.vue': { default: Stub },
     '@/components/AppSidebar.vue': { default: Stub }, '@/components/GlobalTopbar.vue': { default: Stub },
     '@/components/automation/GlobalApprovalInbox.vue': { default: Stub },
+    '@/components/BaseModal.vue': { default: Stub },
+    '@/api/modules': { authApi: { endExperience: async () => { throw new Error('Navigation test must not end an experience'); } } },
   }).default;
   const render = evaluate(template.code, { vue }).render;
   const reactiveProps = vue.reactive(props); const scope = vue.effectScope(); const emitted = [];

@@ -31,16 +31,19 @@ class FileConfigurationController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPS', 'DEMO')")
     ResponseEntity<ApiResponse<JsonNode>> list() {
         return response(client.get("/files"));
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPS', 'DEMO')")
     ResponseEntity<ApiResponse<JsonNode>> detail(@PathVariable String id) {
         return response(client.get("/files/" + id));
     }
 
     @GetMapping("/{id}/history")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OPS', 'DEMO')")
     ResponseEntity<ApiResponse<JsonNode>> history(@PathVariable String id) {
         return response(client.get("/files/" + id + "/history"));
     }

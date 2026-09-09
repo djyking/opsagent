@@ -390,7 +390,7 @@ final class AgentEvidenceRegistry {
         if (supported && !measured) throw new ReferenceError("只有变更时间关联不足以支持结论；需要实际探针或观测正文证据");
     }
 
-    private static boolean authentic(AgentStore.Run run, JsonNode entry) {
+    static boolean authentic(AgentStore.Run run, JsonNode entry) {
         if (!run.id().equals(entry.path("runId").asText())
                 || !run.state().path("targetCode").equals(entry.path("targetCode"))
                 || !run.state().path("incidentId").equals(entry.path("incidentId"))

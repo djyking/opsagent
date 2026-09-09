@@ -1,0 +1,1 @@
+import{G as e}from"./index-C-tepXAD.js";const o=[["path",{d:"m6 9 6 6 6-6",key:"qrunsl"}]],n=e("chevron-down",o);const t=[["rect",{x:"14",y:"3",width:"5",height:"18",rx:"1",key:"kaeet6"}],["rect",{x:"5",y:"3",width:"5",height:"18",rx:"1",key:"1wsw3u"}]],r=e("pause",t);export{n as C,r as P};

@@ -95,16 +95,19 @@ class SentinelTrafficClient {
                                 item.path("activeThreads").isIntegralNumber()
                                         ? item.path("activeThreads").asInt()
                                         : null,
-                                resource.equals("ops-rag-request")
-                                        ? "包含同步与流式生命周期"
-                                        : "仅入口校验，不代表模型耗时"));
+                                ObservabilitySanitizer.summary(
+                                        item.path("measurement")
+                                                .asText(
+                                                        resource.equals("ops-rag-request")
+                                                                ? "包含同步与流式生命周期"
+                                                                : "仅入口校验，不代表模型耗时"))));
             }
             cached =
                     new Snapshot(
                             status,
                             List.copyOf(resources),
                             data.path("rules").deepCopy(),
-                            Instant.now());
+                            Instant.parse(data.path("observedAt").asText()));
         } catch (Exception ignored) {
             cached = new Snapshot("UNAVAILABLE", List.of(), json.createObjectNode(), Instant.now());
         }

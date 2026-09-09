@@ -3,8 +3,10 @@ FROM maven:3.9.11-eclipse-temurin-17 AS builder
 WORKDIR /workspace
 COPY . .
 ARG APP_MODULE
+# Maven skips some unfiltered resources with epoch-zero timestamps in cached contexts.
 RUN --mount=type=cache,target=/root/.m2 \
-    mvn -B -DskipTests -pl "${APP_MODULE}" -am package
+    find . -path '*/src/*/resources/*' -type f -exec touch {} + \
+    && mvn -B -DskipTests -pl "${APP_MODULE}" -am package
 RUN cp "$(find "${APP_MODULE}/target" -maxdepth 1 -type f -name '*.jar' \
         ! -name '*.original' | head -n 1)" /workspace/app.jar
 

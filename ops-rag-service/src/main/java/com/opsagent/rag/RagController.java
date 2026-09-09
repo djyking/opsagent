@@ -49,10 +49,21 @@ public class RagController {
             @Min(1) Long documentId,
             @Min(1) Long ticketId,
             @Size(max = 20) String provider,
-            @Valid ObservabilityContext observabilityContext) {
+            @Valid ObservabilityContext observabilityContext,
+            AnswerStyle answerStyle) {
         ChatRequest(
                 String question, Integer topK, Long documentId, Long ticketId, String provider) {
-            this(question, topK, documentId, ticketId, provider, null);
+            this(question, topK, documentId, ticketId, provider, null, null);
+        }
+
+        ChatRequest(
+                String question,
+                Integer topK,
+                Long documentId,
+                Long ticketId,
+                String provider,
+                ObservabilityContext observabilityContext) {
+            this(question, topK, documentId, ticketId, provider, observabilityContext, null);
         }
     }
 
@@ -62,20 +73,29 @@ public class RagController {
         var scope = rateLimiter.requestScope();
         try {
             return ApiResponse.success(
-                    r.observabilityContext() == null
+                    r.answerStyle() != null
                             ? service.ask(
                                     r.question(),
                                     r.topK(),
                                     r.documentId(),
                                     r.ticketId(),
-                                    r.provider())
-                            : service.ask(
-                                    r.question(),
-                                    r.topK(),
-                                    r.documentId(),
-                                    r.ticketId(),
                                     r.provider(),
-                                    r.observabilityContext()));
+                                    r.observabilityContext(),
+                                    r.answerStyle())
+                            : r.observabilityContext() == null
+                                    ? service.ask(
+                                            r.question(),
+                                            r.topK(),
+                                            r.documentId(),
+                                            r.ticketId(),
+                                            r.provider())
+                                    : service.ask(
+                                            r.question(),
+                                            r.topK(),
+                                            r.documentId(),
+                                            r.ticketId(),
+                                            r.provider(),
+                                            r.observabilityContext()));
         } catch (RuntimeException exception) {
             scope.failure(exception);
             throw exception;
@@ -90,27 +110,21 @@ public class RagController {
         try {
             rateLimiter.check();
             scope = rateLimiter.requestScope();
-            RagService.StreamPlan plan =
-                    request.observabilityContext() == null
-                            ? service.prepareStream(
-                                    request.question(),
-                                    request.topK(),
-                                    request.documentId(),
-                                    request.ticketId(),
-                                    null,
-                                    request.provider())
-                            : service.prepareStream(
+            var activeScope = scope;
+            return streamingService.openPrepared(
+                    progress ->
+                            service.prepareStream(
                                     request.question(),
                                     request.topK(),
                                     request.documentId(),
                                     request.ticketId(),
                                     null,
                                     request.provider(),
-                                    request.observabilityContext());
-            var activeScope = scope;
-            return streamingService.open(
-                    plan,
+                                    request.observabilityContext(),
+                                    request.answerStyle(),
+                                    progress),
                     service.auditContext(),
+                    request.answerStyle(),
                     answer -> activeScope.close(),
                     message ->
                             activeScope.failure(

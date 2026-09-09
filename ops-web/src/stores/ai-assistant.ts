@@ -2,8 +2,8 @@ import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { useAuthStore } from '@/stores/auth';
 import { conversationApi, ragProviderApi, type AiProvider, type ProviderOption, type Conversation, type ConversationTurn } from '@/api/conversations';
-import { ragCompletionLabel, ragIncompleteMessage, streamRagAnswer } from '@/api/rag-stream';
-import { cleanAiContext, contextualQuestion, contextLabel, serverObservabilityContext, type AiContext } from '@/utils/ai-context';
+import { ragCompletionLabel, ragIncompleteMessage, streamRagAnswer, type AnswerStyle } from '@/api/rag-stream';
+import { assistantQuestionBody, cleanAiContext, contextualQuestion, contextLabel, isConversation, isProductGuideQuestion, requestContextForQuestion, serverObservabilityContext, type AiContext } from '@/utils/ai-context';
 
 export const useAiAssistantStore = defineStore('ai-assistant', () => {
   const auth = useAuthStore();
@@ -11,6 +11,7 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
   const minimized = ref(false);
   const context = ref<AiContext>({});
   const question = ref('');
+  const answerStyle = ref<AnswerStyle>('concise');
   const sessions = ref<Conversation[]>([]);
   const sessionId = ref('');
   const turns = ref<ConversationTurn[]>([]);
@@ -28,7 +29,7 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
   const references = computed(() => referenceTurn.value?.result?.references || []);
   const contextSummary = computed(() => contextLabel(context.value));
   let controller: AbortController | undefined;
-  let identityVersion = 0, selectionVersion = 0, historyVersion = 0;
+  let identityVersion = 0, selectionVersion = 0, historyVersion = 0, generationVersion = 0;
   let initialized = false;
   const message = (cause: unknown) => cause instanceof Error ? cause.message : '请求失败，请重试';
   const valid = (identity: number) => identity === identityVersion;
@@ -40,6 +41,7 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
     loading.value = false; busy.value = false; actionBusy.value = false; providersLoading.value = false; providersReady.value = false;
     historyError.value = ''; error.value = ''; providerError.value = ''; progress.value = ''; providers.value = []; selectedProvider.value = '';
     historyOpen.value = false; contextOpen.value = true; draftImported.value = false; editMode.value = ''; editTitle.value = '';
+    answerStyle.value = 'concise'; generationVersion++;
   }
   watch(() => [auth.isAuthenticated, auth.user?.userId], reset, { flush: 'sync' });
   function setContext(value: AiContext) { context.value = cleanAiContext(value); }
@@ -116,11 +118,17 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
     await nextTick(); questionInput.value?.focus();
   }
   async function newSession() { await startDraft(); }
-  async function ask(value = question.value) {
-    if (!value.trim() || busy.value || loading.value || !providersReady.value || providersLoading.value) return;
-    const identity = identityVersion;
-    const requestContext = { ...context.value };
-    busy.value = true; error.value = ''; progress.value = '正在读取本次问题需要的数据';
+  function canAsk(value = question.value) {
+    return !!value.trim() && !busy.value && !loading.value
+      && (isProductGuideQuestion(value) || providersReady.value && !providersLoading.value);
+  }
+  async function ask(value = question.value, style = answerStyle.value) {
+    if (!canAsk(value)) return;
+    const identity = identityVersion, generation = ++generationVersion, selection = selectionVersion;
+    const startedAt = performance.now(), submittedStyle = style;
+    const requestContext = requestContextForQuestion({ ...context.value }, value);
+    busy.value = true; error.value = ''; progress.value = isProductGuideQuestion(value) ? '正在读取系统使用指南'
+      : isConversation(value) ? '正在等待模型回答' : '正在读取本次问题需要的数据';
     const requestController = new AbortController(); controller = requestController;
     let pending: ConversationTurn | undefined;
     try {
@@ -134,8 +142,10 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
       const turn = reactive<ConversationTurn>({ id: -Date.now(), question: submitted, answer: '', status: 'PROCESSING', createTime: new Date().toISOString() });
       pending = turn; turns.value.push(turn); selectedTurnId.value = turn.id; question.value = ''; draftImported.value = false;
       await scrollBottom(); if (!valid(identity)) return;
-      const result = await streamRagAnswer({ question: submitted, topK: 5, conversationId: activeId, provider: selectedProvider.value || undefined,
+      const result = await streamRagAnswer({ question: submitted, topK: 5, conversationId: activeId, provider: isProductGuideQuestion(value) ? undefined : selectedProvider.value || undefined,
+        answerStyle: submittedStyle,
         observabilityContext: serverObservabilityContext(requestContext, value),
+        ...(requestContext.documentId ? { documentId: requestContext.documentId } : {}),
         ...(requestContext.ticketId ? { ticketId: requestContext.ticketId } : {}) }, {
         onStatus: value => { if (valid(identity)) progress.value = value; },
         onToken: delta => {
@@ -143,15 +153,26 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
           const follow = chatScroll.value && chatScroll.value.scrollHeight - chatScroll.value.scrollTop - chatScroll.value.clientHeight < 100;
           turn.answer += delta; if (follow) void scrollBottom();
         },
-      }, requestController.signal);
+      }, requestController.signal, startedAt);
       if (!valid(identity)) return;
       turn.answer = result.answer || turn.answer; turn.result = result;
       turn.status = result.metadata?.generationComplete === false ? 'INCOMPLETE' : 'COMPLETE'; turn.errorMessage = ragIncompleteMessage(result);
-      try {
-        const saved = await conversationApi.messages(activeId); if (!valid(identity) || activeId !== sessionId.value) return;
-        const latest = saved.records.at(-1); if (latest?.question === turn.question) Object.assign(turn, latest);
-        selectedTurnId.value = turn.id; await loadSessions();
-      } catch { if (valid(identity)) historyError.value = '回答已生成，历史列表刷新失败，请点击刷新重试。'; }
+      void (async () => {
+        try {
+          const saved = await conversationApi.messages(activeId);
+          if (!valid(identity)) return;
+          if (activeId === sessionId.value && selection === selectionVersion && generation === generationVersion && turns.value.includes(turn)) {
+            const latest = saved.records.at(-1);
+            if (latest?.question === turn.question && latest.answer === turn.answer && latest.status !== 'PROCESSING') {
+              const selected = selectedTurnId.value === turn.id;
+              Object.assign(turn, latest);
+              if (turn.result) turn.result.clientTiming = result.clientTiming;
+              if (selected) selectedTurnId.value = turn.id;
+            }
+          }
+          await loadSessions();
+        } catch { if (valid(identity)) historyError.value = '回答已生成，历史列表刷新失败，请点击刷新重试。'; }
+      })();
     } catch (cause) {
       if (!valid(identity)) return;
       error.value = message(cause); if (pending) { pending.status = 'INTERRUPTED'; pending.errorMessage = error.value; }
@@ -161,6 +182,13 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
     if (turn.status === 'PROCESSING') return busy.value ? progress.value : '生成处理中，请稍后刷新';
     if (turn.status === 'INTERRUPTED') return '回答中断';
     return turn.result ? ragCompletionLabel(turn.result) : turn.status === 'INCOMPLETE' ? '回答未完成' : '回答完成';
+  }
+  async function retry(turn: ConversationTurn) {
+    if (busy.value || loading.value) return;
+    question.value = assistantQuestionBody(turn.question).slice(0, 2000);
+    answerStyle.value = turn.result?.answerStyle || answerStyle.value;
+    error.value = ''; draftImported.value = true;
+    await nextTick(); questionInput.value?.focus();
   }
   async function manageSession() {
     if (!sessionId.value || actionBusy.value || busy.value) return;
@@ -182,8 +210,8 @@ export const useAiAssistantStore = defineStore('ai-assistant', () => {
     catch { error.value = '无法复制，请选择正文手动复制。'; }
   }
   return { open, minimized, context, contextSummary, show, hide, setContext, initialize, reset,
-    question, questionInput, draftImported, providers, selectedProvider, providersLoading, providersReady, providerError, loadProviders,
+    question, questionInput, answerStyle, draftImported, providers, selectedProvider, providersLoading, providersReady, providerError, loadProviders,
     sessions, sessionId, turns, total, hasEarlier, loading, busy, historyError, error, selectedTurnId, historyOpen, contextOpen,
     editMode, editTitle, actionBusy, chatScroll, current, referenceTurn, references, refreshHistory, selectSession, earlier,
-    startDraft, newSession, ask, turnLabel, manageSession, copyAnswer };
+    startDraft, newSession, ask, canAsk, retry, turnLabel, manageSession, copyAnswer };
 });

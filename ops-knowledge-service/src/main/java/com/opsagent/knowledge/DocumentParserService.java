@@ -40,6 +40,7 @@ public class DocumentParserService {
 
     private final KnowledgeProperties properties;
     private final TokenCounter tokenCounter;
+    private final ThreadLocal<Integer> remainingCharacters = new ThreadLocal<>();
 
     DocumentParserService(KnowledgeProperties properties, TokenCounter tokenCounter) {
         this.properties = properties;
@@ -47,29 +48,38 @@ public class DocumentParserService {
     }
 
     List<StructuredChunk> parse(
-            Path path,
-            String extension,
-            String documentTitle,
-            int documentVersion) throws IOException {
+            Path path, String extension, String documentTitle, int documentVersion)
+            throws IOException {
         validateConfiguration();
         String normalizedExtension = extension.toLowerCase(Locale.ROOT);
-        List<DocumentBlock> blocks = switch (normalizedExtension) {
-            case "md", "markdown" -> parseMarkdown(path, documentTitle);
-            case "txt" -> parseText(path, documentTitle);
-            case "docx" -> parseDocx(path, documentTitle);
-            case "pdf" -> parsePdf(path, documentTitle);
-            default -> throw new IllegalArgumentException("不支持的文档类型：" + extension);
-        };
+        List<DocumentBlock> blocks =
+                switch (normalizedExtension) {
+                    case "md", "markdown" -> parseMarkdown(path, documentTitle);
+                    case "txt" -> parseText(path, documentTitle);
+                    case "docx" -> parseDocx(path, documentTitle);
+                    case "pdf" -> parsePdf(path, documentTitle);
+                    default -> throw new IllegalArgumentException("不支持的文档类型：" + extension);
+                };
         if (blocks.isEmpty()) {
             throw new IllegalArgumentException("文档没有可解析文本，扫描 PDF 暂不支持 OCR");
         }
         return chunks(blocks, normalizedExtension.toUpperCase(Locale.ROOT), documentVersion);
     }
 
+    List<StructuredChunk> parseExperience(Path path, String extension, String title, int version)
+            throws IOException {
+        remainingCharacters.set(100_000);
+        try {
+            List<StructuredChunk> result = parse(path, extension, title, version);
+            if (result.size() > 200) throw new IllegalArgumentException("文档超过 200 个切片上限，请拆分后上传");
+            return result;
+        } finally {
+            remainingCharacters.remove();
+        }
+    }
+
     List<StructuredChunk> chunks(
-            List<DocumentBlock> sourceBlocks,
-            String sourceFormat,
-            int documentVersion) {
+            List<DocumentBlock> sourceBlocks, String sourceFormat, int documentVersion) {
         validateConfiguration();
         List<DocumentBlock> blocks = new ArrayList<>();
         for (DocumentBlock block : sourceBlocks) {
@@ -142,7 +152,8 @@ public class DocumentParserService {
     private List<DocumentBlock> parseDocx(Path path, String title) throws IOException {
         List<DocumentBlock> blocks = new ArrayList<>();
         List<String> headings = new ArrayList<>(List.of(title));
-        try (InputStream input = Files.newInputStream(path); XWPFDocument document = new XWPFDocument(input)) {
+        try (InputStream input = Files.newInputStream(path);
+                XWPFDocument document = new XWPFDocument(input)) {
             for (IBodyElement element : document.getBodyElements()) {
                 if (element.getElementType() == BodyElementType.PARAGRAPH) {
                     XWPFParagraph paragraph = (XWPFParagraph) element;
@@ -158,8 +169,8 @@ public class DocumentParserService {
                     } else if (style.equalsIgnoreCase("Title")) {
                         addBlock(blocks, BlockType.TITLE, text, headings, null, null);
                     } else {
-                        BlockType type = paragraph.getNumID() == null
-                                ? BlockType.PARAGRAPH : BlockType.LIST;
+                        BlockType type =
+                                paragraph.getNumID() == null ? BlockType.PARAGRAPH : BlockType.LIST;
                         addBlock(blocks, type, text, headings, null, null);
                     }
                 } else if (element.getElementType() == BodyElementType.TABLE) {
@@ -191,13 +202,7 @@ public class DocumentParserService {
                     continue;
                 }
                 for (String paragraph : pageText.split("\\n\\s*\\n")) {
-                    addBlock(
-                            blocks,
-                            BlockType.PARAGRAPH,
-                            paragraph,
-                            List.of(title),
-                            page,
-                            page);
+                    addBlock(blocks, BlockType.PARAGRAPH, paragraph, List.of(title), page, page);
                 }
             }
         } catch (RuntimeException exception) {
@@ -213,12 +218,11 @@ public class DocumentParserService {
         List<DocumentBlock> current = new ArrayList<>();
         for (DocumentBlock block : blocks) {
             int combinedTokens = tokenCounter.count(contentWith(current, block));
-            boolean newSection = !current.isEmpty()
-                    && !current.get(0).headingPath().equals(block.headingPath());
-            boolean targetReached = !current.isEmpty()
-                    && tokenCounter.count(content(current)) >= target;
-            if (!current.isEmpty()
-                    && (newSection || combinedTokens > maximum || targetReached)) {
+            boolean newSection =
+                    !current.isEmpty() && !current.get(0).headingPath().equals(block.headingPath());
+            boolean targetReached =
+                    !current.isEmpty() && tokenCounter.count(content(current)) >= target;
+            if (!current.isEmpty() && (newSection || combinedTokens > maximum || targetReached)) {
                 drafts.add(current);
                 current = new ArrayList<>();
             }
@@ -241,14 +245,16 @@ public class DocumentParserService {
             }
             if (index + 1 < drafts.size()
                     && sameHeading(current, drafts.get(index + 1))
-                    && tokenCounter.count(content(current) + "\n\n" + content(drafts.get(index + 1)))
+                    && tokenCounter.count(
+                                    content(current) + "\n\n" + content(drafts.get(index + 1)))
                             <= maximum) {
                 current.addAll(drafts.remove(index + 1));
                 continue;
             }
             if (index > 0
                     && sameHeading(drafts.get(index - 1), current)
-                    && tokenCounter.count(content(drafts.get(index - 1)) + "\n\n" + content(current))
+                    && tokenCounter.count(
+                                    content(drafts.get(index - 1)) + "\n\n" + content(current))
                             <= maximum) {
                 drafts.get(index - 1).addAll(current);
                 drafts.remove(index);
@@ -276,14 +282,16 @@ public class DocumentParserService {
                     || tokenCounter.count(overlapText + "\n\n" + content(current)) > maximum) {
                 continue;
             }
-            current.add(0, new DocumentBlock(
-                    tail.type(),
-                    overlapText,
-                    tail.headingPath(),
-                    tail.pageStart(),
-                    tail.pageEnd(),
-                    tail.order(),
-                    Map.of("overlap", true)));
+            current.add(
+                    0,
+                    new DocumentBlock(
+                            tail.type(),
+                            overlapText,
+                            tail.headingPath(),
+                            tail.pageStart(),
+                            tail.pageEnd(),
+                            tail.order(),
+                            Map.of("overlap", true)));
         }
     }
 
@@ -292,19 +300,21 @@ public class DocumentParserService {
         if (tokenCounter.count(block.text()) <= maximum) {
             return List.of(block);
         }
-        List<String> parts = block.type() == BlockType.CODE || block.type() == BlockType.TABLE
-                ? splitLines(block.text(), maximum, block.type() == BlockType.TABLE)
-                : splitSentences(block.text(), maximum);
+        List<String> parts =
+                block.type() == BlockType.CODE || block.type() == BlockType.TABLE
+                        ? splitLines(block.text(), maximum, block.type() == BlockType.TABLE)
+                        : splitSentences(block.text(), maximum);
         List<DocumentBlock> result = new ArrayList<>();
         for (String part : parts) {
-            result.add(new DocumentBlock(
-                    block.type(),
-                    part,
-                    block.headingPath(),
-                    block.pageStart(),
-                    block.pageEnd(),
-                    block.order(),
-                    block.metadata()));
+            result.add(
+                    new DocumentBlock(
+                            block.type(),
+                            part,
+                            block.headingPath(),
+                            block.pageStart(),
+                            block.pageEnd(),
+                            block.order(),
+                            block.metadata()));
         }
         return result;
     }
@@ -372,9 +382,7 @@ public class DocumentParserService {
     }
 
     private StructuredChunk toChunk(
-            List<DocumentBlock> blocks,
-            String sourceFormat,
-            int documentVersion) {
+            List<DocumentBlock> blocks, String sourceFormat, int documentVersion) {
         String content = content(blocks);
         Set<BlockType> types = new LinkedHashSet<>();
         Integer pageStart = null;
@@ -382,7 +390,10 @@ public class DocumentParserService {
         for (DocumentBlock block : blocks) {
             types.add(block.type());
             if (block.pageStart() != null) {
-                pageStart = pageStart == null ? block.pageStart() : Math.min(pageStart, block.pageStart());
+                pageStart =
+                        pageStart == null
+                                ? block.pageStart()
+                                : Math.min(pageStart, block.pageStart());
             }
             if (block.pageEnd() != null) {
                 pageEnd = pageEnd == null ? block.pageEnd() : Math.max(pageEnd, block.pageEnd());
@@ -419,10 +430,11 @@ public class DocumentParserService {
     private String tableText(XWPFTable table) {
         List<String> rows = new ArrayList<>();
         for (XWPFTableRow row : table.getRows()) {
-            rows.add(row.getTableCells().stream()
-                    .map(cell -> clean(cell.getText()))
-                    .reduce((left, right) -> left + " | " + right)
-                    .orElse(""));
+            rows.add(
+                    row.getTableCells().stream()
+                            .map(cell -> clean(cell.getText()))
+                            .reduce((left, right) -> left + " | " + right)
+                            .orElse(""));
         }
         return String.join("\n", rows);
     }
@@ -453,14 +465,22 @@ public class DocumentParserService {
             Integer pageEnd) {
         String normalized = clean(text);
         if (!normalized.isBlank()) {
-            blocks.add(new DocumentBlock(
-                    type,
-                    normalized,
-                    headings,
-                    pageStart,
-                    pageEnd,
-                    blocks.size(),
-                    Map.of()));
+            Integer remaining = remainingCharacters.get();
+            if (remaining != null) {
+                int count = normalized.codePointCount(0, normalized.length());
+                if (count > remaining)
+                    throw new IllegalArgumentException("文档提取文字超过 10 万字符上限，请拆分后上传");
+                remainingCharacters.set(remaining - count);
+            }
+            blocks.add(
+                    new DocumentBlock(
+                            type,
+                            normalized,
+                            headings,
+                            pageStart,
+                            pageEnd,
+                            blocks.size(),
+                            Map.of()));
         }
     }
 
@@ -468,7 +488,8 @@ public class DocumentParserService {
         List<String> segments = List.of(SENTENCE_BOUNDARY.split(text));
         String selected = "";
         for (int index = segments.size() - 1; index >= 0; index--) {
-            String candidate = selected.isBlank() ? segments.get(index) : segments.get(index) + " " + selected;
+            String candidate =
+                    selected.isBlank() ? segments.get(index) : segments.get(index) + " " + selected;
             if (tokenCounter.count(candidate) > maximumTokens) {
                 break;
             }

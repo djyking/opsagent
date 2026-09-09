@@ -2,11 +2,17 @@ package com.opsagent.platform;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,6 +25,70 @@ import java.util.TreeMap;
  * @since 2026/9/3
  */
 class ServiceMetricHistoryControllerTest {
+    @Test
+    void indexedMinuteRangeRetainsExactWindowAndEnvironmentBoundaries() throws Exception {
+        var jdbc =
+                new JdbcTemplate(
+                        new DriverManagerDataSource(
+                                "jdbc:h2:mem:service_history;DB_CLOSE_DELAY=-1", "sa", ""));
+        jdbc.execute("DROP TABLE IF EXISTS obs_v3_topology_snapshot");
+        jdbc.execute(
+                "CREATE TABLE obs_v3_topology_snapshot(environment VARCHAR(32), observed_minute"
+                    + " BIGINT, generated_at TIMESTAMP, payload_json CLOB, UNIQUE(environment,"
+                    + " observed_minute))");
+        var json = new ObjectMapper();
+        var cmdb = mock(ItsmPlatformService.class);
+        when(cmdb.ci("rag")).thenReturn(Map.of("environment", "PROD"));
+        Instant now = Instant.now();
+        Instant sampled = now.minusSeconds(60);
+        var node =
+                Map.of(
+                        "ciCode",
+                        "rag",
+                        "environment",
+                        "PROD",
+                        "observation",
+                        Map.of("fetchedAt", sampled.toString()),
+                        "metricEvidence",
+                        Map.of(
+                                "rps",
+                                Map.of("value", 0, "sampledAt", sampled.toString(), "unit", "/s")));
+        String payload = json.writeValueAsString(Map.of("nodes", new Object[] {node}));
+        for (String env : new String[] {"ALL", "PROD", "DEMO"}) {
+            jdbc.update(
+                    "INSERT INTO obs_v3_topology_snapshot VALUES(?,?,?,?)",
+                    env,
+                    sampled.getEpochSecond() / 60,
+                    Timestamp.from(sampled),
+                    payload);
+        }
+        Instant old = now.minusSeconds(3600);
+        jdbc.update(
+                "INSERT INTO obs_v3_topology_snapshot VALUES(?,?,?,?)",
+                "PROD",
+                old.getEpochSecond() / 60,
+                Timestamp.from(old),
+                payload);
+        var result =
+                new ServiceMetricHistoryController(jdbc, cmdb, json)
+                        .history("rag", "PROD", "5m")
+                        .data();
+        var series = (Map<?, ?>) result.get("series");
+        assertEquals(
+                1,
+                ((java.util.List<?>) series.get("rps")).size(),
+                "Duplicates from ALL and PROD represent one original sample");
+        assertEquals(
+                2,
+                ((Map<?, ?>) result.get("timing")).get("snapshotCount"),
+                "Unrelated environments and old payloads are never read");
+        assertThrows(
+                com.opsagent.common.core.BusinessException.class,
+                () ->
+                        new ServiceMetricHistoryController(jdbc, cmdb, json)
+                                .history("rag", "DEMO", "5m"));
+    }
+
     @Test
     void keepsRealZeroAndHistoricalSamplesWithoutDuplicatingOrFillingMissingEvidence()
             throws Exception {

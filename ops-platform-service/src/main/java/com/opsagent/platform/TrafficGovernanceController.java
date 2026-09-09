@@ -20,9 +20,17 @@ import org.springframework.web.bind.annotation.*;
 @PreAuthorize("isAuthenticated()")
 class TrafficGovernanceController {
     private final TrafficGovernanceService service;
+    private final TrafficObservationService observation;
 
-    TrafficGovernanceController(TrafficGovernanceService service) {
+    TrafficGovernanceController(
+            TrafficGovernanceService service, TrafficObservationService observation) {
         this.service = service;
+        this.observation = observation;
+    }
+
+    @GetMapping("/overview")
+    ResponseEntity<ApiResponse<TrafficGovernanceDtos.Overview>> overview() {
+        return response(observation.overview());
     }
 
     @GetMapping

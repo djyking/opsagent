@@ -16,18 +16,30 @@ const actor = vue.reactive({ user: { userId: 1 } });
 const assistant = vue.reactive({ open: false, minimized: false, busy: false, show() { this.open = true; } });
 const mounted = [], unmount = [], stored = new Map();
 let tick;
+let placementRequests = 0;
+class Element { constructor(topology = false) { this.topology = topology; } closest() { return this.topology ? {} : null; } }
 const document = { hidden: false, activeElement: null, body: {}, modal: false, querySelector() { return this.modal ? {} : null; }, addEventListener() {}, removeEventListener() {} };
 const reduced = { matches: false, addEventListener() {}, removeEventListener() {} };
 const imports = { vue: { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmount.push(fn) }, '@lucide/vue': {},
   '@/stores/auth': { useAuthStore: () => actor }, '@/stores/ai-assistant': { useAiAssistantStore: () => assistant }, '@/utils/assistant-placement': placementModule.exports };
 const module = { exports: {} };
-new Function('require', 'module', 'exports', 'document', 'window', 'MutationObserver', 'localStorage', 'setInterval', 'clearInterval',
+new Function('require', 'module', 'exports', 'document', 'window', 'MutationObserver', 'localStorage', 'setInterval', 'clearInterval', 'Element', 'setTimeout', 'clearTimeout',
   ts.transpileModule(script.content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(
   id => imports[id], module, module.exports, document, { matchMedia: () => reduced }, class { observe() {} disconnect() {} },
-  { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) }, fn => { tick = fn; return 1; }, () => { tick = undefined; });
+  { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) }, fn => { tick = fn; return 1; }, () => { tick = undefined; },
+  Element, () => { placementRequests++; return 1; }, () => {});
 const scope = vue.effectScope();
 const state = scope.run(() => module.exports.default.setup({}, { expose() {} }));
 mounted.forEach(fn => fn());
+assert.equal(state.welcomeVisible.value, true, 'first entry offers a dismissible greeting without an AI request');
+state.welcomeVisible.value = false; state.offerWelcome();
+assert.equal(state.welcomeVisible.value, false, 'dismissed greeting does not return on repeated offers');
+placementRequests = 0;
+state.contentChanged([{ target: new Element(true) }]);
+state.contentScrolled({ target: new Element(true) });
+assert.equal(placementRequests, 0, 'topology-internal movement cannot continuously relocate the orb');
+state.contentChanged([{ target: new Element(false) }]);
+assert.equal(placementRequests, 1, 'new page controls still trigger obstacle avoidance');
 tick(); assert.equal(state.jumping.value, true);
 for (const condition of ['hidden', 'input', 'orbFocus', 'modal', 'reduced', 'busy']) {
   state.jumping.value = false;
@@ -38,7 +50,9 @@ for (const condition of ['hidden', 'input', 'orbFocus', 'modal', 'reduced', 'bus
 document.hidden = document.modal = reduced.matches = assistant.busy = false; document.activeElement = null;
 state.toggleMotion(); state.minimize(true); tick(); assert.equal(state.jumping.value, false);
 actor.user = { userId: 2 }; await vue.nextTick(); assert.equal(state.motion.value, true); assert.equal(assistant.minimized, false);
+assert.equal(state.welcomeVisible.value, true, 'a new experience receives its own greeting');
 actor.user = { userId: 1 }; await vue.nextTick(); assert.equal(state.motion.value, false); assert.equal(assistant.minimized, true);
+assert.equal(state.welcomeVisible.value, false, 'returning to an existing experience does not repeat the greeting');
 state.minimize(false);
 const drag = { button: 0, pointerId: 1, clientX: 1238, clientY: 594, currentTarget: { setPointerCapture() {} }, preventDefault() {} };
 state.dragStart(drag); state.dragMove({ ...drag, clientX: 1240 }); assert.equal(state.dragging.value, false, 'pointer jitter remains a click');

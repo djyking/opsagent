@@ -85,7 +85,16 @@ class FileConfigurationClient {
                         .anyMatch(role -> Set.of("ADMIN", "ROLE_ADMIN").contains(role));
         boolean ops =
                 actor.roles().stream().anyMatch(role -> Set.of("OPS", "ROLE_OPS").contains(role));
-        if (actor.userId() <= 0 || !admin && (!ops || method.equals("POST")))
+        boolean visitor =
+                actor.roles().stream().anyMatch(role -> Set.of("DEMO", "ROLE_DEMO").contains(role));
+        boolean visitorRead =
+                method.equals("GET")
+                        && path.matches(
+                                "/files(?:/(?!drafts(?:/|$)|tasks(?:/|$))"
+                                        + "[a-zA-Z0-9][a-zA-Z0-9_.-]{0,95}(?:/history)?)?");
+        if (visitor
+                ? actor.userId() == 0 || !visitorRead
+                : actor.userId() <= 0 || !admin && (!ops || method.equals("POST")))
             throw new BusinessException(ErrorCode.FORBIDDEN, "当前身份不允许执行该配置动作");
         if (secret.length() < 32 || base == null)
             throw new BusinessException(ErrorCode.MIDDLEWARE_UNAVAILABLE, "独立配置执行器尚未配置或信任身份未接入");
@@ -97,7 +106,7 @@ class FileConfigurationClient {
                             .timeout(Duration.ofSeconds(20))
                             .header("X-Ops-Executor-Token", secret)
                             .header("X-Ops-Actor-Id", String.valueOf(actor.userId()))
-                            .header("X-Ops-Actor-Role", admin ? "ADMIN" : "OPS")
+                            .header("X-Ops-Actor-Role", visitor ? "DEMO" : admin ? "ADMIN" : "OPS")
                             .header("Accept", "application/json");
             if (method.equals("POST")
                     && (path.endsWith("/execute") || path.endsWith("/verify"))
@@ -129,6 +138,7 @@ class FileConfigurationClient {
             if (response.statusCode() != 200 || result.path("code").asInt(-1) != 0) {
                 int status = response.statusCode();
                 String message = result.path("message").asText("配置执行器暂不可用");
+                if (visitor) message = "配置只读请求未完成，请核对权限或稍后重试";
                 if (message.length() > 500) message = "配置执行器返回无效错误信息";
                 if (status == 400) throw new BusinessException(ErrorCode.VALIDATION, message);
                 if (status == 403) throw new BusinessException(ErrorCode.FORBIDDEN, message);
@@ -136,7 +146,11 @@ class FileConfigurationClient {
                 if (status == 409) throw new BusinessException(ErrorCode.CONFLICT, message);
                 throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, message);
             }
-            return result.path("data");
+            JsonNode data = result.path("data");
+            if (visitor && !"VISITOR_READ_ONLY".equals(data.path("accessMode").asText()))
+                throw new BusinessException(
+                        ErrorCode.MIDDLEWARE_UNAVAILABLE, "配置执行器尚未提供访客脱敏视图，请稍后重试");
+            return data;
         } catch (BusinessException | ResponseStatusException failure) {
             throw failure;
         } catch (InterruptedException failure) {

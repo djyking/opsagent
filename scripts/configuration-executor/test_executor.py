@@ -108,6 +108,72 @@ class ExecutorTest(unittest.TestCase):
         for key in ["ops.jwt.token", "spring.datasource.password", "ops.ai.api-key"]:
             self.assertTrue(module.sensitive_name(key), key)
 
+    def test_visitor_reads_real_parameters_and_sanitized_published_history_only(self):
+        self.file.write_text(self.original + "server:\n  port: 8101 # internal-private-comment\n", encoding="utf-8")
+        self.registry["files"]["auth"]["fields"].append({"key": "server.port", "label": "服务端口", "type": "integer"})
+        detail = self.executor.visitor_detail("auth")
+        values = {field["key"]: field for field in detail["fields"]}
+        self.assertEqual(8101, values["server.port"]["value"])
+        self.assertEqual(10, values["spring.datasource.hikari.maximum-pool-size"]["value"])
+        self.assertTrue(values["spring.datasource.password"]["hasValue"])
+        self.assertNotIn("value", values["spring.datasource.password"])
+        self.assertFalse(detail["editable"])
+        self.assertFalse(detail["rawEditable"])
+        first = self.approve(self.draft(12, action="PUBLISH_ONLY"))
+        self.execute(first)
+        self.draft(14, action="PUBLISH_ONLY")
+        history = self.executor.visitor_history("auth")
+        self.assertEqual(1, len(history["versions"]))
+        self.assertEqual(12, history["versions"][0]["diff"][0]["after"])
+        self.assertEqual([], history["drafts"])
+        self.assertEqual([], history["tasks"])
+        serialized = json.dumps([self.executor.visitor_catalog(), detail, history], ensure_ascii=False)
+        for marker in ["original-secret", "internal-private-comment", "untouched", "createdBy", "approvalProof", str(self.root)]:
+            self.assertNotIn(marker, serialized)
+
+    def test_visitor_nested_headers_and_embedded_credentials_are_redacted(self):
+        value = {"port": 8101, "run-token-budget": 100000,
+                 "headers": [{"name": "Authorization", "value": "opaque-header-secret"}],
+                 "url": "https://example.test/api?access_token=url-secret",
+                 "uri": "jdbc:mysql://account:db-secret@localhost:3306/test",
+                 "payload": '{"client_key":"json-secret","port":9000}',
+                 "accessKey": "opaque-key-secret", "cookie": "session=opaque-cookie-secret"}
+        visible = module.visitor_value(value)
+        self.assertEqual(8101, visible["port"])
+        self.assertEqual(100000, visible["run-token-budget"])
+        self.assertEqual("已设置", visible["headers"][0]["value"])
+        self.assertEqual(9000, json.loads(visible["payload"])["port"])
+        serialized = json.dumps(visible)
+        for marker in ["opaque-header-secret", "url-secret", "db-secret", "json-secret", "opaque-key-secret", "opaque-cookie-secret"]:
+            self.assertNotIn(marker, serialized)
+
+    def test_visitor_http_is_read_only_and_never_returns_raw_drafts_or_error_details(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), module.handler(self.executor))
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = "http://127.0.0.1:" + str(server.server_port)
+        headers = {"X-Ops-Executor-Token": self.secret, "X-Ops-Actor-Id": "-99", "X-Ops-Actor-Role": "DEMO"}
+        try:
+            for path in ["/files", "/files/auth", "/files/auth/history"]:
+                with urllib.request.urlopen(urllib.request.Request(base + path, headers=headers)) as response:
+                    body = json.load(response)
+                    self.assertEqual("VISITOR_READ_ONLY", body["data"]["accessMode"])
+                    self.assertNotIn("original-secret", json.dumps(body))
+            for method, path in [("GET", "/drafts/a"), ("GET", "/tasks/a"), ("GET", "/files/auth/download"),
+                                 ("POST", "/files/auth/drafts"), ("POST", "/drafts/a/approve"), ("POST", "/tasks/a/verify")]:
+                with self.assertRaises(urllib.error.HTTPError) as failure:
+                    urllib.request.urlopen(urllib.request.Request(base + path, headers=headers, method=method))
+                self.assertEqual(403, failure.exception.code)
+            self.file.write_text("invalid: [secret-in-broken-yaml", encoding="utf-8")
+            with self.assertRaises(urllib.error.HTTPError) as failure:
+                urllib.request.urlopen(urllib.request.Request(base + "/files/auth", headers=headers))
+            self.assertNotIn("secret-in-broken-yaml", failure.exception.read().decode())
+            self.assertEqual([], self.runner.applied)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     def test_unapproved_or_modified_digest_never_executes(self):
         draft = self.draft()
         with self.assertRaises(module.Rejected):

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, render, watch } from 'vue';
-import { Graph, type IElementEvent, type NodeData } from '@antv/g6';
+import type { IElementEvent, NodeData } from '@antv/g6';
+import type { Graph } from '@/utils/observability-graph-runtime';
+import { loadTopologyGraphRuntime } from '@/utils/load-topology-graph';
 import type { ServiceNode, ServiceRelation, LayoutPosition } from '@/api/observability';
 import { serviceIcon } from '@/utils/observability-icons';
 import { effectiveHealth, healthColors, healthLabels, metric, relationLabels } from '@/utils/observability';
+import { destroyTopologyGraph } from '@/utils/observability-graph-lifecycle';
 import { orderedTopologyNodes, initialTopologyPositions, reconcileTopologyPositions, topologyConnections, topologyLane, topologyLaneLabels, type TopologyPositions, TOPOLOGY_FIT_PADDING, TOPOLOGY_NODE_WIDTH, TOPOLOGY_NODE_HEIGHT } from '@/utils/observability-layout';
 import '@/styles/pages/observability.css';
 
@@ -12,6 +15,8 @@ const emit = defineEmits<{ select: [code: string]; change: []; error: [message: 
 const host = ref<HTMLDivElement>(); const zoom = ref(100);
 const interactionActive = ref(false);
 const canvasHeight = ref<string>();
+const runtimeLoading = ref(true);
+const runtimeError = ref('');
 const hoveredNode = ref('');
 const hoveredEdge = ref('');
 const hoveredRelation = ref<ServiceRelation>();
@@ -25,6 +30,7 @@ const relationSummary = computed(() => {
 let graph: Graph | undefined; let resize: ResizeObserver | undefined; let disposed = false; let revision = 0; let started = false;
 let coordinates: TopologyPositions = {};
 let manualViewport = false;
+let layoutTouched = false;
 let previousCoordinates: TopologyPositions | undefined;
 let surfaceResize: ResizeObserver | undefined;
 let pointerDrag: { code: string; pointerId: number; clientX: number; clientY: number; x: number; y: number; moved: boolean } | undefined;
@@ -116,37 +122,50 @@ async function revealSelection() {
   await graph.focusElement(props.selected, false);
 }
 async function fitReadable() { if (!graph || disposed) return; await graph.fitView(); if (graph.getZoom() < .86) await graph.zoomTo(.86); if (props.compact && graph.getZoom() > 1.15) await graph.zoomTo(1.15); await revealSelection(); afterTransform(); }
-async function draw(reset = false) {
+async function draw(reset = false, useSaved = false) {
   if (!graph || disposed) return; const current = ++revision;
   try {
-    if (started && !reset) captureCoordinates();
+    if (started && !reset && !useSaved) captureCoordinates();
     coordinates = reset ? initialTopologyPositions(props.nodes, props.compact, props.edges) : reconcileTopologyPositions(props.nodes, props.edges, props.layout, coordinates, props.compact);
     graph.setOptions({ layout: undefined });
     graph.setData(data());
     await graph.render();
     if (disposed || current !== revision) return;
-    if (!started || reset) { await fitReadable(); started = true; manualViewport = false; }
+    if (!started || reset || useSaved) { await fitReadable(); started = true; manualViewport = false; }
     await applyFocus();
     zoom.value = Math.round(graph.getZoom() * 100);
   } catch (cause) { if (!disposed) emit('error', cause instanceof Error ? cause.message : '拓扑画布渲染失败'); }
 }
-async function autoLayout() { captureCoordinates(); previousCoordinates = structuredClone(coordinates); await draw(true); if (props.editing) emit('change'); }
-async function undoLayout() { if (!previousCoordinates || !graph) return; coordinates = previousCoordinates; previousCoordinates = undefined; graph.setData(data()); await graph.render(); await fitReadable(); await applyFocus(); if (props.editing) emit('change'); }
-async function restoreLayout() { coordinates = {}; previousCoordinates = undefined; started = false; await draw(); }
+async function autoLayout() { layoutTouched = true; captureCoordinates(); previousCoordinates = structuredClone(coordinates); await draw(true); if (props.editing) emit('change'); }
+async function undoLayout() { layoutTouched = true; if (!previousCoordinates || !graph) return; coordinates = previousCoordinates; previousCoordinates = undefined; graph.setData(data()); await graph.render(); await fitReadable(); await applyFocus(); if (props.editing) emit('change'); }
+async function restoreLayout() { layoutTouched = true; coordinates = {}; previousCoordinates = undefined; started = false; await draw(); }
 function afterTransform() { if (started && !disposed && graph) zoom.value = Math.round(graph.getZoom() * 100); }
-async function fit() { if (!started || disposed || !graph) return; manualViewport = false; await graph.fitView(); afterTransform(); }
-async function restoreView() { if (!started || disposed || !graph) return; manualViewport = false; await fitReadable(); }
-function activateCanvas() { interactionActive.value = true; manualViewport = true; }
+async function fit() { layoutTouched = true; if (!started || disposed || !graph) return; manualViewport = false; await graph.fitView(); afterTransform(); }
+async function restoreView() { layoutTouched = true; if (!started || disposed || !graph) return; manualViewport = false; await fitReadable(); }
+function activateCanvas() { layoutTouched = true; interactionActive.value = true; manualViewport = true; }
 function leaveCanvas(event: PointerEvent) { if (!host.value?.contains(event.target as Node)) interactionActive.value = false; }
 function leaveWithEscape(event: KeyboardEvent) { if (event.key === 'Escape') interactionActive.value = false; }
 function markWheel(event: WheelEvent) { if (interactionActive.value) { event.preventDefault(); manualViewport = true; } }
-async function zoomBy(factor: number) { if (!started || disposed || !graph) return; manualViewport = true; await graph.zoomBy(factor); afterTransform(); }
+async function zoomBy(factor: number) { layoutTouched = true; if (!started || disposed || !graph) return; manualViewport = true; await graph.zoomBy(factor); afterTransform(); }
 function positions(): LayoutPosition[] { captureCoordinates(); return Object.entries(coordinates).map(([ciCode, position]) => ({ ciCode, ...position })); }
 function keySelect(event: KeyboardEvent) { if (props.wallboard || !['Enter', ' '].includes(event.key)) return; const node = (event.target as HTMLElement)?.closest<HTMLElement>('[data-ci-code]'); if (node?.dataset.ciCode) { event.preventDefault(); emit('select', node.dataset.ciCode); } }
 defineExpose({ autoLayout, undoLayout, restoreLayout, fit, restoreView, zoomBy, positions, zoom, interactionActive, reset: () => draw(true) });
 onMounted(async () => {
   await nextTick(); if (!host.value || disposed) return;
+  let runtime: Awaited<ReturnType<typeof loadTopologyGraphRuntime>>;
+  try { runtime = await loadTopologyGraphRuntime(); }
+  catch (cause) {
+    if (!disposed) {
+      runtimeLoading.value = false;
+      runtimeError.value = '拓扑画布加载失败，请刷新页面重试。';
+      emit('error', runtimeError.value);
+    }
+    return;
+  }
+  if (!host.value || disposed) return;
+  runtimeLoading.value = false;
   sizeCanvas(); await nextTick();
+  if (!host.value || disposed) return;
   window.addEventListener('resize', sizeCanvas);
   document.addEventListener?.('fullscreenchange', sizeCanvas);
   surfaceResize = new ResizeObserver(sizeCanvas);
@@ -163,7 +182,7 @@ onMounted(async () => {
   host.value.addEventListener('pointerleave', clearHover);
   document.addEventListener('pointerdown', leaveCanvas);
   document.addEventListener('keydown', leaveWithEscape);
-  graph = new Graph({ container: host.value, width: host.value.clientWidth || 900, height: host.value.clientHeight || 590, padding: TOPOLOGY_FIT_PADDING, animation: false, zoomRange: [.15, 2],
+  graph = new runtime.Graph({ container: host.value, width: host.value.clientWidth || 900, height: host.value.clientHeight || 590, padding: TOPOLOGY_FIT_PADDING, animation: false, zoomRange: [.15, 2],
     node: { type: 'html', style: { size: [TOPOLOGY_NODE_WIDTH, TOPOLOGY_NODE_HEIGHT], dx: -TOPOLOGY_NODE_WIDTH / 2, dy: -TOPOLOGY_NODE_HEIGHT / 2, innerHTML: (datum: NodeData) => datum.data?.lane ? `<div class="obs-graph-lane">${escape(datum.data.lane)}</div>` : html((datum.data as { node: ServiceNode }).node) } },
     edge: { type: 'polyline', style: { radius: 24, stroke: '#397cff', lineWidth: 1.35, opacity: .6, endArrow: true, endArrowSize: 6 }, state: { active: { stroke: '#1f65ec', lineWidth: 2.1, opacity: 1, halo: false, zIndex: 2 }, inactive: { opacity: .14, lineWidth: 1 } } },
     behaviors: ['drag-canvas', { type: 'zoom-canvas', key: 'focused-zoom', preventDefault: false, enable: () => interactionActive.value }],
@@ -178,11 +197,24 @@ onMounted(async () => {
   resize = new ResizeObserver(() => { if (host.value && graph && !disposed) { graph.setSize(host.value.clientWidth, host.value.clientHeight); if (started && props.selected) void revealSelection(); else if (started && !manualViewport) void fitReadable(); } }); resize.observe(host.value);
   await draw();
 });
-watch(() => [props.nodes, props.edges, props.layout], () => { void draw(); });
-watch(() => props.scopeKey, () => { coordinates = {}; previousCoordinates = undefined; started = false; void draw(); });
+watch(() => [props.nodes, props.edges], () => { void draw(); });
+watch(() => props.layout, (layout, previous) => {
+  if (JSON.stringify(layout || {}) === JSON.stringify(previous || {})) return;
+  // A late personal layout can replace the provisional layout until the user interacts.
+  // Live observations and later layout responses never reset a moved viewport or edited nodes.
+  const useSaved = !layoutTouched;
+  if (useSaved) coordinates = {};
+  void draw(false, useSaved);
+});
+watch(() => props.scopeKey, () => { layoutTouched = false; coordinates = {}; previousCoordinates = undefined; started = false; void draw(); });
 watch(() => [props.selected, props.showTraffic], async () => { if (!graph) return; graph.updateNodeData(props.nodes.map(node => ({ id: node.ciCode, data: { node } }))); await graph.draw(); await applyFocus(); });
 watch(() => props.selected, async () => { await nextTick(); if (started) await revealSelection(); });
 watch(() => props.editing, () => { if (!props.editing) void draw(); });
-onBeforeUnmount(() => { disposed = true; revision++; pointerDrag = undefined; document.removeEventListener('pointerdown', leaveCanvas); document.removeEventListener('keydown', leaveWithEscape); host.value?.removeEventListener('pointerdown', activateCanvas); host.value?.removeEventListener('wheel', markWheel); window.removeEventListener('resize', sizeCanvas); document.removeEventListener?.('fullscreenchange', sizeCanvas); surfaceResize?.disconnect(); host.value?.removeEventListener('keydown', keySelect); host.value?.removeEventListener('focusin', focusNode); host.value?.removeEventListener('focusout', clearHover); host.value?.removeEventListener('pointermove', pointerFocus, true); host.value?.removeEventListener('pointerdown', startPointerDrag, true); host.value?.removeEventListener('pointerup', finishPointerDrag, true); host.value?.removeEventListener('pointercancel', finishPointerDrag, true); host.value?.removeEventListener('pointerleave', clearHover); resize?.disconnect(); const previous = graph; graph = undefined; previous?.off('aftertransform', afterTransform); previous?.destroy(); });
+onBeforeUnmount(() => { disposed = true; revision++; pointerDrag = undefined; document.removeEventListener('pointerdown', leaveCanvas); document.removeEventListener('keydown', leaveWithEscape); host.value?.removeEventListener('pointerdown', activateCanvas); host.value?.removeEventListener('wheel', markWheel); window.removeEventListener('resize', sizeCanvas); document.removeEventListener?.('fullscreenchange', sizeCanvas); surfaceResize?.disconnect(); host.value?.removeEventListener('keydown', keySelect); host.value?.removeEventListener('focusin', focusNode); host.value?.removeEventListener('focusout', clearHover); host.value?.removeEventListener('pointermove', pointerFocus, true); host.value?.removeEventListener('pointerdown', startPointerDrag, true); host.value?.removeEventListener('pointerup', finishPointerDrag, true); host.value?.removeEventListener('pointercancel', finishPointerDrag, true); host.value?.removeEventListener('pointerleave', clearHover); resize?.disconnect(); const previous = graph; graph = undefined; previous?.off('aftertransform', afterTransform); destroyTopologyGraph(previous, !props.compact); });
 </script>
-<template><div class="obs-topology-surface"><div class="obs-topology-canvas" :class="{ 'is-editing': editing, 'is-wallboard': wallboard, 'is-compact': compact, 'is-interaction-active': interactionActive }" :style="{ height: canvasHeight }" ref="host" role="group" tabindex="0" :aria-label="`服务依赖拓扑。${interactionActive ? '滚轮缩放已启用，按 Esc 退出' : '点击画布启用滚轮缩放'}`" @keydown.enter.self="activateCanvas" /><div class="obs-topology-relation" :class="{ 'has-relation': hoveredRelation }" role="status">{{ relationSummary }}</div></div></template>
+<template><div class="obs-topology-surface"><p v-if="runtimeLoading || runtimeError" class="topology-runtime-status" :class="{ 'inline-error': runtimeError }" role="status">{{ runtimeError || '正在加载拓扑画布…' }}</p><div class="obs-topology-canvas" :class="{ 'is-editing': editing, 'is-wallboard': wallboard, 'is-compact': compact, 'is-interaction-active': interactionActive }" :style="{ height: canvasHeight }" ref="host" role="group" tabindex="0" :aria-label="`服务依赖拓扑。${interactionActive ? '滚轮缩放已启用，按 Esc 退出' : '点击画布启用滚轮缩放'}`" @keydown.enter.self="activateCanvas" /><div class="obs-topology-relation" :class="{ 'has-relation': hoveredRelation }" role="status">{{ relationSummary }}</div></div></template>
+<style scoped>
+.obs-topology-surface { position: relative; }
+.topology-runtime-status { position: absolute; inset: 24px 20px auto; z-index: 1; margin: 0; color: #64748b; text-align: center; pointer-events: none; }
+.topology-runtime-status.inline-error { color: #b42318; }
+</style>

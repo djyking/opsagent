@@ -186,6 +186,7 @@ console.log('PASS retained metrics-only workspace: real heap/HTTP history, colle
   const requests = [];
   const page = await fixture('KnowledgeView.vue', '/knowledge', {
     '@/stores/auth': { useAuthStore: () => auth },
+    '@/api/visitor-knowledge': { visitorKnowledgeApi: { get: async () => { throw new Error('Navigation test must not read private experience knowledge'); } } },
     '@/api/http': { request: async options => {
       requests.push(options);
       assert.equal(options.url, '/api/knowledge/bases');
@@ -205,7 +206,10 @@ console.log('PASS retained metrics-only workspace: real heap/HTTP history, colle
       await vue.nextTick();
       const html = await page.html();
       assert.match(html, /知识与经验/);
-      assert.match(html, /href="\/knowledge"/);
+      if (isDemo) {
+        assert.match(html, /公共知识/); assert.match(html, /我的体验库/);
+        assert.match(html, /aria-pressed="true"/);
+      } else assert.match(html, /href="\/knowledge"/);
       for (const href of ['/knowledge/review', '/knowledge/index-admin']) {
         assert.equal(html.includes(`href="${href}"`), visible, `${role}: ${href}`);
       }

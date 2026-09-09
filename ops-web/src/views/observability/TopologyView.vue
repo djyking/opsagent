@@ -24,7 +24,7 @@ const canvasLayout = computed(() => ({ ...store.topologyData?.layout, ...draftLa
 let timer: ReturnType<typeof setInterval> | undefined;
 const context = computed(() => serviceContext(store.selectedCiCode, store.selectedEnvironment, store.timeRange));
 const degradedSources = computed(() => store.topologyData?.dataSources.filter(source => !source.healthy) || []);
-const counts = computed(() => (store.topologyData?.nodes || []).reduce((all, node) => { const key = effectiveHealth(node); all[key] = (all[key] || 0) + 1; return all; }, {} as Record<string, number>));
+const counts = computed(() => (store.topologyData?.nodes || []).reduce((all, node) => { const key = effectiveHealth(node, store.observationClock); all[key] = (all[key] || 0) + 1; return all; }, {} as Record<string, number>));
 const layoutSource = computed(() => ({ PERSONAL: '我的布局', TEAM: '团队默认', AUTO: '自动生成' }[store.layoutData?.source || 'AUTO']));
 function readQuery() { const env = String(route.query.environment || 'PROD'); const time = String(route.query.timeRange || '15m'); store.selectedEnvironment = ['ALL', 'PROD', 'DEMO', 'DEV', 'TEST', 'STAGING'].includes(env) ? env : 'PROD'; store.timeRange = ['5m', '15m', '30m', '1h', '6h'].includes(time) ? time : '15m'; store.selectedCiCode = String(route.query.ciCode || ''); }
 function syncQuery() { void router.replace({ query: { ...route.query, ...context.value } }); }
@@ -42,18 +42,26 @@ async function saveLayout() {
     const positions = Object.entries(merged).filter(([ciCode]) => eligible.has(ciCode)).map(([ciCode, position]) => ({ ciCode, ...position }));
     await (saveScope.value === 'TEAM' ? observabilityApi.saveLayout : observabilityApi.savePersonalLayout)(environment, positions);
     if (environment !== store.selectedEnvironment || token !== auth.identity) return;
-    dirty.value = false; draftLayout.value = {}; await store.load(); savedMessage.value = saveScope.value === 'TEAM' ? '团队默认布局已保存；已有个人布局保持独立' : '我的布局已保存';
+    dirty.value = false; draftLayout.value = {}; await Promise.all([store.load(), store.refreshLayout()]); savedMessage.value = saveScope.value === 'TEAM' ? '团队默认布局已保存；已有个人布局保持独立' : '我的布局已保存';
   } catch (cause) { if (environment === store.selectedEnvironment && token === auth.identity) localError.value = cause instanceof Error ? cause.message : '布局保存失败'; } finally { saving.value = false; }
 }
-async function restoreLayout() { await store.load(); if (!store.layoutError && !store.error) { draftLayout.value = {}; await nextTick(); await graph.value?.restoreLayout(); dirty.value = false; } }
+async function restoreLayout() { await Promise.all([store.load(), store.refreshLayout()]); if (!store.layoutError && !store.error) { draftLayout.value = {}; await nextTick(); await graph.value?.restoreLayout(); dirty.value = false; } }
 async function useTeamLayout() { if (auth.isDemo || saving.value) return; saving.value = true; try { await observabilityApi.resetPersonalLayout(store.selectedEnvironment); await restoreLayout(); savedMessage.value = '已使用团队默认布局'; } catch (cause) { localError.value = cause instanceof Error ? cause.message : '恢复布局失败'; } finally { saving.value = false; } }
 async function fullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await canvas.value?.requestFullscreen(); } catch { localError.value = '浏览器暂未允许全屏，可继续在当前画布查看。'; } }
 watch(() => route.query, readQuery);
 watch(() => store.selectedEnvironment, () => { draftLayout.value = {}; dirty.value = false; });
 watch(() => [store.selectedEnvironment, store.timeRange, store.topologyMode], () => { syncQuery(); void store.load(); });
 watch(() => auth.identity, () => { drawer.value = false; editor.value = false; relations.value = false; dirty.value = false; draftLayout.value = {}; saveScope.value = 'PERSONAL'; if (auth.identity) void store.load(); });
-onMounted(() => { readQuery(); drawer.value = !!store.selectedCiCode; void store.load(); timer = setInterval(() => { if (!document.hidden && !store.loading) void store.load(); }, store.refreshInterval); });
-onBeforeUnmount(() => { clearInterval(timer); store.invalidate(); });
+function visibleRefresh() {
+  if (document.hidden) return;
+  store.observationClock = Date.now(); void store.load();
+}
+onMounted(() => {
+  readQuery(); drawer.value = !!store.selectedCiCode; void store.load();
+  timer = setInterval(visibleRefresh, store.refreshInterval);
+  document.addEventListener('visibilitychange', visibleRefresh);
+});
+onBeforeUnmount(() => { clearInterval(timer); document.removeEventListener('visibilitychange', visibleRefresh); store.invalidate(); });
 </script>
 <template>
   <ObservabilityWorkspaceView description="统一服务关系，定位异常并查看影响范围。">

@@ -45,3 +45,34 @@ const map = mapFixture('redis', 'CORE'); await map.state.load(); assert.deepEqua
 graph = { ...graph, nodes: [...graph.nodes, { ciCode: 'redis', environment: 'DEMO' }] }; await map.state.load(); assert.equal(map.state.scopeAmbiguous.value, true); assert.equal(map.state.nodes.value.length, 0, 'an unmapped event cannot merge different environments with the same service identity');
 map.props.environment = 'DEMO'; await map.state.load(); assert.equal(topologyCalls.at(-1).environment, 'DEMO'); assert.equal(topologyCalls.at(-1).mode, 'HYBRID'); map.stop();
 console.log('PASS event dependency scope: registered environment provenance, no guessed CORE mapping and ambiguous-environment exclusion');
+
+// New visitor entry is a public projection; owned history uses server-side actor scope, not assignee scope.
+{
+  const visitor = vue.reactive({ isDemo: true, isAdmin: false, user: { userId: -77, roles: ['DEMO'] } });
+  const visitorRoute = vue.reactive({ name: 'tickets', query: {} });
+  const requests = [];
+  const app = fixture('views/TicketListView.vue', {
+    ...common,
+    '@/stores/auth': { useAuthStore: () => visitor },
+    'vue-router': { useRoute: () => visitorRoute, useRouter: () => ({ async replace({ query }) { visitorRoute.query = query; } }), onBeforeRouteLeave() {} },
+    '@/api/modules': { itsmApi: { cis: async () => [] }, ticketApi: {} },
+    '@/api/event-queue': { eventQueueApi: {
+      page: async params => { requests.push(params); return { records: [], total: 0 }; },
+      summary: async () => ({ counts: { open: 0 } }),
+    } },
+  });
+  try {
+    await app.state.load();
+    assert.equal(app.state.showingCases.value, true);
+    assert.equal(requests.length, 0);
+    visitorRoute.query = { view: 'mine' }; await flush(); await flush();
+    assert.equal(app.state.showingCases.value, false);
+    assert.equal(requests.at(-1).scope, 'mine');
+    assert.equal(requests.at(-1).assigneeId, undefined);
+    assert.equal(requests.at(-1).eventScope, undefined, 'Closed personal history is not silently excluded');
+    assert.equal(visitorRoute.query.view, 'mine');
+    visitorRoute.query = { view: 'cases' }; await flush();
+    assert.equal(app.state.showingCases.value, true);
+  } finally { app.stop(); }
+}
+console.log('PASS visitor case default, owned server scope and closed history continuity');

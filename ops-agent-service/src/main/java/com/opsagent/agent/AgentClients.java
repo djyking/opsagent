@@ -59,8 +59,9 @@ class AgentClients {
     Context refresh(Context context) {
         JsonNode actor =
                 call("auth", "/internal/agent/actors/" + context.userId(), "GET", null, context);
-        if (!actor.path("active").asBoolean() || actor.path("userId").asLong() != context.userId())
-            throw denied();
+        if (actor.path("userId").asLong() != context.userId())
+            throw new AgentAccessFailure("ACTOR_ID_MISMATCH");
+        if (!actor.path("active").asBoolean()) throw new AgentAccessFailure(inactiveReason(actor));
         List<String> roles =
                 context.roles().stream()
                         .filter(
@@ -70,13 +71,13 @@ class AgentClients {
                                     return false;
                                 })
                         .toList();
-        if (roles.isEmpty()) throw denied();
+        if (roles.isEmpty()) throw new AgentAccessFailure("ACTOR_ROLE_REVOKED");
         Instant expiry = context.validUntil();
         if (!actor.path("expiresAt").isNull() && actor.hasNonNull("expiresAt")) {
             Instant lease = Instant.parse(actor.path("expiresAt").asText());
             if (lease.isBefore(expiry)) expiry = lease;
-        } else if (roles.contains("DEMO")) throw denied();
-        if (!expiry.isAfter(Instant.now())) throw denied();
+        } else if (roles.contains("DEMO")) throw new AgentAccessFailure("ACTOR_LEASE_REQUIRED");
+        if (!expiry.isAfter(Instant.now())) throw new AgentAccessFailure("RUN_DEADLINE_EXPIRED");
         return new Context(
                 context.userId(),
                 actor.path("username").asText(),
@@ -84,6 +85,33 @@ class AgentClients {
                 context.runId(),
                 context.targetCode(),
                 expiry);
+    }
+
+    /**
+     * Read identity status even after a run deadline; this context is never returned for tool use.
+     */
+    JsonNode inspectActor(Context original) {
+        Context query =
+                new Context(
+                        original.userId(),
+                        original.username(),
+                        original.roles(),
+                        "identity-status",
+                        original.targetCode(),
+                        Instant.now().plusSeconds(30));
+        return call("auth", "/internal/agent/actors/" + original.userId(), "GET", null, query);
+    }
+
+    static String inactiveReason(JsonNode actor) {
+        String reason = actor.path("reasonCode").asText();
+        if (List.of("VISITOR_REVOKED", "VISITOR_LEASE_EXPIRED", "ACTOR_DISABLED").contains(reason))
+            return reason;
+        if (actor.path("revoked").asBoolean() || actor.hasNonNull("revokedAt"))
+            return "VISITOR_REVOKED";
+        if (actor.hasNonNull("expiresAt")
+                && !Instant.parse(actor.path("expiresAt").asText()).isAfter(Instant.now()))
+            return "VISITOR_LEASE_EXPIRED";
+        return "ACTOR_DISABLED";
     }
 
     Context fromState(JsonNode state) {
@@ -126,6 +154,16 @@ class AgentClients {
             if (response.statusCode() / 100 != 2 || result.path("code").asInt(-1) != 0) {
                 String message = result.path("message").asText("内部服务暂不可用");
                 if (message.length() > 300) message = message.substring(0, 300);
+                if (List.of(
+                                "VISITOR_REVOKED",
+                                "VISITOR_LEASE_EXPIRED",
+                                "ACTOR_DISABLED",
+                                "ACTOR_ROLE_REVOKED",
+                                "ACTOR_LEASE_REQUIRED",
+                                "ACTOR_LEASE_EXPIRED",
+                                "ACTOR_ID_MISMATCH",
+                                "ACTOR_INACTIVE")
+                        .contains(message)) throw new AgentAccessFailure(message);
                 throw new BusinessException(
                         failureCode(response.statusCode(), result.path("code").asInt(-1)), message);
             }
@@ -149,7 +187,8 @@ class AgentClients {
                 Duration.ofSeconds(
                         audience.equals("rag") ? path.equals("/internal/ai/turns") ? 130 : 65 : 12);
         Duration remaining = Duration.between(Instant.now(), actor.validUntil());
-        if (remaining.isNegative() || remaining.isZero()) throw denied();
+        if (remaining.isNegative() || remaining.isZero())
+            throw new AgentAccessFailure("RUN_DEADLINE_EXPIRED");
         return remaining.compareTo(configured) < 0 ? remaining : configured;
     }
 

@@ -126,6 +126,49 @@ class EventLifecycleTest {
     }
 
     @Test
+    void visitorOwnerCompletesDrillConfirmationWithSameEvidenceGatesAndAuditIdentity() {
+        actor(-1, "DEMO");
+        ticket.setOwnerActorId(-1L);
+        ticket.setSourceType("ISOLATED_DRILL");
+        ticket.setEnvironment("ISOLATED");
+        ticket.setAffectedCiCode("ops-demo-order-service");
+        ticket.setIncidentId("incident-1");
+        ticket.setAssigneeId(null);
+        assertThat(service.read(1).confirmationScope()).isEqualTo("VISITOR_DRILL");
+        act("RESULT");
+        act("TECH_PASS");
+        assertThat(service.read(1).allowedActions()).doesNotContain("CLOSE");
+        act("BUSINESS_CONFIRM");
+        act("CLOSE");
+        assertThat(service.read(1).stage()).isEqualTo("CLOSED");
+        assertThat(records)
+                .allSatisfy(
+                        record -> {
+                            assertThat(record.createBy()).isEqualTo(-1);
+                            assertThat(record.content()).startsWith("【访客演练确认】");
+                        });
+        verify(verifier, times(2)).verify(eq(ticket), any());
+    }
+
+    @Test
+    void publicOrForeignOrNonIsolatedTicketNeverGrantsVisitorConfirmation() {
+        actor(-1, "DEMO");
+        ticket.setPublicDemo(true);
+        ticket.setOwnerActorId(-2L);
+        ticket.setSourceType("ISOLATED_DRILL");
+        ticket.setEnvironment("ISOLATED");
+        ticket.setAffectedCiCode("ops-demo-order-service");
+        ticket.setIncidentId("incident-1");
+        assertThat(service.read(1).allowedActions()).isEmpty();
+        ticket.setOwnerActorId(-1L);
+        ticket.setEnvironment("CORE");
+        assertThat(service.read(1).allowedActions()).isEmpty();
+        ticket.setEnvironment("ISOLATED");
+        ticket.setIncidentId(null);
+        assertThat(service.read(1).allowedActions()).isEmpty();
+    }
+
+    @Test
     void creatorFeedbackDoesNotGrantFormalBusinessConfirmationOrClosure() {
         act("RESULT");
         act("TECH_PASS");

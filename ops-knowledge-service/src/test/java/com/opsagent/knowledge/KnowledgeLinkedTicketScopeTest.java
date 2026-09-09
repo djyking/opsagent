@@ -41,6 +41,8 @@ class KnowledgeLinkedTicketScopeTest {
     void setUp() {
         jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:h2:mem:linked-"
                 + UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+        jdbc.execute("CREATE TABLE knowledge_base(id BIGINT PRIMARY KEY,status VARCHAR(32))");
+        jdbc.update("INSERT INTO knowledge_base VALUES(1,'active')");
         jdbc.execute("CREATE TABLE knowledge_document(id BIGINT PRIMARY KEY,ticket_id BIGINT,"
                 + "original_name VARCHAR(255),version INT,visibility VARCHAR(16),review_status VARCHAR(16),"
                 + "create_by BIGINT,update_time TIMESTAMP,deleted TINYINT)");
@@ -98,7 +100,7 @@ class KnowledgeLinkedTicketScopeTest {
                 null, null, null, null, Set.of(), "HYBRID", null);
         var result = new HybridSearchResult("Redis", Map.of(), List.of(marker), List.of(), List.of(),
                 List.of(), Map.of(), "HYBRID", null);
-        when(index.search(any())).thenReturn(result);
+        when(index.search(any(), any())).thenReturn(result);
         when(index.candidateRows(result)).thenReturn(java.util.stream.LongStream.rangeClosed(1, 6)
                 .mapToObj(id -> Map.<String, Object>of("chunkId", id, "documentId", id,
                         "content", "stale private index text", "retrievalMode", "HYBRID")).toList());

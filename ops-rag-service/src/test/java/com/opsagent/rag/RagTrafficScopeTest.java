@@ -3,11 +3,14 @@ package com.opsagent.rag;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import com.alibaba.csp.sentinel.slots.block.flow.FlowRule;
 import com.alibaba.csp.sentinel.slots.block.flow.FlowRuleManager;
 import com.alibaba.csp.sentinel.slots.clusterbuilder.ClusterBuilderSlot;
 import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.core.ErrorCode;
 import com.opsagent.common.security.OpsPrincipal;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -15,8 +18,10 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
@@ -48,11 +53,11 @@ class RagTrafficScopeTest {
         controller = new RagConversationController(conversations, rag, streaming, limiter);
         when(limiter.requestScope()).thenReturn(scope);
         when(conversations.begin(anyString(), anyLong(), anyString())).thenReturn(12L);
-        when(streaming.open(any(), any(), any(), any()))
+        when(streaming.openPrepared(any(), any(), any(), any(), any()))
                 .thenAnswer(
                         call -> {
-                            completed.set(call.getArgument(2));
-                            failed.set(call.getArgument(3));
+                            completed.set(call.getArgument(3));
+                            failed.set(call.getArgument(4));
                             return new SseEmitter();
                         });
     }
@@ -74,12 +79,12 @@ class RagTrafficScopeTest {
     }
 
     @Test
-    void beginAndContextPreparationFailuresAlwaysReleaseEntry() {
+    void beginFailuresAlwaysReleaseEntry() {
         var cause = new IllegalStateException("begin failure");
         when(conversations.begin(anyString(), anyLong(), anyString())).thenThrow(cause);
         assertThatThrownBy(() -> controller.ask("chat", request())).isSameAs(cause);
         verify(scope).failure(cause);
-        verify(streaming, never()).open(any(), any(), any(), any());
+        verify(streaming, never()).openPrepared(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -100,15 +105,51 @@ class RagTrafficScopeTest {
     }
 
     @Test
-    void contextFailureRetainsOriginalExceptionEvenWhenFailureAuditAlsoFails() {
-        var cause = new IllegalStateException("context failure");
-        when(conversations.context(anyString(), anyLong())).thenThrow(cause);
+    void streamOpeningFailureRetainsOriginalExceptionEvenWhenFailureAuditAlsoFails() {
+        var cause = new IllegalStateException("stream opening failure");
+        when(streaming.openPrepared(any(), any(), any(), any(), any())).thenThrow(cause);
         doThrow(new IllegalStateException("audit failure"))
                 .when(conversations)
                 .fail(anyString(), anyLong(), anyLong(), anyString());
         assertThatThrownBy(() -> controller.ask("chat", request())).isSameAs(cause);
         assertThat(cause.getSuppressed()).hasSize(1);
         verify(scope).failure(cause);
+    }
+
+    @Test
+    void asynchronousContextFailureStillSettlesScopeWhenFailureAuditAlsoFails() throws Exception {
+        when(conversations.context(anyString(), anyLong()))
+                .thenThrow(new BusinessException(ErrorCode.FORBIDDEN, "历史访问被拒绝"));
+        doThrow(new IllegalStateException("audit failure"))
+                .when(conversations)
+                .fail(anyString(), anyLong(), anyLong(), anyString());
+        var liveStreaming = new RagStreamingService(rag, new AiProperties(), Runnable::run);
+        var mvc =
+                MockMvcBuilders.standaloneSetup(
+                                new RagConversationController(
+                                        conversations, rag, liveStreaming, limiter))
+                        .build();
+        var started =
+                mvc.perform(
+                                post("/api/rag/conversations/chat/stream")
+                                        .contentType(MediaType.APPLICATION_JSON)
+                                        .accept(MediaType.TEXT_EVENT_STREAM)
+                                        .content("{\"question\":\"为什么服务变慢\"}"))
+                        .andReturn();
+        String body =
+                mvc.perform(asyncDispatch(started))
+                        .andReturn()
+                        .getResponse()
+                        .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(body)
+                .contains("event:error", "\"code\":40300", "历史访问被拒绝")
+                .doesNotContain("event:done", "event:token", "audit failure");
+        verify(conversations).fail("chat", 1, 12, "历史访问被拒绝");
+        verify(scope).failure(any());
+        verify(conversations, never()).complete(anyString(), anyLong(), anyLong(), any());
+        verify(rag, never()).stream(any(), any(), any(), any());
+        verify(rag, never())
+                .prepareStream(anyString(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test

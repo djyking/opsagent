@@ -14,10 +14,15 @@ public final class DemoAccessPolicy {
             return path.equals("/api/auth/me")
                     || observabilityRead(path)
                     || path.equals("/api/platform/configuration/managed")
+                    || path.equals("/api/platform/configuration/files")
+                    || path.matches(
+                            "/api/platform/configuration/files/(?!drafts(?:/|$)|tasks(?:/|$))"
+                                    + "[A-Za-z0-9][A-Za-z0-9_.-]{0,95}(?:/history)?")
                     || path.matches(
                             "/api/platform/configuration/managed/order-(?:business|runtime)(?:/history)?")
                     || path.equals("/api/automation/approvals/pending")
                     || path.equals("/api/automation/summary")
+                    || path.matches("/api/automation/public-cases(?:/[A-Za-z0-9_-]+)?")
                     || path.matches("/api/automation/tickets/[0-9]+/workspace")
                     || path.matches("/api/automation/(?:models|tools|definitions|runs)")
                     || path.matches("/api/automation/definitions/[A-Za-z0-9_-]+")
@@ -30,8 +35,7 @@ public final class DemoAccessPolicy {
                     || path.equals("/api/tickets/alerts")
                     || path.matches(
                             "/api/tickets/[0-9]+(?:/(?:history|comments|work-records|sla))?")
-                    || path.matches(
-                            "/api/tickets/[0-9]+/event-lifecycle(?:/recovery-binding)?")
+                    || path.matches("/api/tickets/[0-9]+/event-lifecycle(?:/recovery-binding)?")
                     || path.startsWith("/api/tickets/sla/")
                     || path.equals("/api/platform/monitor/summary")
                     || path.equals("/api/platform/cmdb/cis")
@@ -44,13 +48,19 @@ public final class DemoAccessPolicy {
                     || path.equals("/api/rag/runtime/sentinel")
                     || path.matches("/api/rag/conversations(?:/[a-f0-9-]+(?:/messages)?)?")
                     || path.equals("/api/knowledge/bases")
+                    || path.equals("/api/knowledge/experience")
                     || path.equals("/api/knowledge/internal/search")
+                    || path.equals("/api/knowledge/search")
+                    || path.matches("/api/knowledge/documents/[0-9]+/content")
                     || path.matches("/api/knowledge/bases/[0-9]+/documents")
                     || path.matches(
                             "/api/knowledge/(?:documents/[0-9]+(?:/chunks)?|tickets/[0-9]+/documents)");
         }
         if ("POST".equals(method)) {
             return path.equals("/api/auth/logout")
+                    || path.equals("/api/auth/end-experience")
+                    || path.equals("/api/knowledge/experience/documents")
+                    || path.matches("/api/knowledge/experience/documents/[0-9]+/(?:parse|index)")
                     || path.equals("/api/platform/observability/evidence")
                     || path.equals("/api/platform/observability/evidence/resolve")
                     || path.matches("/api/platform/observability/inspections/[A-Za-z0-9_-]+/run")
@@ -62,10 +72,13 @@ public final class DemoAccessPolicy {
                     || path.equals("/api/platform/operations/demo/actions")
                     || path.matches(
                             "/api/tickets/[0-9]+/(?:claim|transition|comments|work-records)")
+                    || path.matches("/api/tickets/[0-9]+/event-lifecycle")
                     || path.matches("/api/rag/(?:chat|ask|stream)")
                     || path.equals("/api/rag/conversations")
                     || path.matches("/api/rag/conversations/[a-f0-9-]+/stream");
         }
+        if ("DELETE".equals(method) && path.matches("/api/knowledge/experience/documents/[0-9]+"))
+            return true;
         return ("PATCH".equals(method) || "PUT".equals(method) || "DELETE".equals(method))
                 && path.matches("/api/rag/conversations/[a-f0-9-]+");
     }
@@ -84,7 +97,7 @@ public final class DemoAccessPolicy {
                 || path.matches("/api/platform/observability/inspections/[A-Za-z0-9_-]+/history")
                 || path.equals("/api/platform/config-center")
                 || path.matches("/api/platform/config-center/[A-Za-z0-9_-]+(?:/(?:history|diff))?")
-                || path.matches("/api/platform/traffic(?:/(?:summary|history))?")
+                || path.matches("/api/platform/traffic(?:/(?:summary|history|overview))?")
                 || path.matches("/api/platform/traffic/rules/[A-Za-z_]+")
                 || path.equals("/api/rag/runtime/traffic");
     }

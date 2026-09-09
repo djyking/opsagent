@@ -1,13 +1,13 @@
 package com.opsagent.rag;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.opsagent.common.core.BusinessException;
 import com.opsagent.common.core.QueryEmbeddingBudget;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -58,7 +58,9 @@ class RagServiceTest {
                         org.mockito.ArgumentMatchers.any(ContextAssembler.AssembledContext.class)))
                 .thenReturn(request);
         LlmResult result = new LlmResult("先检查切换 [S1]", "openai", "model", 10, 5);
-        when(invocationService.invoke("Redis 主节点挂了以后第一步做什么？", request))
+        when(invocationService.invoke(
+                        eq("Redis 主节点挂了以后第一步做什么？"),
+                        argThat(actual -> publicRequest(actual, request))))
                 .thenReturn(new LlmInvocationService.Invocation(result, 123));
         RagProperties properties = new RagProperties();
         SimpleMeterRegistry metrics = new SimpleMeterRegistry();
@@ -84,7 +86,10 @@ class RagServiceTest {
                 .build(
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.any(ContextAssembler.AssembledContext.class));
-        order.verify(invocationService).invoke("Redis 主节点挂了以后第一步做什么？", request);
+        order.verify(invocationService)
+                .invoke(
+                        eq("Redis 主节点挂了以后第一步做什么？"),
+                        argThat(actual -> publicRequest(actual, request)));
         assertThat(answer.references()).extracting(RagService.Source::chunkId).containsExactly(7L);
         assertThat(answer.answer()).contains("[S1]");
     }
@@ -255,7 +260,7 @@ class RagServiceTest {
                             org.mockito.ArgumentMatchers.any(
                                     ContextAssembler.AssembledContext.class)))
                     .thenReturn(request);
-            when(invocation.invoke(question, request))
+            when(invocation.invoke(eq(question), argThat(actual -> publicRequest(actual, request))))
                     .thenThrow(new AiProviderException("deepseek", 503, "服务暂不可用", null));
         }
         RagProperties properties = new RagProperties();
@@ -275,7 +280,7 @@ class RagServiceTest {
                             mock(CmdbAnswerService.class),
                             mock(OperationsAnswerService.class));
             RagService.Answer answer = service.ask(question, 5);
-            assertThat(answer.model()).isEqualTo("retrieval-only");
+            assertThat(answer.model()).isEqualTo(configured ? "test-model" : "retrieval-only");
             assertThat(answer.metadata().degradedReason()).isEqualTo(reason);
             assertThat(answer.answer()).contains(explanation, "未经 AI 生成", "[S1]");
             assertThat(answer.outputTokens()).isZero();
@@ -293,7 +298,7 @@ class RagServiceTest {
     }
 
     @Test
-    void rejectsOversizedEmbeddingBeforeCallingKnowledgeAndDoesNotChargeSqlScopes() {
+    void largerAllowanceAdmitsFormerQueriesWhilePreservingPrivateScopeReservation() {
         var knowledge = mock(KnowledgeClient.class);
         var invocation = mock(LlmInvocationService.class);
         var properties = new RagProperties();
@@ -314,17 +319,43 @@ class RagServiceTest {
                         mock(CmdbAnswerService.class),
                         mock(OperationsAnswerService.class));
         String question = "甲".repeat(1500);
-        assertThatThrownBy(() -> service.prepareStream(question, 5, null, (String) null))
-                .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("尚未发送");
-        verifyNoInteractions(knowledge, invocation);
+        when(knowledge.search(question, 30, null))
+                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(), "test"));
         when(knowledge.search(question, 30, 9L))
                 .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(), "test"));
-        var scoped = service.prepareStream(question, 5, 9L, (String) null);
-        assertThat(scoped.immediate().metadata().budgetChargedTokens()).isZero();
+        assertThat(
+                        service.prepareStream(question, 5, null, (String) null)
+                                .immediate()
+                                .metadata()
+                                .budgetLimit())
+                .isEqualTo(50000);
+        assertThat(
+                        service.prepareStream(question, 5, 9L, (String) null)
+                                .immediate()
+                                .metadata()
+                                .budgetChargedTokens())
+                .isEqualTo(QueryEmbeddingBudget.reserve(question));
         org.mockito.Mockito.verify(knowledge).search(question, 30, 9L);
-        verifyNoInteractions(invocation);
+        String shortQuestion = "所选文档如何排查磁盘";
+        when(knowledge.search(shortQuestion, 30, 9L))
+                .thenReturn(new KnowledgeClient.Envelope<>(0, "ok", List.of(), "test"));
+        var scoped = service.prepareStream(shortQuestion, 5, 9L, (String) null);
+        assertThat(scoped.immediate().metadata().budgetChargedTokens())
+                .isEqualTo(QueryEmbeddingBudget.reserve(shortQuestion));
+        assertThat(scoped.immediate().metadata().budgetUsageKnown()).isFalse();
+        org.mockito.Mockito.verify(knowledge).search(shortQuestion, 30, 9L);
+        org.mockito.Mockito.verify(invocation)
+                .recordRetrievalBudget(shortQuestion, QueryEmbeddingBudget.reserve(shortQuestion));
         metrics.close();
+    }
+
+    private boolean publicRequest(LlmRequest actual, LlmRequest original) {
+        return actual != null
+                && actual.systemPrompt().startsWith(original.systemPrompt())
+                && actual.systemPrompt().contains("通用建议")
+                && actual.userPrompt().equals(original.userPrompt())
+                && actual.maxOutputTokens() == original.maxOutputTokens()
+                && actual.priorReservedTokens() == original.priorReservedTokens();
     }
 
     private void configureModel(AiProperties ai) {

@@ -79,7 +79,9 @@ class InternalActorAccessTest {
         assertThat(SecurityContextHolder.getContext()).isSameAs(before);
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
 
-        auth.enqueue(NativeToolModelClientTest.json("{\"code\":0,\"data\":{\"active\":false}}"));
+        auth.enqueue(
+                NativeToolModelClientTest.json(
+                        "{\"code\":0,\"data\":{\"active\":false,\"userId\":7}}"));
         assertThatThrownBy(() -> access.verify(header, "rag"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("ACTOR_INACTIVE");
@@ -114,7 +116,7 @@ class InternalActorAccessTest {
                         """));
         assertThatThrownBy(() -> access.verify(header, "rag"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("ACTOR_PERMISSION_REVOKED_OR_EXPIRED");
+                .hasMessage("ACTOR_LEASE_EXPIRED");
         auth.enqueue(
                 NativeToolModelClientTest.json(
                         """
@@ -123,7 +125,7 @@ class InternalActorAccessTest {
                         """));
         assertThatThrownBy(() -> access.verify(header, "rag"))
                 .isInstanceOf(BusinessException.class)
-                .hasMessage("ACTOR_INACTIVE");
+                .hasMessage("ACTOR_ID_MISMATCH");
         assertThatThrownBy(() -> access.verify(header, "ticket"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("INTERNAL_AUTH_INVALID");

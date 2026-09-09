@@ -1,16 +1,30 @@
 import { ref, watch, onBeforeUnmount } from 'vue';
 import { useAuthStore } from '@/stores/auth';
-import { trafficGovernanceApi, type TrafficWorkspace, type TrafficChange, type TrafficRule, type TrafficRuleSet } from '@/api/trafficGovernance';
+import { trafficGovernanceApi, type TrafficWorkspace, type TrafficOverview, type TrafficChange, type TrafficRule, type TrafficRuleSet } from '@/api/trafficGovernance';
 
 export function useTrafficGovernance(ciCode: () => string) {
   const auth = useAuthStore();
   const workspace = ref<TrafficWorkspace>(); const history = ref<TrafficChange[]>([]);
+  const overview = ref<TrafficOverview>(); const overviewLoading = ref(false); const overviewError = ref('');
   const loading = ref(false); const busy = ref(false); const error = ref(''); const notice = ref('');
   const selectedType = ref('FLOW');
   const plan = ref<{ type: string; before: TrafficRule[]; after: TrafficRule[]; revision: string; requestId: string; rollbackVersionId?: number }>();
   let generation = 0; let historyGeneration = 0; let actionGeneration = 0;
+  let overviewGeneration = 0;
   const identity = () => auth.identity;
   async function load() {
+    await Promise.allSettled([loadWorkspace(), loadOverview()]);
+  }
+  async function loadOverview() {
+    const turn = ++overviewGeneration, token = identity(); overviewLoading.value = true; overviewError.value = '';
+    try {
+      const data = await trafficGovernanceApi.overview();
+      if (turn === overviewGeneration && token === identity()) overview.value = data;
+    } catch (cause) {
+      if (turn === overviewGeneration && token === identity()) { overview.value = undefined; overviewError.value = cause instanceof Error ? cause.message : '平台流量采集暂不可用'; }
+    } finally { if (turn === overviewGeneration) overviewLoading.value = false; }
+  }
+  async function loadWorkspace() {
     const turn = ++generation, token = identity(); loading.value = true; error.value = '';
     try {
       const data = await trafficGovernanceApi.workspace(ciCode() || undefined);
@@ -55,9 +69,9 @@ export function useTrafficGovernance(ciCode: () => string) {
       // Keep the exact request ID for retries: never manufacture a second publication after a network error.
     } finally { if (turn === actionGeneration) busy.value = false; }
   }
-  function reset() { generation++; historyGeneration++; actionGeneration++; workspace.value = undefined; history.value = []; plan.value = undefined; busy.value = false; loading.value = false; error.value = ''; notice.value = ''; }
+  function reset() { generation++; overviewGeneration++; historyGeneration++; actionGeneration++; workspace.value = undefined; overview.value = undefined; overviewLoading.value = false; overviewError.value = ''; history.value = []; plan.value = undefined; busy.value = false; loading.value = false; error.value = ''; notice.value = ''; }
   watch([ciCode, identity, () => auth.isAdmin], () => { reset(); void load(); }, { flush: 'sync' });
   watch(selectedType, () => { actionGeneration++; busy.value = false; plan.value = undefined; void loadHistory(); }, { flush: 'sync' });
   onBeforeUnmount(reset);
-  return { workspace, history, loading, busy, error, notice, selectedType, plan, load, loadHistory, prepare, confirm };
+  return { workspace, overview, overviewLoading, overviewError, history, loading, busy, error, notice, selectedType, plan, load, loadHistory, prepare, confirm };
 }

@@ -3,6 +3,7 @@ package com.opsagent.ticket;
 import static com.opsagent.ticket.TicketQueueDtos.*;
 
 import com.opsagent.common.core.PageResult;
+import com.opsagent.common.security.SecurityUsers;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -107,9 +108,17 @@ class TicketQueueService {
     private List<Entry> visible(Query query) {
         // TicketService.list 已应用 ADMIN/OPS/USER/DEMO 的既有可见性，统计不能绕过它。
         return tickets.list().stream()
+                .filter(ticket -> !"mine".equals(query.scope()) || ownedByCurrentActor(ticket))
                 .filter(ticket -> matches(ticket, query))
                 .map(ticket -> new Entry(ticket, lifecycle.read(ticket.id()).stage()))
                 .toList();
+    }
+
+    private static boolean ownedByCurrentActor(TicketDtos.View ticket) {
+        var actor = SecurityUsers.current();
+        return actor.roles().contains("DEMO")
+                ? Objects.equals(ticket.ownerActorId(), actor.userId())
+                : Objects.equals(ticket.assigneeId(), actor.userId());
     }
 
     static boolean matches(TicketDtos.View ticket, Query query) {

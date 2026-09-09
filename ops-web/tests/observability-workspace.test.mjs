@@ -8,6 +8,7 @@ function evaluate(source, imports = {}) { const module = { exports: {} }; const 
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 async function flush() { await vue.nextTick(); await Promise.resolve(); await Promise.resolve(); }
 const util = evaluate(read('utils/observability.ts'));
+const graphLifecycle = evaluate(read('utils/observability-graph-lifecycle.ts'));
 const layoutUtil = evaluate(read('utils/observability-layout.ts'), { './observability-routing': evaluate(read('utils/observability-routing.ts')) });
 const now = Date.now();
 const node = (code, extra = {}) => ({ ciCode: code, ciName: code, ciType: 'SERVICE', environment: 'PROD', health: 'HEALTHY', observedAt: new Date(now).toISOString(), metrics: { rps: 0, errorRate: 2.5, p95Ms: null, healthyInstances: 1, totalInstances: 1 }, ...extra });
@@ -136,9 +137,10 @@ console.log('PASS visitor topology keeps in-memory layout tools while hiding and
 {
   const mounted = [], unmounted = []; const scope = vue.effectScope(); const pushes = [], aiCalls = [], emissions = [];
   const auth = vue.reactive({ token: 'a', identity: 'actor-a' }); const props = vue.reactive({ node: node('first'), environment: 'PROD', timeRange: '15m' });
-  let impl; const imports = { vue: { ...vue, onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback) }, '@lucide/vue': icons,
+  let impl, serviceCalls = 0, configCalls = 0, historyCalls = 0; const signals = [], slowHistory = deferred();
+  const imports = { vue: { ...vue, onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback) }, '@lucide/vue': icons,
     'vue-router': { useRoute: () => ({ path: '/observability/topology' }), useRouter: () => ({ push: value => pushes.push(value) }) },
-    '@/api/observability': { observabilityApi: { service: (...args) => impl(...args), configSummary: async () => { throw Error('Nacos down'); }, trafficSummary: async () => ({ status: 'NOT_INTEGRATED', passQps: null }), metricHistory: async () => ({ series: {} }) } }, '@/stores/auth': { useAuthStore: () => auth }, '@/stores/ai-assistant': { useAiAssistantStore: () => ({ show: context => aiCalls.push(context) }) },
+    '@/api/observability': { observabilityApi: { service: (...args) => { serviceCalls++; signals.push(args[2].signal); return impl(...args); }, configSummary: async () => { configCalls++; throw Error('Nacos down'); }, trafficSummary: async () => ({ status: 'NOT_INTEGRATED', passQps: null }), metricHistory: () => { historyCalls++; return slowHistory.promise; } } }, '@/stores/auth': { useAuthStore: () => auth }, '@/stores/ai-assistant': { useAiAssistantStore: () => ({ show: context => aiCalls.push(context) }) },
     '@/components/cmdb/topology': { ciType: () => ({ label: '服务', icon: Stub }), environmentNames: { PROD: '生产' } }, '@/utils/observability': util, '@/utils/service-endpoint': { displayEndpoint: value => value },
     './ServiceHealthBadge.vue': Stub, './ServiceDetailShell.vue': Stub, './ObservationEvidence.vue': Stub, './MetricSparkline.vue': Stub,
     '@/utils/observability-icons': { serviceIcon: () => Stub },
@@ -150,11 +152,28 @@ console.log('PASS visitor topology keeps in-memory layout tools while hiding and
   const second = deferred(); impl = () => second.promise; props.node = node('second'); await flush();
   second.resolve({ node: node('second'), alerts: [], recentChanges: [], recentRuns: [], relations: [], alertsAvailable: false }); await flush();
   first.resolve({ node: node('first'), alerts: [], recentChanges: [], recentRuns: [], relations: [] }); await request;
-  assert.equal(state.detail.value.node.ciCode, 'second'); assert.equal(state.configSummary.value.status, 'UNAVAILABLE'); assert.equal(state.trafficSummary.value.passQps, null); assert.equal(state.cards.value[1].value, '2.5%');
+  assert.equal(state.detail.value.node.ciCode, 'second'); assert.equal(state.loading.value, false, 'Slow history cannot hold the service detail spinner');
+  assert.equal(state.historyLoading.value, true); assert.equal(configCalls, 0, 'Configuration waits until its tab opens');
+  assert.equal(signals[0].aborted, true, 'Changing service cancels the old network request');
+  assert.equal(state.cards.value[1].value, '2.5%');
+  state.tab.value = 'config'; await flush(); assert.match(state.configError.value, /Nacos down/); assert.equal(configCalls, 1);
+  const callsBeforeSameNode = serviceCalls, detailBeforeSameNode = state.detail.value;
+  props.node = node('second', { statusReason: 'new topology sample' }); await flush();
+  assert.equal(state.detail.value, detailBeforeSameNode); assert.equal(state.tab.value, 'config'); assert.equal(serviceCalls, callsBeforeSameNode, 'Replacing an identical service node must not reset the drawer');
+  state.tab.value = 'traffic'; await flush(); assert.equal(state.trafficSummary.value.passQps, null);
+  state.tab.value = 'overview'; await flush();
+  impl = async () => ({ node: node('second'), alerts: [], recentChanges: [], recentRuns: [], relations: [] });
+  state.refreshVisible(); await flush(); state.refreshVisible(); await flush();
+  assert.equal(state.detail.value.node.ciCode, 'second'); assert.equal(state.tab.value, 'overview'); assert.equal(state.historyLoading.value, true); assert.equal(historyCalls, 1, 'Auto refresh does not restart an already pending history request');
+  slowHistory.reject(Error('history timeout')); await flush();
+  assert.equal(state.historyLoading.value, false); assert.match(state.historyError.value, /超时/); assert.equal(state.detail.value.node.ciCode, 'second');
   state.go('/itsm/alerts'); assert.equal(pushes[0].query.ciCode, 'second'); assert.equal(pushes[0].query.environment, 'PROD');
   state.go('/observability/metrics'); assert.equal(pushes.at(-1).path, '/observability/metrics'); assert.equal(pushes.at(-1).query.ciCode, 'second');
   state.analyze(); assert.equal(aiCalls[0].service, 'second'); assert(emissions.some(item => item[0] === 'close'));
-  impl = async () => { throw Error('node detail unavailable'); }; await state.load(); assert.equal(state.detail.value, undefined); assert.match(state.error.value, /unavailable/);
+  impl = async () => { throw Error('node detail unavailable'); }; await state.load(); assert.equal(state.detail.value.node.ciCode, 'second', 'Background failure retains previously timestamped detail'); assert.match(state.error.value, /unavailable/);
+  const foreign = deferred(); impl = () => foreign.promise; const late = state.load(); auth.identity = ''; await flush();
+  foreign.resolve({ node: node('second'), alerts: [], recentChanges: [], recentRuns: [], relations: [] }); await late;
+  assert.equal(state.detail.value, undefined, 'Identity changes remove data even when an old read finishes late'); assert.equal(state.loading.value, false);
   unmounted.forEach(fn => fn()); scope.stop();
 }
 console.log('PASS actual service Drawer selection race, context-preserving alerts and shared AI, percentage display and failed reads');
@@ -197,7 +216,7 @@ console.log('PASS actual editor role gate for save/delete and existing tags adap
   const props = vue.reactive({ nodes: [node('rag'), node('queue', { ciType: 'QUEUE' })], edges: [{ id: 3, sourceCiCode: 'rag', targetCiCode: 'queue', relationType: 'PUBLISHES_TO', relationSource: 'CONFIGURED' }], selected: '', editing: false, showTraffic: false, wallboard: false });
   const scope = vue.effectScope();
   try {
-    const Component = compile('components/observability/ServiceTopology.vue', { vue: { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounted.push(fn), render: (node, box) => { if (node) box.innerHTML = '<svg aria-hidden="true"></svg>'; } }, '@antv/g6': { Graph }, '@/styles/pages/observability.css': {}, '@/utils/observability-icons': { serviceIcon: () => Stub }, '@/utils/observability': util, '@/utils/observability-layout': layoutUtil });
+    const Component = compile('components/observability/ServiceTopology.vue', { vue: { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: fn => unmounted.push(fn), render: (node, box) => { if (node) box.innerHTML = '<svg aria-hidden="true"></svg>'; } }, '@/utils/load-topology-graph': { loadTopologyGraphRuntime: async () => ({ Graph }) }, '@/styles/pages/observability.css': {}, '@/utils/observability-icons': { serviceIcon: () => Stub }, '@/utils/observability': util, '@/utils/observability-layout': layoutUtil, '@/utils/observability-graph-lifecycle': graphLifecycle });
     const state = scope.run(() => Component.setup(props, { expose() {}, emit: (...args) => emitted.push(args) }));
     state.host.value = { clientWidth: 1200, clientHeight: 600, getBoundingClientRect: () => ({ top: 274 }), closest: () => null, addEventListener() {}, removeEventListener() {}, setPointerCapture() {}, hasPointerCapture: () => true, releasePointerCapture() {} };
     for (const callback of mounted) await callback();
@@ -205,6 +224,10 @@ console.log('PASS actual editor role gate for save/delete and existing tags adap
     assert.equal(emitted.some(item => item[0] === 'error'), false, 'initial G6 transform must not access the unfinished viewport');
     assert.equal(instance.options.edge.style.endArrow, true); assert.equal(instance.options.layout, undefined); assert(instance.data.nodes.every(item => Number.isFinite(item.style.x)));
     assert.equal(instance.data.edges[0].source, 'rag'); assert.equal(instance.data.edges[0].target, 'queue');
+    props.editing = true; await flush();
+    props.layout = { rag: { x: 221, y: 153 }, queue: { x: 501, y: 153 } }; await flush();
+    assert.equal(state.positions().find(item => item.ciCode === 'rag').x, 221, 'A late saved layout applies before the user interacts');
+    props.editing = false; await flush();
     instance.events.get('node:click')({ target: { id: 'queue' } }); assert.deepEqual(emitted[0], ['select', 'queue']);
     const card = { dataset: { ciCode: 'rag' }, closest: () => null };
     const pointer = (clientX, clientY, type = 'pointermove') => ({ type, button: 0, pointerId: 1, clientX, clientY, target: { closest: selector => selector === '[data-ci-code]' ? card : null }, preventDefault() {}, stopPropagation() {} });
@@ -240,3 +263,49 @@ assert(!read('views/observability/WallboardView.vue').includes('ServiceEditor'))
 assert.match(read('views/observability/WallboardView.vue'), /document.hidden/);
 assert.match(read('views/observability/InspectionView.vue'), /currentHealth/);
 console.log('PASS workspace templates, read-only wallboard and inspection current/history separation');
+
+{
+  pinia.setActivePinia(pinia.createPinia());
+  const auth = vue.reactive({ identity: 'layout-owner-a' }); const delayedLayout = deferred();
+  let layoutReads = 0, topologyReads = 0, delayedTopology; const requests = [];
+  const api = {
+    topology: async (params, options) => { topologyReads++; requests.push({ params, options }); return delayedTopology ? delayedTopology.promise : snapshot(); },
+    layout: async environment => { layoutReads++; return layoutReads === 1 ? delayedLayout.promise : { environment, positions: {}, source: 'AUTO' }; },
+  };
+  const module = evaluate(read('stores/observability.ts'), { vue, pinia, '@/api/observability': { observabilityApi: api }, '@/stores/auth': { useAuthStore: () => auth }, '@/utils/observability': util });
+  const store = module.useObservabilityStore(); store.selectedEnvironment = 'PROD';
+  try {
+    await store.load(); assert.equal(store.loading, false); assert.equal(store.topologyData.nodes.length, 1); assert.equal(store.layoutData, undefined, 'A pending personal layout cannot withhold available observations');
+    delayedLayout.resolve({ environment: 'PROD', positions: { rag: { x: 241, y: 173 } }, source: 'PERSONAL' }); await flush();
+    assert.equal(store.layoutData.source, 'PERSONAL'); assert.deepEqual(store.topologyData.layout.rag, { x: 241, y: 173 });
+    await store.load(); store.invalidate(); await store.load(); assert.equal(layoutReads, 1, 'Polling and reopening reuse an identity/environment layout');
+    await store.refreshLayout(); assert.equal(layoutReads, 2, 'Explicit refresh after layout changes bypasses the cache');
+    delayedTopology = deferred(); const pending = store.load(); const duplicate = store.load(); const readCount = topologyReads;
+    const oldRequest = requests.at(-1); store.selectedEnvironment = 'DEMO'; assert(oldRequest.options.signal.aborted);
+    const newer = store.load(); assert.equal(topologyReads, readCount + 1, 'Only the changed scope creates another read');
+    delayedTopology.resolve(snapshot([node('scoped')])); await Promise.all([pending, duplicate, newer]); delayedTopology = undefined;
+    assert.equal(store.topologyData.nodes[0].ciCode, 'scoped'); assert.equal(layoutReads, 3);
+    auth.identity = 'layout-owner-b'; await store.load(); assert.equal(layoutReads, 4, 'Another identity cannot reuse a personal layout');
+    delayedTopology = deferred(); const leaving = store.load(); const finalRequest = requests.at(-1); store.invalidate(); assert(finalRequest.options.signal.aborted);
+    delayedTopology.resolve(snapshot()); await leaving; assert.equal(store.topologyData, undefined);
+  } finally { store.invalidate(); store.$dispose(); }
+}
+console.log('PASS topology data before slow layouts, identity/environment layout cache, explicit cache refresh, request deduplication and abort');
+
+// Exercise the real installed G6 Minimap debounce: an after-render event immediately
+// followed by unmount used to invoke getData() on its already destroyed context.
+{
+  const { Minimap } = require('@antv/g6'); const handlers = new Map(); let reads = 0;
+  const emitter = { on: (name, callback) => handlers.set(name, callback), off: name => handlers.delete(name) };
+  const minimap = new Minimap({ graph: emitter, model: { getData: () => { reads++; return { nodes: [], edges: [], combos: [] }; } } }, { delay: 30 });
+  const graph = { rendered: true, destroyed: false, getPluginInstance: name => { assert.equal(name, 'minimap'); return minimap; },
+    destroy() { minimap.destroy(); this.destroyed = true; } };
+  handlers.get('afterrender')();
+  handlers.get('aftertransform')(); handlers.get('aftertransform')();
+  graphLifecycle.destroyTopologyGraph(graph, true);
+  await new Promise(resolve => setTimeout(resolve, 90));
+  assert.equal(reads, 0, 'A queued real minimap debounce must not read the disposed graph model');
+  assert.equal(handlers.size, 0); assert.equal(minimap.destroyed, true);
+  assert.doesNotThrow(() => graphLifecycle.destroyTopologyGraph(graph, true));
+}
+console.log('PASS real G6 minimap queued render/transform after immediate destroy remains harmless');

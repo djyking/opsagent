@@ -42,7 +42,7 @@ public class KnowledgeRepository {
                                     "INSERT INTO knowledge_base(name, description, status,"
                                             + " create_by, create_time, update_time, deleted)"
                                             + " VALUES(?,?,'enable',?,NOW(),NOW(),0)",
-                                    Statement.RETURN_GENERATED_KEYS);
+                                    new String[] {"id"});
                     p.setString(1, name);
                     p.setString(2, description);
                     p.setLong(3, user);
@@ -55,7 +55,15 @@ public class KnowledgeRepository {
     List<Map<String, Object>> bases() {
         return jdbc.queryForList(
                 "SELECT id,name,description,status,create_by,create_time,update_time FROM"
-                        + " knowledge_base WHERE deleted=0 ORDER BY id DESC");
+                    + " knowledge_base WHERE deleted=0 AND status<>'experience' ORDER BY id DESC");
+    }
+
+    boolean experienceBase(long base) {
+        return jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM knowledge_base WHERE id=? AND status='experience'",
+                        Integer.class,
+                        base)
+                > 0;
     }
 
     List<Map<String, Object>> publicBases() {
@@ -84,7 +92,7 @@ public class KnowledgeRepository {
                                         + " visibility, create_by, create_time, update_time,"
                                         + " deleted)"
                                         + " VALUES(?,?,?,?,?,?,?,'UPLOADED','DRAFT',?,1,?,?,NOW(),NOW(),0)",
-                                    Statement.RETURN_GENERATED_KEYS);
+                                    new String[] {"id"});
                     p.setLong(1, base);
                     if (ticketId == null) p.setNull(2, Types.BIGINT);
                     else p.setLong(2, ticketId);
@@ -112,10 +120,9 @@ public class KnowledgeRepository {
                     + " d.id,d.knowledge_base_id,d.ticket_id,d.original_name,d.file_type,d.file_size,"
                     + "d.status,d.review_status,d.index_status,d.visibility,d.version,"
                     + "d.content_hash,d.parse_error,d.review_comment,d.create_by,d.create_time,"
-                    + "d.update_time,COUNT(c.id)"
-                    + " chunk_count,MAX(c.embedding_model) embedding_model FROM knowledge_document"
-                    + " d LEFT JOIN knowledge_chunk c ON c.document_id=d.id WHERE"
-                    + " d.knowledge_base_id=? AND d.deleted=0"
+                    + "d.update_time,COUNT(c.id) chunk_count,MAX(c.embedding_model) embedding_model"
+                    + " FROM knowledge_document d LEFT JOIN knowledge_chunk c ON c.document_id=d.id"
+                    + " WHERE d.knowledge_base_id=? AND d.deleted=0"
                         + (publicPublishedOnly
                                 ? " AND d.visibility='PUBLIC' AND d.review_status='PUBLISHED'"
                                 : "")
@@ -150,7 +157,7 @@ public class KnowledgeRepository {
     boolean parsePending(long id) {
         return jdbc.queryForObject(
                         "SELECT COUNT(*) FROM document_parse_task WHERE document_id=? AND status IN"
-                            + " ('QUEUED','PROCESSING','RETRYING')",
+                                + " ('QUEUED','PROCESSING','RETRYING')",
                         Integer.class,
                         id)
                 > 0;
@@ -414,7 +421,7 @@ public class KnowledgeRepository {
             throw new IllegalArgumentException("必须指定文档或工单范围");
         StringBuilder sql =
                 new StringBuilder(
-                        """
+"""
 SELECT c.id chunkId,c.document_id documentId,c.chunk_index chunkIndex,c.content,
        d.original_name documentName,c.page_number page,d.version,d.update_time updateTime
 FROM knowledge_chunk c JOIN knowledge_document d ON d.id=c.document_id
@@ -466,7 +473,7 @@ WHERE d.deleted=0 AND d.status IN ('PARSED','INDEXED')
     List<Map<String, Object>> reviewDocuments(String status) {
         String reviewStatus = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
         return jdbc.queryForList(
-                """
+"""
 SELECT d.id,d.knowledge_base_id knowledgeBaseId,b.name knowledgeBaseName,
        d.original_name originalName,d.status parseStatus,d.index_status indexStatus,
        d.version,d.ticket_id ticketId,
@@ -477,7 +484,7 @@ SELECT d.id,d.knowledge_base_id knowledgeBaseId,b.name knowledgeBaseName,
        d.create_time createTime,d.update_time updateTime
 FROM knowledge_document d
 JOIN knowledge_base b ON b.id=d.knowledge_base_id
-WHERE d.deleted=0 AND (?='' OR d.review_status=?)
+WHERE d.deleted=0 AND d.review_status<>'EXPERIENCE' AND (?='' OR d.review_status=?)
 ORDER BY FIELD(d.review_status,'IN_REVIEW','DRAFT','REJECTED','PUBLISHED','ARCHIVED'),
          d.update_time DESC
 LIMIT 500
@@ -503,7 +510,7 @@ LIMIT 500
 
     int approveReview(long documentId, long reviewerId, String comment, int version) {
         return jdbc.update(
-                """
+"""
 UPDATE knowledge_document SET review_status='PUBLISHED',reviewer_id=?,
     review_time=NOW(),publish_time=NOW(),review_comment=?,index_status='PENDING',update_time=NOW()
 WHERE id=? AND deleted=0 AND review_status='IN_REVIEW' AND version=? AND status IN ('PARSED','INDEXED')
@@ -678,8 +685,8 @@ WHERE id=? AND deleted=0 AND review_status='IN_REVIEW' AND version=? AND status 
         Integer count =
                 jdbc.queryForObject(
                         "SELECT COUNT(*) FROM knowledge_document WHERE id=? AND version=? AND"
-                            + " deleted=0 AND review_status='PUBLISHED' AND status IN"
-                            + " ('PARSED','INDEXED')",
+                                + " deleted=0 AND review_status='PUBLISHED' AND status IN"
+                                + " ('PARSED','INDEXED')",
                         Integer.class,
                         documentId,
                         version);

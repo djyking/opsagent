@@ -109,6 +109,7 @@ class PrometheusAdapterTimestampTest {
 
     @AfterEach
     void stopFixture() throws Exception {
+        if (adapter != null) adapter.close();
         if (server != null) server.close();
         if (exchanges != null) exchanges.get(2, TimeUnit.SECONDS);
     }
@@ -239,7 +240,7 @@ class PrometheusAdapterTimestampTest {
                                 : vector(evaluatedAt, "0");
 
         var snapshot = adapter.collect("5m");
-        assertThat(queries.get(0)).isEqualTo("up[45s]");
+        assertThat(queries).contains("up[45s]");
         assertThat(snapshot.healthy()).isTrue();
         assertThat(snapshot.series().get("up")).isEmpty();
         var state =

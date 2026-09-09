@@ -119,6 +119,10 @@ export function safeReturnPath(path: unknown): string {
 }
 
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+export async function withExperienceLock<T>(action: () => Promise<T>): Promise<T> {
+  if (navigator.locks) return navigator.locks.request("opsagent-visitor-experience", action);
+  return refreshLock(action);
+}
 async function refreshLock<T>(action: () => Promise<T>): Promise<T> {
   if (navigator.locks) return navigator.locks.request("opsagent-session-refresh", action);
   // Older browsers coordinate by a short lease; the backend still atomically rejects reuse.
@@ -148,14 +152,14 @@ function temporaryFailure(message: string, status?: number) {
 export async function ensureAccessToken(rejectedToken?: string): Promise<string> {
   const session = readSession();
   if (!session) throw new SessionError("请先登录。", true, 401);
-  if (Date.now() >= sessionDeadline(session)) throw expireSession(
-    Date.now() >= Date.parse(session.sessionExpiresAt) ? "本次登录已到期，请重新登录。" : "超过 2 小时未操作，请重新登录。",
-  );
+  if (Date.now() >= sessionDeadline(session)) throw expireSession(!session.refreshToken
+    ? "访客访问凭证已到期，请通过验证码继续；24 小时体验期内保留原身份与记录。"
+    : Date.now() >= Date.parse(session.sessionExpiresAt) ? "本次登录已到期，请重新登录。" : "超过 2 小时未操作，请重新登录。");
   const force = rejectedToken === session.accessToken;
   if (!force && Date.parse(session.expiresAt) - Date.now() > renewAheadMs) return session.accessToken;
   if (!session.refreshToken) {
     if (!force && Date.now() < Date.parse(session.expiresAt)) return session.accessToken;
-    throw expireSession("访客会话已到期，请重新登录。");
+    throw expireSession("访客访问凭证已到期或被拒绝，请通过验证码重新进入，续接有效体验。");
   }
   if (flight) return flight;
   flight = refreshLock(async () => {

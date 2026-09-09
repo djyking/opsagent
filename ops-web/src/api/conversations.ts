@@ -1,5 +1,5 @@
 import { request } from "./http";
-import { normalizeReferences, type RagStreamResult } from "./rag-stream";
+import { normalizeReferences, ragIncompleteMessage, type RagStreamResult } from "./rag-stream";
 
 export type AiProvider = "deepseek" | "openai" | "kimi";
 export interface ProviderOption { provider: AiProvider; model: string; available: boolean; status: string }
@@ -24,7 +24,10 @@ export const conversationApi = {
   async messages(id: string, beforeId?: number) {
     const page = await request<{records: ConversationTurn[]; hasMore: boolean}>({ url: `/api/rag/conversations/${id}/messages`, params: { beforeId } });
     for (const turn of page.records) {
-      if (turn.result) turn.result.references = normalizeReferences(turn.result.references as unknown as Record<string, unknown>[]);
+      if (turn.result) {
+        turn.result.references = normalizeReferences(turn.result.references as unknown as Record<string, unknown>[]);
+        if (turn.result.metadata?.generationComplete === false) turn.errorMessage = ragIncompleteMessage(turn.result);
+      }
     }
     return page;
   },

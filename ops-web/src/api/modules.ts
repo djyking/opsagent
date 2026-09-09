@@ -1,4 +1,5 @@
 import { request } from "./http";
+import { withExperienceLock } from "./session";
 import type {
   AiAnswer,
   AiQuestion,
@@ -26,7 +27,8 @@ export const authApi = {
     url: "/api/auth/captcha", timeout: 8000,
   }),
   login: (data: { username: string; password: string; captchaId: string; captchaCode: string }) =>
-    request<LoginResponse>({ method: "POST", url: "/api/auth/login", data }),
+    withExperienceLock(() => request<LoginResponse>({ method: "POST", url: "/api/auth/login", data, timeout: 20000, withCredentials: true })),
+  endExperience: (expectedIdentity: string) => withExperienceLock(() => request<void>({ method: "POST", url: "/api/auth/end-experience", withCredentials: true, expectedIdentity })),
   register: (data: {
     username: string;
     password: string;

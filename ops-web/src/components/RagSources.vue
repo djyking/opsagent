@@ -72,6 +72,7 @@ function officialUrl(item: AiReference) {
             <span v-if="item.neighbor">邻近上下文</span>
             <span v-if="item.relevanceScore">相关度 {{ (item.relevanceScore * 100).toFixed(0) }}%</span>
           </small>
+          <RouterLink v-if="item.documentId && (!item.sourceType || item.sourceType === 'KNOWLEDGE_DOCUMENT')" class="source-catalog-link" :to="{ path: '/knowledge', query: { documentId: item.documentId } }">查看文档 <ArrowUpRight :size="13" /></RouterLink>
           <small v-if="item.sourceType !== 'CMDB' && item.sourceType !== 'OPERATIONS' && auth.isAdmin && (item.rrfScore != null || item.rerankScore != null)" class="source-debug">
             RRF {{ item.rrfScore?.toFixed(5) || "-" }} · Rerank {{ item.rerankScore?.toFixed(5) || "未启用" }}
           </small>

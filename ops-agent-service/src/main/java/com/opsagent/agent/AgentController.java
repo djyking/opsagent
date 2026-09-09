@@ -143,6 +143,24 @@ class AgentController {
         return ApiResponse.success(service.usage(id));
     }
 
+    @GetMapping("/runs/{id}/takeover-preview")
+    ApiResponse<JsonNode> takeoverPreview(@PathVariable String id) {
+        return ApiResponse.success(service.takeoverPreview(id));
+    }
+
+    @PostMapping("/runs/{id}/takeover")
+    ApiResponse<?> takeover(@PathVariable String id, @Valid @RequestBody Takeover request) {
+        String created =
+                service.takeover(
+                        id,
+                        request.requestId(),
+                        request.reason(),
+                        request.incidentId(),
+                        request.expectedRevision());
+        return ApiResponse.success(
+                Map.of("id", created, "sourceRunId", id, "mode", "NEW_ADMIN_RUN"));
+    }
+
     @PostMapping("/runs/{id}/cancel")
     ApiResponse<Void> cancel(@PathVariable String id) {
         service.own(id);
@@ -201,6 +219,16 @@ class AgentController {
             @NotBlank String definitionId,
             @NotBlank String provider,
             @NotBlank String requestId) {}
+
+    /**
+     * @author heyu
+     */
+    record Takeover(
+            @NotBlank @Size(max = 80) String requestId,
+            @NotBlank @Size(max = 500) String reason,
+            @NotBlank @Size(max = 36) String incidentId,
+            @NotBlank @jakarta.validation.constraints.Pattern(regexp = "[a-f0-9]{64}")
+                    String expectedRevision) {}
 
     /**
      * @author heyu

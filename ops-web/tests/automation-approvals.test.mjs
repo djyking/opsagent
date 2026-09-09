@@ -32,7 +32,7 @@ function approval(id = 'approval-1', overrides = {}) {
   assert.equal(presentation.approvalActionable(item, 7, false, Date.now()), true);
   assert.equal(presentation.approvalActionable(item, 8, false, Date.now()), false);
   assert.equal(presentation.approvalActionable(item, 8, true, Date.now()), true);
-  for (const change of [{ pauseRequested: true }, { runStatus: 'COMPLETED' }, { status: 'APPROVED' },
+  for (const change of [{ canOperate: false }, { pauseRequested: true }, { runStatus: 'COMPLETED' }, { status: 'APPROVED' },
     { expires_at: new Date(0).toISOString() }, { runDeadline: new Date(0).toISOString() }, { runDeadline: 'invalid' }]) {
     assert.equal(presentation.approvalActionable({ ...item, ...change }, 7, true, Date.now()), false);
   }
@@ -169,6 +169,8 @@ function componentFixture(path, props = {}, extra = {}) {
     '@/components/PageHeader.vue': Stub, '@/components/InlineError.vue': Stub, '@/components/EmptyState.vue': Stub,
     '@/components/automation/ApprovalCard.vue': Stub, '@/components/automation/InspectionRuns.vue': Stub,
     '@/components/automation/AutomationUsage.vue': Stub, '@/components/events/EventManualRecovery.vue': Stub,
+    '@/components/automation/PublicCases.vue': Stub, '@/components/automation/DrillStartConfirm.vue': Stub,
+    '@/components/BaseModal.vue': Stub,
     '@/api/modules': { ticketApi: { detail: async id => ({ id }) } },
     '@/styles/pages/automation.css': {}, '@/styles/components/automation-approval.css': {}, ...extra,
   };

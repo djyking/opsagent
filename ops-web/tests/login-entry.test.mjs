@@ -18,18 +18,18 @@ const javascript = ts.transpileModule(script.content, {
 function createPage(features) {
   const mounted = [], logins = [], routes = [];
   let challenges = 0;
-  const auth = { login: async (...args) => { logins.push(args); } };
+  const auth = { login: async (...args) => { logins.push(args); }, fetchMe: async () => {} };
   const context = { exports: {}, setTimeout: () => 1, clearTimeout: () => {}, Error,
     require: name => {
       if (name === 'vue') return { ...vue, onMounted: fn => mounted.push(fn), onBeforeUnmount: () => {} };
-      if (name === 'vue-router') return { useRoute: () => ({ query: { redirect: '/operations' } }), useRouter: () => ({ push: async path => routes.push(path) }) };
+      if (name === 'vue-router') return { isNavigationFailure: () => false, useRoute: () => ({ query: { redirect: '/operations' } }), useRouter: () => ({ push: async path => routes.push(path) }) };
       if (name === '@/api/modules') return { authApi: {
         features: async () => { if (features instanceof Error) throw features; return features; },
         captcha: async () => ({ captchaId: `challenge-${++challenges}`, imageDataUrl: 'data:image/png;base64,test', expiresInSeconds: 120 }),
       } };
       if (name === '@/stores/auth') return { useAuthStore: () => auth };
       if (name === '@/composables/useToast') return { useToast: () => ({ show() {} }) };
-      if (name === '@/api/session') return { safeReturnPath: value => value };
+      if (name === '@/api/session') return { safeReturnPath: value => value, SessionError: class extends Error {} };
       return {};
     },
   };
@@ -75,6 +75,30 @@ for (const features of [{ demoEnabled: false, registrationEnabled: false }, new 
   assert.equal(page.featuresLoading.value, false);
 }
 console.log('PASS disabled or unavailable demonstration capability leaves normal account login available');
+{
+  const { page, auth, mount, logins, routes } = createPage({ demoEnabled: true, registrationEnabled: false });
+  await mount();
+  page.captchaCode.value = 'ABCDE';
+  let release;
+  auth.fetchMe = () => new Promise((_, reject) => { release = reject; });
+  const pending = page.submit();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.busy.value, true);
+  assert.equal(page.phase.value, 'loading');
+  assert.match(page.loadingHint.value, /加载工作台/);
+  await page.submit();
+  assert.equal(logins.length, 1, 'repeated clicks cannot create an extra visitor');
+  release(new Error('page resources offline'));
+  await pending;
+  assert.equal(page.phase.value, 'load-failed');
+  assert.equal(page.succeeded.value, false);
+  assert.equal(page.captchaId.value, 'challenge-1', 'page failure does not restart authentication');
+  auth.fetchMe = async () => {};
+  await page.submit();
+  assert.equal(logins.length, 1, 'retry opens the workbench under the already authenticated identity');
+  assert.deepEqual(routes, ['/operations']);
+  console.log('PASS continuous loading and resource-error retry preserve authenticated visitor identity');
+}
 {
   const { page, mount, auth, logins } = createPage({ demoEnabled: true, registrationEnabled: false });
   await mount();

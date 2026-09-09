@@ -9,6 +9,9 @@ import EmptyState from '@/components/EmptyState.vue';
 import ApprovalCard from '@/components/automation/ApprovalCard.vue';
 import InspectionRuns from '@/components/automation/InspectionRuns.vue';
 import AutomationUsage from '@/components/automation/AutomationUsage.vue';
+import PublicCases from '@/components/automation/PublicCases.vue';
+import DrillStartConfirm from '@/components/automation/DrillStartConfirm.vue';
+import BaseModal from '@/components/BaseModal.vue';
 import EventManualRecovery from '@/components/events/EventManualRecovery.vue';
 import { ticketApi } from '@/api/modules';
 import type { Ticket } from '@/types/api';
@@ -24,8 +27,9 @@ const auth = useAuthStore();
 const approvalInbox = useApprovalInboxStore();
 const route = useRoute();
 const router = useRouter();
-const tab = ref('runs');
-const tabs = [{ id: 'runs', label: '运行与审批', icon: Activity }, { id: 'experience', label: '故障演练', icon: FlaskConical },
+const publicCases = ref<InstanceType<typeof PublicCases>>();
+const tab = ref(auth.isDemo && !route.query.run && !route.query.ticketId && !route.query.incidentId ? 'cases' : 'runs');
+const tabs = [{ id: 'cases', label: '公共案例', icon: FileCheck2 }, { id: 'runs', label: '运行与审批', icon: Activity }, { id: 'experience', label: '我的演练', icon: FlaskConical },
   { id: 'workflows', label: '工作流与版本', icon: GitBranch }, { id: 'inspection', label: '巡检计划与执行', icon: Check },
   { id: 'tools', label: '模型与工具', icon: Wrench }];
 const targetCode = ref(route.query.target === 'ops-demo-notification-service' ? 'ops-demo-notification-service' : 'ops-demo-order-service');
@@ -59,18 +63,42 @@ const ticketFilter = ref(String(route.query.ticketId || ''));
 const appliedTicketFilter = ref(Number(route.query.ticketId) || undefined);
 const trackedIncidentId = ref(String(route.query.incidentId || ''));
 const trackedRuns = ref<RunRow[]>([]);
+const trackedError = ref('');
+const startScenario = ref('');
+const startError = ref('');
+const trackingOwner = ref<number | undefined>(auth.user?.userId);
+const takeoverOpen = ref(false);
+const takeoverReason = ref('');
+const takeoverPreview = ref<Awaited<ReturnType<typeof api.takeoverPreview>>>();
+const takeoverAttempt = ref<{ runId: string; input: Parameters<typeof api.takeover>[1] }>();
+const canSubmitTakeover = computed(() => {
+  if (!auth.isAdmin || !detail.value || busy.value || !takeoverReason.value.trim() || takeoverReason.value.trim().length > 500) return false;
+  if (takeoverAttempt.value) return takeoverAttempt.value.runId === detail.value.id;
+  const preview = takeoverPreview.value;
+  return detail.value.authorization?.canTakeover === true && preview?.canTakeover === true
+    && preview.sourceRunId === detail.value.id && preview.incidentId === detail.value.state.incidentId
+    && !!preview.incidentId && !!preview.expectedRevision && !!preview.targetCode;
+});
 const toolCatalog = ref<Awaited<ReturnType<typeof api.tools>>>();
 const now = ref(Date.now());
 let timer: ReturnType<typeof setInterval> | undefined;
 let disposed = false;
 let polling = false;
+let mountedReady = false;
+let initialScope = '';
+let nextPollAt = 0;
+let refreshPending: { key: string; promise: Promise<void> } | undefined;
+let catalogEpoch = 0;
+const catalogLoadedAt = { models: 0, definitions: 0, tools: 0 };
+const catalogPending = new Map<string, Promise<void>>();
 let selectedEpoch = 0;
 let refreshEpoch = 0;
 let trackedEpoch = 0;
+let terminalReadAt = 0;
 let createAttempt: { fingerprint: string; requestId: string } | undefined;
 const terminal = new Set(['COMPLETED', 'CANCELLED', 'EXPIRED', 'REJECTED', 'NEEDS_ATTENTION', 'BUDGET_EXCEEDED']);
 const needsHandoff = computed(() => ['NEEDS_ATTENTION', 'BUDGET_EXCEEDED', 'REJECTED', 'EXPIRED', 'CANCELLED'].includes(detail.value?.status || '') && !verifiedCompletion.value);
-const ownRun = computed(() => auth.isAdmin || detail.value?.ownerId === auth.user?.userId);
+const ownRun = computed(() => detail.value?.authorization?.canOperate ?? (auth.isAdmin || detail.value?.ownerId === auth.user?.userId));
 const modelFailure = computed(() => runModelFailure(detail.value));
 const rawRunMessage = computed(() => modelFailure.value?.reason || detail.value?.state.message || '');
 const runMessage = computed(() => runHasUnlimitedTokenBudget(detail.value) && detail.value?.status === 'BUDGET_EXCEEDED'
@@ -88,7 +116,7 @@ const canResume = computed(() => ownRun.value && detail.value
     || (detail.value.pauseRequested && ['WAITING_APPROVAL', 'WAITING_INPUT'].includes(detail.value.status))));
 const canOperate = computed(() => auth.isAdmin || auth.isOps || auth.isDemo);
 const activeIncident = computed(() => incidents.value.find(item => item.incidentId === target.value?.incidentId));
-const canStart = computed(() => canOperate.value && target.value?.configured && target.value.canStart
+const canStart = computed(() => canOperate.value && target.value?.configured === true && target.value.canStart
   && target.value.status === 'BASELINE' && target.value.business.httpStatus === 200);
 const canRestore = computed(() => canOperate.value && !!target.value?.incidentId && !!target.value.expectedRevision
   && (!trackedIncidentId.value || target.value.incidentId === trackedIncidentId.value)
@@ -97,7 +125,9 @@ const canRestore = computed(() => canOperate.value && !!target.value?.incidentId
     || activeIncident.value?.ownerId === auth.user?.userId)
   && ['FAULT_ACTIVE', 'INJECTING', 'INJECTION_UNCONFIRMED'].includes(activeIncident.value?.status || ''));
 const trackedIncident = computed(() => incidents.value.find(item => item.incidentId === trackedIncidentId.value));
+const identityChanged = computed(() => trackingOwner.value != null && trackingOwner.value !== auth.user?.userId);
 const latestTrackedRun = computed(() => trackedRuns.value[0]);
+const activePersonalRun = computed(() => runs.value.find(run => run.owner_id === auth.user?.userId && !terminal.has(run.status)));
 const selectedModel = computed(() => models.value.find(item => item.provider === provider.value));
 const canCreate = computed(() => canOperate.value && Number.isSafeInteger(ticketId.value) && ticketId.value > 0
   && selectedModel.value?.configured && selectedModel.value.toolCalling
@@ -178,10 +208,10 @@ function nodeName(id: string) { return graph.value?.nodes.find(node => node.id =
 function branchName(when?: string) { return when === 'true' ? '条件成立' : when === 'false' ? '条件不成立' : when || '继续'; }
 function nodeDone(id: string) { return Object.prototype.hasOwnProperty.call(detail.value?.state.outputs || {}, id); }
 function approvalAvailable(approval: PendingApproval) {
-  return approvalActionable(approval, auth.user?.userId, auth.isAdmin, now.value) && approvalInbox.isCurrent(approval);
+  return ownRun.value && approvalActionable(approval, auth.user?.userId, auth.isAdmin, now.value) && approvalInbox.isCurrent(approval);
 }
 function approvalUnavailableReason(approval: PendingApproval) {
-  if (!ownRun.value) return '只有此运行的所有者或管理员可以处理审批。';
+  if (!ownRun.value) return detail.value?.authorization?.hint || '当前身份不能执行此运行，请由管理员核对接管条件。';
   if (approval.pauseRequested) return '运行已请求暂停。请先继续运行，再处理此审批。';
   if (new Date(approval.expires_at).getTime() <= now.value || new Date(approval.runDeadline).getTime() <= now.value)
     return '此审批或运行已到期，不能继续提交。';
@@ -199,30 +229,44 @@ async function action(key: string, task: () => Promise<void>) {
   try { await task(); } catch (cause) { error.value = message(cause); }
   finally { busy.value = ''; }
 }
-async function refresh() {
+function refresh(scope = tab.value): Promise<void> {
+  if (!['cases', 'runs', 'experience'].includes(scope)) return Promise.resolve();
+  const key = JSON.stringify([auth.user?.userId, scope, targetCode.value, page.value, appliedTicketFilter.value]);
+  if (refreshPending?.key === key) return refreshPending.promise;
   const epoch = ++refreshEpoch;
-  const results = await Promise.allSettled([api.target(targetCode.value), api.scenarios(targetCode.value), api.runs(page.value, { ticketId: appliedTicketFilter.value })]);
-  if (disposed || epoch !== refreshEpoch) return;
-  now.value = Date.now();
-  target.value = results[0].status === 'fulfilled' ? results[0].value : undefined;
-  targetError.value = results[0].status === 'fulfilled' ? '' : experienceMessage(results[0].reason, '演练目标状态');
-  incidents.value = results[1].status === 'fulfilled' ? results[1].value.incidents : [];
-  scenariosError.value = results[1].status === 'fulfilled' ? '' : experienceMessage(results[1].reason, '演练场景');
-  if (results[2].status === 'fulfilled') { runs.value = results[2].value.items; total.value = results[2].value.total; }
-  if (!trackedIncidentId.value) trackedIncidentId.value = activeIncident.value?.incidentId || incidents.value[0]?.incidentId || '';
-  await refreshTrackedRuns();
-  if (disposed || epoch !== refreshEpoch) return;
-  if (results[2].status === 'rejected') throw results[2].reason;
+  const task: Promise<void> = (async () => {
+    if (scope !== 'experience') {
+      const list = await api.runs(scope === 'cases' ? 1 : page.value, scope === 'cases' ? {} : { ticketId: appliedTicketFilter.value });
+      if (disposed || epoch !== refreshEpoch) return;
+      runs.value = list.items; total.value = list.total; now.value = Date.now();
+      return;
+    }
+    const results = await Promise.allSettled([api.target(targetCode.value), api.scenarios(targetCode.value)]);
+    if (disposed || epoch !== refreshEpoch) return;
+    now.value = Date.now();
+    target.value = results[0].status === 'fulfilled' ? results[0].value : undefined;
+    targetError.value = results[0].status === 'fulfilled' ? '' : experienceMessage(results[0].reason, '演练目标状态');
+    incidents.value = results[1].status === 'fulfilled' ? results[1].value.incidents : [];
+    scenariosError.value = results[1].status === 'fulfilled' ? '' : experienceMessage(results[1].reason, '演练场景');
+    if (!trackedIncidentId.value) trackedIncidentId.value = (auth.isDemo
+      ? incidents.value.find(item => item.ownerId === auth.user?.userId)?.incidentId
+      : activeIncident.value?.incidentId || incidents.value[0]?.incidentId) || '';
+    await refreshTrackedRuns();
+  })().catch(cause => { if (!disposed && epoch === refreshEpoch) throw cause; })
+    .finally(() => { if (refreshPending?.promise === task) refreshPending = undefined; });
+  refreshPending = { key, promise: task };
+  return task;
 }
+
 async function refreshTrackedRuns() {
   const id = trackedIncidentId.value;
   const epoch = ++trackedEpoch;
-  if (!id) { trackedRuns.value = []; return; }
+  if (!id || identityChanged.value) { trackedRuns.value = []; return; }
   try {
     const result = await api.runs(1, { incidentId: id });
-    if (!disposed && epoch === trackedEpoch && trackedIncidentId.value === id) trackedRuns.value = result.items;
+    if (!disposed && epoch === trackedEpoch && trackedIncidentId.value === id) { trackedRuns.value = result.items; trackedError.value = ''; }
   } catch (cause) {
-    if (!disposed && epoch === trackedEpoch && trackedIncidentId.value === id) throw cause;
+    if (!disposed && epoch === trackedEpoch && trackedIncidentId.value === id) { trackedError.value = message(cause); throw cause; }
   }
 }
 async function selectRun(id: string) {
@@ -257,20 +301,37 @@ async function readRunEvents(id: string, after: number, epoch: number) {
   }
   return { items, complete: false };
 }
-async function poll() {
-  if (polling || disposed || document.hidden) return;
+function pollingDelay() {
+  if (tab.value === 'experience') return target.value?.status !== 'BASELINE'
+    || trackedRuns.value.some(run => !terminal.has(run.status)) ? 4000 : 30_000;
+  if (tab.value === 'runs') return detail.value && !terminal.has(detail.value.status)
+    || runs.value.some(run => !terminal.has(run.status)) || writeSummary.value.uncertain ? 4000 : 30_000;
+  return activePersonalRun.value ? 4000 : 30_000;
+}
+async function poll(force = false) {
+  if (polling || busy.value || disposed || document.hidden || !['cases', 'runs', 'experience'].includes(tab.value)) return;
+  if (!force && Date.now() < nextPollAt) return;
   polling = true;
+  const scope = tab.value, startedAt = Date.now();
   try {
-    const results = await Promise.allSettled([refresh(), refreshSelectedRun()]);
+    const results = await Promise.allSettled([refresh(scope), scope === 'runs' ? refreshSelectedRun() : Promise.resolve()]);
     const failed = results.find(item => item.status === 'rejected');
     if (failed?.status === 'rejected') throw failed.reason;
-  } catch (cause) { if (!disposed) error.value = cause instanceof Error ? cause.message : '实时刷新失败'; }
-  finally { polling = false; }
+    if (!disposed && tab.value === scope) nextPollAt = startedAt + pollingDelay();
+  } catch (cause) {
+    if (!disposed && tab.value === scope) { error.value = message(cause); nextPollAt = Date.now() + 15_000; }
+  } finally { polling = false; }
 }
+
 async function refreshSelectedRun(force = false) {
   const id = detail.value?.id;
   const epoch = selectedEpoch;
-  if (!id || !force && terminal.has(detail.value!.status) && !writeSummary.value.uncertain && eventsComplete.value) return;
+  if (!id) return;
+  if (!force && terminal.has(detail.value!.status) && !writeSummary.value.uncertain && eventsComplete.value) {
+    // A stopped visitor run can receive an administrator recovery summary later.
+    if (Date.now() - terminalReadAt < 15_000) return;
+    terminalReadAt = Date.now();
+  }
   const [run, more] = await Promise.all([api.run(id), readRunEvents(id, events.value.at(-1)?.id || 0, epoch)]);
   if (!disposed && detail.value?.id === id && epoch === selectedEpoch) {
     detail.value = run;
@@ -280,20 +341,52 @@ async function refreshSelectedRun(force = false) {
   }
 }
 async function refreshAll() {
-  const results = await Promise.allSettled([refresh(), refreshSelectedRun(true)]);
-  const failed = results.find(item => item.status === 'rejected');
-  if (failed?.status === 'rejected') throw failed.reason;
+  await Promise.all([refresh(), tab.value === 'runs' ? refreshSelectedRun(true) : Promise.resolve(), loadTabCatalog(tab.value, true)]);
 }
+
 async function start(code: string) {
   if (!canStart.value) return;
+  startError.value = '';
   await action(code, async () => {
-    const incident = await api.start(code);
+    let incident: Incident;
+    try { incident = await api.start(code); }
+    catch (cause) { startError.value = `${message(cause)}。请刷新当前现场确认是否已创建，避免重复发起。`; await refresh().catch(() => {}); throw cause; }
+    trackingOwner.value = incident.ownerId; startScenario.value = ''; tab.value = 'experience';
     trackedIncidentId.value = incident.incidentId; trackedRuns.value = [];
     incidents.value = [incident, ...incidents.value.filter(item => item.incidentId !== incident.incidentId)];
-    await router.replace({ query: { ...route.query, incidentId: incident.incidentId } });
+    await router.replace({ query: { ...route.query, tab: 'experience', target: targetCode.value, incidentId: incident.incidentId, scenario: undefined } });
     notice.value = '演练已创建，下方会持续显示本次演练的工单和 Agent 运行。监控需先确认持续故障。';
     await refresh();
   });
+}
+async function prepareStart(code: string, codeTarget = targetCode.value) {
+  if (busy.value) return;
+  if (codeTarget !== targetCode.value) await selectTarget(codeTarget);
+  tab.value = 'experience'; startError.value = ''; startScenario.value = code;
+  await router.replace({ query: { ...route.query, tab: 'experience', target: codeTarget, scenario: undefined, run: undefined } });
+  await refresh('experience');
+}
+async function takeover() {
+  if (!canSubmitTakeover.value) return;
+  const id = detail.value!.id;
+  if (!takeoverAttempt.value) takeoverAttempt.value = { runId: id, input: {
+    requestId: requestId(), reason: takeoverReason.value.trim(),
+    incidentId: takeoverPreview.value!.incidentId, expectedRevision: takeoverPreview.value!.expectedRevision,
+  } };
+  await action('takeover', async () => {
+    const run = await api.takeover(id, { ...takeoverAttempt.value!.input });
+    takeoverOpen.value = false; takeoverAttempt.value = undefined; takeoverReason.value = '';
+    await selectRun(run.id); notice.value = '已创建管理员接管的独立恢复运行。原运行和审批保留，新修复动作仍需重新审批。';
+  });
+}
+async function prepareTakeover() {
+  if (!auth.isAdmin || !detail.value || busy.value) return;
+  if (takeoverAttempt.value?.runId === detail.value.id) {
+    takeoverReason.value = takeoverAttempt.value.input.reason; takeoverOpen.value = true; return;
+  }
+  if (!detail.value.authorization?.canTakeover) return;
+  takeoverOpen.value = true; takeoverPreview.value = undefined; takeoverReason.value = ''; takeoverAttempt.value = undefined;
+  await action('takeover-preview', async () => { takeoverPreview.value = await api.takeoverPreview(detail.value!.id); });
 }
 async function restore() {
   if (!target.value || !canRestore.value) return;
@@ -319,7 +412,7 @@ async function filterRuns() {
   if (id !== undefined && (!Number.isSafeInteger(id) || id < 1)) throw new Error('请输入有效的正整数工单 ID。');
   appliedTicketFilter.value = id; page.value = 1;
   await router.replace({ query: { ...route.query, ticketId: id ? String(id) : undefined } });
-  await refresh();
+  await refresh('runs');
 }
 async function createRun() {
   if (!canCreate.value) return;
@@ -332,23 +425,71 @@ async function createRun() {
   createAttempt = undefined;
 }
 async function loadDefinition(id: string) {
-  const value = await api.definition(id); definition.value = value; graphText.value = pretty(value.graph); definitionId.value = id;
+  const epoch = catalogEpoch;
+  const value = await api.definition(id);
+  if (disposed || epoch !== catalogEpoch) return;
+  definition.value = value; graphText.value = pretty(value.graph); definitionId.value = id;
+}
+function readCatalog(kind: 'models' | 'definitions' | 'tools', force = false): Promise<void> {
+  if (!force && Date.now() - catalogLoadedAt[kind] < 60_000) return Promise.resolve();
+  const cached = catalogPending.get(kind); if (cached) return cached;
+  const epoch = catalogEpoch;
+  const task: Promise<void> = (async () => {
+    if (kind === 'models') {
+      const value = await api.models();
+      if (disposed || epoch !== catalogEpoch) return;
+      models.value = value.models; chooseModel();
+    } else if (kind === 'definitions') {
+      const value = await api.definitions();
+      if (disposed || epoch !== catalogEpoch) return;
+      definitions.value = value;
+    } else {
+      const value = await api.tools();
+      if (disposed || epoch !== catalogEpoch) return;
+      toolCatalog.value = value;
+    }
+    catalogLoadedAt[kind] = Date.now();
+  })().catch(cause => { if (!disposed && epoch === catalogEpoch) throw cause; })
+    .finally(() => { if (catalogPending.get(kind) === task) catalogPending.delete(kind); });
+  catalogPending.set(kind, task);
+  return task;
+}
+async function loadTabCatalog(scope: string, force = false) {
+  const jobs: Promise<void>[] = [];
+  if (['runs', 'tools'].includes(scope)) jobs.push(readCatalog('models', force), readCatalog('tools', force));
+  if (['runs', 'workflows'].includes(scope)) jobs.push(readCatalog('definitions', force));
+  await Promise.all(jobs);
+  if (scope !== 'workflows' || tab.value !== scope || disposed) return;
+  const requested = String(route.query.definition || definitionId.value);
+  const selected = definitions.value.find(item => item.id === requested)
+    || definitions.value.find(item => item.id === 'isolated-recovery') || definitions.value[0];
+  if (selected && (!definition.value || definition.value.id !== selected.id
+    || force && graphText.value === pretty(definition.value.graph))) await loadDefinition(selected.id);
+}
+async function refreshCurrentTab() {
+  const scope = tab.value;
+  try {
+    await Promise.all([refresh(scope), loadTabCatalog(scope)]);
+    if (!disposed && scope === tab.value) nextPollAt = Date.now() + pollingDelay();
+  } catch (cause) { if (!disposed && scope === tab.value) throw cause; }
 }
 async function initial() {
   await action('load', async () => {
     if (tabs.some(item => item.id === route.query.tab)) tab.value = String(route.query.tab);
     else if (route.query.ticketId) tab.value = 'runs';
-    const results = await Promise.allSettled([api.models(), api.definitions(), api.tools(), refresh(),
-      tab.value === 'runs' && route.query.run ? selectRun(String(route.query.run)) : Promise.resolve()]);
-    if (results[0].status === 'fulfilled') models.value = results[0].value.models;
-    if (results[1].status === 'fulfilled') definitions.value = results[1].value;
-    if (results[2].status === 'fulfilled') toolCatalog.value = results[2].value;
-    chooseModel();
-    const initialDefinition = definitions.value.find(item => item.id === 'isolated-recovery') || definitions.value[0];
-    if (initialDefinition) await loadDefinition(initialDefinition.id);
-    const failed = results.find(item => item.status === 'rejected');
-    if (failed?.status === 'rejected') throw failed.reason;
+    initialScope = tab.value;
+    await Promise.all([refreshCurrentTab(), tab.value === 'runs' && route.query.run
+      ? selectRun(String(route.query.run)) : Promise.resolve()]);
   });
+  const scenario = String(route.query.scenario || '');
+  if (['NACOS_REDIS_CONFIG_DRIFT', 'SENTINEL_RULE_REGRESSION', 'RABBITMQ_CONSUMER_PAUSED'].includes(scenario))
+    await prepareStart(scenario);
+}
+
+function modelStatus(model: Model) {
+  const configuration = { MISSING_API_KEY: '缺少 API 密钥', MISSING_MODEL: '未配置模型名称',
+    INVALID_ENDPOINT: '模型地址无效', DISABLED: '未启用', CONFIGURED: '' }[model.configurationStatus || 'CONFIGURED'];
+  return configuration || (model.configured ? label(model.verificationStatus) : '尚未配置');
 }
 function chooseModel() {
   if (models.value.some(item => item.provider === provider.value && item.toolCalling && item.configured)) return;
@@ -368,13 +509,21 @@ async function selectTarget(value: string) {
     targetError.value = ''; scenariosError.value = '';
     incidents.value = []; trackedIncidentId.value = ''; trackedRuns.value = [];
     await router.replace({ query: { ...route.query, target: value, incidentId: undefined } });
-    await refresh();
+    await refresh('experience');
   });
 }
+watch(tab, () => {
+  refreshEpoch++; trackedEpoch++; refreshPending = undefined; nextPollAt = 0;
+  if (mountedReady) void refreshCurrentTab().catch(cause => { if (!disposed) error.value = message(cause); });
+});
 watch(() => route.query.tab, value => {
   if (tabs.some(item => item.id === value) && tab.value !== value) {
     selectedEpoch++; tab.value = String(value);
   }
+});
+watch(() => route.query.definition, value => {
+  if (tab.value === 'workflows' && typeof value === 'string' && value !== definitionId.value && definitions.value.some(item => item.id === value))
+    void action('definition', () => loadDefinition(value));
 });
 const runPresentation = computed(() => automationRunPresentation(detail.value, !!recoveryProgress.value || verifiedCompletion.value));
 const awaitingDecision = computed(() => ['APPROVAL', 'INPUT'].includes(runPresentation.value.code));
@@ -394,7 +543,7 @@ watch(() => [route.query.target, route.query.incidentId], ([code, incident]) => 
   refreshEpoch++; trackedEpoch++;
   if (nextCode !== targetCode.value) { target.value = undefined; incidents.value = []; targetError.value = ''; scenariosError.value = ''; }
   targetCode.value = nextCode; trackedIncidentId.value = nextIncident; trackedRuns.value = [];
-  void refresh().catch(cause => { if (!disposed) error.value = message(cause); });
+  if (tab.value === 'experience') void refresh().catch(cause => { if (!disposed) error.value = message(cause); });
 });
 watch(() => route.query.run, value => {
   const explicitTab = tabs.some(item => item.id === route.query.tab);
@@ -413,19 +562,42 @@ watch(() => route.query.ticketId, value => {
     void action('filter', filterRuns);
   }
 });
-onMounted(() => { void initial(); timer = setInterval(() => void poll(), 4000); });
-onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer); });
+watch(() => auth.user?.userId, () => {
+  selectedEpoch++; refreshEpoch++; trackedEpoch++; catalogEpoch++;
+  refreshPending = undefined; catalogPending.clear(); nextPollAt = 0;
+  catalogLoadedAt.models = 0; catalogLoadedAt.definitions = 0; catalogLoadedAt.tools = 0;
+  models.value = []; definitions.value = []; toolCatalog.value = undefined; definition.value = undefined; graphText.value = '';
+  detail.value = undefined; runTicketContext.value = undefined; events.value = []; runs.value = []; trackedRuns.value = []; incidents.value = [];
+  target.value = undefined; startScenario.value = ''; takeoverOpen.value = false; takeoverAttempt.value = undefined;
+  if (auth.user) void refreshCurrentTab().catch(cause => { if (!disposed) error.value = message(cause); });
+});
+function visibleRefresh() {
+  if (!document.hidden) { now.value = Date.now(); nextPollAt = 0; void poll(true); }
+}
+onMounted(() => {
+  void initial().finally(() => { if (disposed) return; mountedReady = true; if (tab.value !== initialScope) void refreshCurrentTab().catch(cause => { if (!disposed) error.value = message(cause); }); });
+  timer = setInterval(() => void poll(), 4000);
+  document.addEventListener('visibilitychange', visibleRefresh);
+});
+onBeforeUnmount(() => {
+  disposed = true; selectedEpoch++; refreshEpoch++; trackedEpoch++; catalogEpoch++;
+  if (timer) clearInterval(timer); document.removeEventListener('visibilitychange', visibleRefresh);
+});
 </script>
 
 <template>
   <div class="automation-page">
     <PageHeader title="自动化中心" :icon="GitBranch">
-      <template #actions><button class="button secondary" :disabled="!!busy" @click="action('refresh', refreshAll)"><RefreshCw :size="16" />刷新</button></template>
+      <template #actions><button class="button secondary" :disabled="!!busy || publicCases?.loading" @click="tab === 'cases' ? publicCases?.refresh() : action('refresh', refreshAll)"><RefreshCw :size="16" />刷新</button></template>
       <template #tabs><nav class="automation-tabs" aria-label="自动化工作区"><button v-for="item in tabs" :key="item.id" :class="{ active: tab === item.id }" :aria-current="tab === item.id ? 'page' : undefined" @click="selectTab(item.id)"><component :is="item.icon" :size="16" />{{ item.label }}</button></nav></template>
     </PageHeader>
     <InlineError v-if="error" :message="error" />
     <p v-if="notice" class="automation-notice" role="status"><Check :size="18" />{{ notice }}</p>
     <InspectionRuns v-if="tab === 'inspection'" />
+    <section v-if="tab === 'cases' && activePersonalRun" class="panel automation-manual-next"><strong>你有一条正在进行的演练</strong><p>{{ label(activePersonalRun.status) }} · {{ date(activePersonalRun.created_at) }}</p><button class="button primary" :disabled="!!busy" @click="action(activePersonalRun.id, () => selectRun(activePersonalRun!.id))">继续我的演练<ArrowRight :size="16" /></button></section>
+    <PublicCases v-if="tab === 'cases'" ref="publicCases" @start="prepareStart" />
+    <DrillStartConfirm v-if="startScenario" :key="startScenario" :scenario="startScenario" :target="target" :busy="!!busy" :can-start="canStart" :error="startError" @close="startScenario = ''" @confirm="start(startScenario)" />
+    <BaseModal v-if="takeoverOpen" title="管理员接管恢复" @close="!busy && (takeoverOpen = false)"><form class="event-dialog-body" @submit.prevent="takeover"><p>保留原运行及审批历史，为当前故障创建独立关联恢复运行。新恢复动作需要重新核对版本并审批。</p><InlineError v-if="error" :message="error" /><p v-if="!takeoverPreview">正在核对当前目标与接管条件…</p><template v-else><p>目标：{{ takeoverPreview.targetCode }} · 当前版本：{{ takeoverPreview.expectedRevision }}</p><p>{{ takeoverPreview.hint }}</p></template><label>接管原因<textarea v-model.trim="takeoverReason" rows="4" maxlength="500" required :disabled="!!busy || !!takeoverAttempt" /></label><button class="button primary" :disabled="!canSubmitTakeover">{{ busy ? '正在处理…' : takeoverAttempt ? '使用同一请求重试' : '创建接管恢复运行' }}</button></form></BaseModal>
 
     <template v-if="tab === 'experience'">
       <section class="panel automation-target-picker"><div><h3>演练目标</h3><small>仅作用于已登记的隔离业务</small></div><select :value="targetCode" :disabled="!!busy" aria-label="演练业务目标" @change="selectTarget(($event.target as HTMLSelectElement).value)"><option value="ops-demo-order-service">订单服务 · Redis / Sentinel</option><option value="ops-demo-notification-service">通知服务 · RabbitMQ / 消费回执</option></select></section>
@@ -434,12 +606,14 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer); });
         <Activity :size="23" /><div><strong>{{ targetError ? '目标暂不可用' : !target ? '正在读取目标状态' : target.business.httpStatus === 200 ? '业务请求正常' : `业务返回 ${target.business.httpStatus || '未知'}` }}</strong><p>{{ targetError ? '配置完成后刷新，取得目标与健康基线才能发起演练。' : target ? target.business.reasonCode || '以实际业务探针为准' : '等待本次读取结果' }}</p></div><RouterLink v-if="targetError" class="button secondary" :to="{ path: '/observability/config', query: { ciCode: targetCode } }">查看目标配置</RouterLink><small v-else>{{ date(target?.observedAt || target?.business.observedAt) }}</small>
       </section>
       <div v-if="!notificationTarget" class="automation-scenarios">
-        <article class="panel automation-scenario"><span class="automation-icon"><Database :size="25" /></span><div><span class="automation-kicker">配置诊断</span><h3>Nacos Redis 配置漂移</h3><details><summary>故障机制与验证依据</summary><p>专用配置指向无监听端口，实际 Redis 查询失败，订单预览返回 503。Agent 读取配置证据并申请恢复基线。</p></details></div><div class="automation-tags"><span>Nacos 配置</span><span>Redis 依赖</span><span>HTTP 503</span></div><button class="button primary automation-scenario-action" :disabled="!!busy || !canStart" aria-describedby="automation-start-hint" @click="start('NACOS_REDIS_CONFIG_DRIFT')"><Play :size="16" />{{ busy === 'NACOS_REDIS_CONFIG_DRIFT' ? '正在发起…' : '发起真实演练' }}</button></article>
-        <article class="panel automation-scenario"><span class="automation-icon violet"><Zap :size="25" /></span><div><span class="automation-kicker">流量治理</span><h3>Sentinel 限流规则回退</h3><details><summary>故障机制与验证依据</summary><p>专用资源的 QPS 阈值降为零，真实请求被 Sentinel 拦截并返回 429。Agent 比较规则与指标后申请修复。</p></details></div><div class="automation-tags"><span>Sentinel 规则</span><span>真实请求</span><span>HTTP 429</span></div><button class="button primary automation-scenario-action" :disabled="!!busy || !canStart" aria-describedby="automation-start-hint" @click="start('SENTINEL_RULE_REGRESSION')"><Play :size="16" />{{ busy === 'SENTINEL_RULE_REGRESSION' ? '正在发起…' : '发起真实演练' }}</button></article>
+        <article class="panel automation-scenario"><span class="automation-icon"><Database :size="25" /></span><div><span class="automation-kicker">配置诊断</span><h3>Nacos Redis 配置漂移</h3><details><summary>故障机制与验证依据</summary><p>专用配置指向无监听端口，实际 Redis 查询失败，订单预览返回 503。Agent 读取配置证据并申请恢复基线。</p></details></div><div class="automation-tags"><span>Nacos 配置</span><span>Redis 依赖</span><span>HTTP 503</span></div><button class="button primary automation-scenario-action" :disabled="!!busy || !canStart" aria-describedby="automation-start-hint" @click="prepareStart('NACOS_REDIS_CONFIG_DRIFT')"><Play :size="16" />{{ busy === 'NACOS_REDIS_CONFIG_DRIFT' ? '正在发起…' : '发起真实演练' }}</button></article>
+        <article class="panel automation-scenario"><span class="automation-icon violet"><Zap :size="25" /></span><div><span class="automation-kicker">流量治理</span><h3>Sentinel 限流规则回退</h3><details><summary>故障机制与验证依据</summary><p>专用资源的 QPS 阈值降为零，真实请求被 Sentinel 拦截并返回 429。Agent 比较规则与指标后申请修复。</p></details></div><div class="automation-tags"><span>Sentinel 规则</span><span>真实请求</span><span>HTTP 429</span></div><button class="button primary automation-scenario-action" :disabled="!!busy || !canStart" aria-describedby="automation-start-hint" @click="prepareStart('SENTINEL_RULE_REGRESSION')"><Play :size="16" />{{ busy === 'SENTINEL_RULE_REGRESSION' ? '正在发起…' : '发起真实演练' }}</button></article>
       </div>
-      <div v-else class="automation-scenarios single"><article class="panel automation-scenario"><span class="automation-icon violet"><Layers :size="25" /></span><div><span class="automation-kicker">异步业务诊断</span><h3>RabbitMQ 消费暂停与消息积压</h3><details><summary>故障机制与验证依据</summary><p>暂停独立通知消费者，真实消息继续入队并等待消费回执。Agent 核对队列深度与消费者状态，申请恢复订阅并验证消息排空。</p></details></div><div class="automation-tags"><span>真实消息队列</span><span>消费回执</span><span>独立业务目标</span></div><button class="button primary automation-scenario-action" :disabled="!!busy || !canStart" aria-describedby="automation-start-hint" @click="start('RABBITMQ_CONSUMER_PAUSED')"><Play :size="16" />{{ busy === 'RABBITMQ_CONSUMER_PAUSED' ? '正在发起…' : '发起真实演练' }}</button></article></div>
+      <div v-else class="automation-scenarios single"><article class="panel automation-scenario"><span class="automation-icon violet"><Layers :size="25" /></span><div><span class="automation-kicker">异步业务诊断</span><h3>RabbitMQ 消费暂停与消息积压</h3><details><summary>故障机制与验证依据</summary><p>暂停独立通知消费者，真实消息继续入队并等待消费回执。Agent 核对队列深度与消费者状态，申请恢复订阅并验证消息排空。</p></details></div><div class="automation-tags"><span>真实消息队列</span><span>消费回执</span><span>独立业务目标</span></div><button class="button primary automation-scenario-action" :disabled="!!busy || !canStart" aria-describedby="automation-start-hint" @click="prepareStart('RABBITMQ_CONSUMER_PAUSED')"><Play :size="16" />{{ busy === 'RABBITMQ_CONSUMER_PAUSED' ? '正在发起…' : '发起真实演练' }}</button></article></div>
       <p id="automation-start-hint" class="automation-help">{{ startHint }}</p>
-      <section v-if="trackedIncidentId" class="panel automation-tracker" aria-label="本次演练进度">
+      <p v-if="identityChanged" class="automation-notice" role="status">当前体验身份已变化，原演练不会转给新身份。请使用原浏览器体验身份续期，或进入公共案例查看示例。</p>
+      <InlineError v-if="trackedError" :message="`本次演练记录读取失败：${trackedError}。请刷新重试，不能据此判断记录不存在。`" />
+      <section v-if="trackedIncidentId && !identityChanged" class="panel automation-tracker" aria-label="本次演练进度">
         <header class="panel-header"><div><h3>演练进度与对应运行</h3><p>按照同一演练 ID 关联工单和运行，运行结束后仍需确认业务恢复。</p></div>
           <select :value="trackedIncidentId" aria-label="选择要跟踪的演练" :disabled="!!busy" @change="action('track', async () => { trackedIncidentId = ($event.target as HTMLSelectElement).value; trackedRuns = []; await router.replace({ query: { ...route.query, incidentId: trackedIncidentId } }); await refreshTrackedRuns(); })"><option v-for="incident in incidents" :key="incident.incidentId" :value="incident.incidentId">{{ date(incident.startedAt) }} · {{ scenarioLabel(incident.scenarioCode) }}</option></select>
         </header>
@@ -471,7 +645,7 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer); });
           <button v-for="run in runs" :key="run.id" class="automation-run-item" :class="{ selected: detail?.id === run.id }" :disabled="!!busy" @click="action(run.id, () => selectRun(run.id))"><span class="automation-run-dot" :data-status="run.status"></span><div><strong>{{ label(run.status) }}</strong><small>工单 #{{ runTicket(run) || '待关联' }} · {{ date(run.created_at) }}</small><code>{{ run.id.slice(0, 8) }} · v{{ run.version }}</code></div><ArrowRight :size="14" /></button><EmptyState v-if="!runs.length" :title="appliedTicketFilter ? '该工单暂无可见运行' : '暂无执行记录'" :description="appliedTicketFilter ? '可清除筛选查看其他记录，或等待演练告警触发运行。' : '先发起真实故障演练。'" /><footer class="automation-pagination"><span>共 {{ total }} 条</span><template v-if="total > 10"><button class="button secondary" :disabled="page <= 1 || !!busy" aria-label="上一页" @click="action('page', async () => { page--; await refresh(); })"><ChevronLeft :size="16" /></button><span>{{ page }} / {{ Math.ceil(total / 10) }}</span><button class="button secondary" :disabled="page * 10 >= total || !!busy" aria-label="下一页" @click="action('page', async () => { page++; await refresh(); })"><ChevronRight :size="16" /></button></template></footer></details>
         <section v-if="detail" :key="detail.id" class="automation-run-detail">
           <section class="panel"><header class="panel-header"><div><h3>运行 {{ detail.id.slice(0, 8) }}</h3><p><router-link :to="`/tickets/${detail.state.ticketId}`">工单 #{{ detail.state.ticketId }}</router-link> · {{ detail.snapshot.model.model }}</p></div><div class="row-actions"><button v-if="canPause" class="button secondary" :disabled="!!busy" @click="action('pause', async () => { await api.pause(detail!.id); await selectRun(detail!.id); notice = '已请求在步骤边界暂停；已发出的远程动作仍会返回执行结果。'; })"><Pause :size="14" />暂停</button><button v-if="canResume" class="button secondary" :disabled="!!busy" @click="action('resume', async () => { await api.resume(detail!.id); await selectRun(detail!.id); notice = '已请求继续同一运行，原有预算、审批要求和期限继续生效。'; })"><Play :size="14" />继续运行</button><button v-if="ownRun && !terminal.has(detail.status)" class="button secondary" :disabled="!!busy" @click="action('cancel', async () => { await api.cancel(detail!.id); await selectRun(detail!.id); notice = '已请求取消运行，已发出的远程动作仍需查看最终结果。'; })"><Square :size="14" />取消</button></div></header>
-            <div class="automation-result-main" role="status"><span class="automation-kicker">{{ terminal.has(detail.status) ? '运行结果' : '当前任务' }}</span><h2>{{ verifiedCompletion ? '恢复验证已通过' : runPresentation.title }}</h2><p>{{ needsHandoff && runMessage ? runMessage : runPresentation.description }}</p><small class="automation-current-step">当前步骤 · {{ nodeName(detail.nodeId) }}</small></div>
+            <section v-if="detail.takeoverRecovery" class="automation-notice" role="status"><div><strong>管理员接管恢复 · {{ label(detail.takeoverRecovery.status) }}</strong><p>{{ detail.takeoverRecovery.message }}</p><small>更新于 {{ date(detail.takeoverRecovery.updatedAt) }}</small><RouterLink :to="`/tickets/${detail.state.ticketId}`">查看原事件的恢复记录与确认 →</RouterLink></div></section><p v-if="detail.authorization?.hint" class="automation-help" role="status">{{ detail.authorization.hint }}</p><button v-if="detail.authorization?.canTakeover || takeoverAttempt?.runId === detail.id" class="button primary" :disabled="!!busy" @click="prepareTakeover">管理员接管恢复</button><div class="automation-result-main" role="status"><span class="automation-kicker">{{ terminal.has(detail.status) ? '运行结果' : '当前任务' }}</span><h2>{{ verifiedCompletion ? '恢复验证已通过' : runPresentation.title }}</h2><p>{{ needsHandoff && runMessage ? runMessage : runPresentation.description }}</p><small class="automation-current-step">当前步骤 · {{ nodeName(detail.nodeId) }}</small></div>
             <div class="automation-result-next"><span>{{ needsHandoff ? '执行恢复 → 记录结果 → 观察与确认' : awaitingDecision ? '核对本次动作后决定是否继续' : '依据实际执行结果继续下一步' }}</span><div class="automation-handoff-actions"><button v-if="awaitingDecision" class="button primary" :disabled="!!busy" @click="showCurrentApproval">{{ runPresentation.action }}</button><button v-else-if="!terminal.has(detail.status) && runPresentation.code !== 'VERIFYING'" class="button primary" @click="showTrace">查看执行进度</button><RouterLink :class="['button', !terminal.has(detail.status) && runPresentation.code !== 'VERIFYING' ? 'secondary' : 'primary']" :to="{ path: `/tickets/${detail.state.ticketId}`, query: needsHandoff ? { handoff: '1' } : {} }">{{ needsHandoff ? '人工接管并继续处置' : runPresentation.code === 'VERIFYING' || terminal.has(detail.status) ? '核对恢复结果' : '查看关联事件' }} <ArrowRight :size="16" /></RouterLink></div></div>
             <details class="automation-result-disclosure"><summary>步骤、变更与恢复证据</summary><dl class="automation-result-facts"><div><dt>当前步骤</dt><dd>{{ nodeName(detail.nodeId) }}</dd></div><div><dt>实际变更</dt><dd>{{ eventsComplete ? writeSummary.text : `证据尚未读完 · ${writeSummary.text}` }}<small>只统计本次运行的写入回执。</small></dd></div><div><dt>恢复验证</dt><dd>{{ verificationStatus }}</dd></div><div><dt>流程 Token 记录</dt><dd>{{ runBudgetSummary(detail) }}<small>流程记账可能含预留，不代表 DeepSeek 实际计费用量。</small></dd></div></dl><p v-if="recoveryProgress">{{ recoveryProgress }}</p><p v-if="recoveryOutcome">{{ recoveryOutcome }}</p><p v-if="detail.status === 'BUDGET_EXCEEDED' && !runHasUnlimitedTokenBudget(detail)">下一次调用的输入与回复预留也需在剩余额度内，预算限制不等于实际用量已达到上限。</p><template v-if="needsHandoff"><p>执行恢复会改变当前演练配置；记录处理只保存说明。技术确认、业务确认和关闭仍需在事件中分别完成。</p><div class="automation-handoff-actions"><EventManualRecovery v-if="runTicketContext" :key="detail.id" :ticket-id="detail.state.ticketId" :target-code="runTicketContext.affectedCiCode" :incident-id="runTicketContext.incidentId" @restored="action('refresh-recovery', refresh)" /><RouterLink v-if="!auth.isDemo" class="button secondary" :to="{ path: `/tickets/${detail.state.ticketId}`, query: { record: '1' } }">记录人工处理</RouterLink></div></template></details>
             <details v-if="rawRunMessage || modelFailure || modelApprovalHint" class="automation-failure-detail"><summary>技术详情与审批说明</summary><p v-if="modelApprovalHint">{{ modelApprovalHint }}</p><pre v-if="rawRunMessage">{{ rawRunMessage }}</pre><code v-if="modelFailure">{{ modelFailure.code }}</code></details>
@@ -492,7 +666,7 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer); });
           </details>
         </section><section v-else class="panel automation-no-selection"><Bot :size="42" /><h3>选择一次运行</h3><p>查看模型决策、工具参数、审批与恢复证据。</p></section>
       </div>
-      <details class="panel automation-start-disclosure"><summary>手动启动已有事件的诊断流程</summary><div class="automation-run-form"><div><strong>为已有事件启动运行</strong><p>通常由告警自动触发；手动启动需要可操作的隔离演练工单和已验证模型。</p></div><label>事件 ID<input v-model.number="ticketId" type="number" min="1" step="1" /></label><label>工作流<select v-model="runDefinitionId" :disabled="auth.isDemo"><option v-for="item in definitions" :key="item.id" :value="item.id" :disabled="!item.published_version">{{ item.name }} · v{{ item.published_version || '未发布' }}</option></select></label><label>模型<select v-model="provider"><option value="" disabled>请选择已验证模型</option><option v-for="model in models" :key="model.provider" :value="model.provider" :disabled="!model.configured || !model.toolCalling">{{ model.model }}{{ model.toolCalling ? '' : ' · 未验证' }}</option></select></label><button class="button primary" :disabled="!!busy || !canCreate" @click="action('create', createRun)"><Play :size="16" />{{ busy === 'create' ? '正在启动…' : '启动运行' }}</button></div></details>
+      <details class="panel automation-start-disclosure"><summary>手动启动已有事件的诊断流程</summary><div class="automation-run-form"><div><strong>为已有事件启动运行</strong><p>通常由告警自动触发；手动启动需要可操作的隔离演练工单和已验证模型。</p></div><label>事件 ID<input v-model.number="ticketId" type="number" min="1" step="1" /></label><label>工作流<select v-model="runDefinitionId" :disabled="auth.isDemo"><option v-for="item in definitions" :key="item.id" :value="item.id" :disabled="!item.published_version">{{ item.name }} · v{{ item.published_version || '未发布' }}</option></select></label><label>模型<select v-model="provider"><option value="" disabled>请选择已验证模型</option><option v-for="model in models" :key="model.provider" :value="model.provider" :disabled="!model.configured || !model.toolCalling">{{ model.model || model.provider }}{{ !model.configured ? ` · ${modelStatus(model)}` : model.toolCalling ? '' : ' · 未验证' }}</option></select></label><button class="button primary" :disabled="!!busy || !canCreate" @click="action('create', createRun)"><Play :size="16" />{{ busy === 'create' ? '正在启动…' : '启动运行' }}</button></div></details>
     </template>
 
     <template v-if="tab === 'workflows'">
@@ -501,7 +675,7 @@ onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer); });
     </template>
 
     <template v-if="tab === 'tools'">
-      <section class="panel"><header class="panel-header"><div><h3>原生工具调用能力</h3><p>只有实际验证通过的模型能启动 Agent。“验证能力”会发送一次真实模型请求并使用 AI 预算。</p></div></header><div class="automation-models"><article v-for="model in models" :key="model.provider"><span class="automation-icon"><Bot :size="23" /></span><div><strong>{{ model.model }}</strong><small>{{ model.provider }} · {{ model.configured ? label(model.verificationStatus) : '尚未配置' }}</small></div><span :class="['automation-pill', { good: model.toolCalling }]">{{ model.toolCalling ? '工具已验证' : '待验证' }}</span><button v-if="auth.isAdmin && model.configured" class="button secondary" :disabled="!!busy" @click="action('probe', async () => { await api.probe(model.provider); models = (await api.models()).models; chooseModel(); notice = '模型能力验证结果已更新。'; })">验证能力</button></article></div></section>
+      <section class="panel"><header class="panel-header"><div><h3>原生工具调用能力</h3><p>只有实际验证通过的模型能启动 Agent。“验证能力”会发送一次真实模型请求并使用 AI 预算。</p></div></header><div class="automation-models"><article v-for="model in models" :key="model.provider"><span class="automation-icon"><Bot :size="23" /></span><div><strong>{{ model.model }}</strong><small>{{ model.provider }} · {{ modelStatus(model) }}</small></div><span :class="['automation-pill', { good: model.configured && model.toolCalling }]">{{ !model.configured ? '未配置' : model.toolCalling ? '工具已验证' : '待验证' }}</span><button v-if="auth.isAdmin && model.configured" class="button secondary" :disabled="!!busy" @click="action('probe', async () => { await api.probe(model.provider); models = (await api.models()).models; chooseModel(); notice = '模型能力验证结果已更新。'; })">验证能力</button></article></div></section>
       <details class="panel automation-tool-disclosure"><summary>工具目录与参数 · {{ toolCatalog?.tools.length || 0 }} 项</summary><div class="automation-tools"><article v-for="tool in toolCatalog?.tools" :key="tool.function.name" class="panel"><header><span class="automation-icon"><Wrench :size="20" /></span><span class="automation-pill" :class="{ approval: toolCatalog?.approvalRequired.includes(tool.function.name) }">{{ toolCatalog?.approvalRequired.includes(tool.function.name) ? '精确动作审批' : '受控工具' }}</span></header><h3>{{ toolLabels[tool.function.name] || tool.function.name }}</h3><code>{{ tool.function.name }}</code><p>{{ tool.function.description }}</p><details><summary>参数协议</summary><pre>{{ pretty(tool.function.parameters) }}</pre></details></article></div></details>
     </template>
   </div>

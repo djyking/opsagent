@@ -24,12 +24,16 @@ import { formatDateTime, formatRelativeTime } from "@/utils/datetime";
 import { parseTicketDescription } from "@/utils/ticket-description";
 import { usePageFeedback } from "@/composables/usePageFeedback";
 import ActionButton from "@/components/feedback/ActionButton.vue";
+import PublicCases from '@/components/automation/PublicCases.vue';
 import { useAuthStore } from "@/stores/auth";
 import '@/styles/pages/phase3-event-lists.css';
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
-const mineScope = computed(() => route.query.scope === 'mine');
+const publicCases = ref<InstanceType<typeof PublicCases>>();
+const showingCases = computed(() => route.query.view === 'cases' || (auth.isDemo && route.query.view !== 'mine' && route.query.scope !== 'mine'));
+const mineScope = computed(() => route.query.scope === 'mine' || (auth.isDemo && !showingCases.value));
+function startFromCase(scenarioCode: string, targetCode: string) { void router.push({ path: '/automation', query: { tab: 'experience', scenario: scenarioCode, target: targetCode } }); }
 let listEpoch = 0;
 const now = ref(Date.now());
 let clock: ReturnType<typeof setInterval> | undefined;
@@ -53,7 +57,7 @@ function sourceTypeLabel(value: string) { return ({ ALERTMANAGER: "真实告警�
 const filters = reactive({
   keyword: "",
   status: "",
-  eventScope: 'OPEN',
+  eventScope: auth.isDemo ? '' : 'OPEN',
   priority: "",
   affectedCiCode: '', assigneeId: '', eventStage: '',
   pageNum: 1,
@@ -68,12 +72,13 @@ const form = reactive({
 });
 async function load() {
   const epoch = ++listEpoch;
+  if (showingCases.value) { loading.value = false; error.value = ''; return; }
   loading.value = true;
   error.value = "";
   try {
-    const params = { ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '')), ...(mineScope.value ? { assigneeId: auth.user?.userId } : {}) };
+    const params = { ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== '')), ...(mineScope.value ? { scope: 'mine' } : {}) };
     const query = Object.fromEntries(Object.entries(params).map(([key, value]) => [key, String(value)]));
-    await router.replace({ query: { ...query, ...(mineScope.value ? { scope: 'mine' } : {}) } });
+    await router.replace({ query: { ...query, ...(auth.isDemo || route.query.view === 'mine' ? { view: 'mine' } : {}) } });
     const results = await Promise.allSettled([eventQueueApi.page(params), eventQueueApi.summary(params)]);
     if (epoch !== listEpoch) return;
     if (results[0].status === 'fulfilled') page.value = results[0].value; else throw results[0].reason;
@@ -108,7 +113,7 @@ function reset() {
   Object.assign(filters, {
     keyword: "",
     status: "",
-    eventScope: 'OPEN',
+    eventScope: auth.isDemo ? '' : 'OPEN',
     priority: "",
     affectedCiCode: '', assigneeId: '', eventStage: '',
     pageNum: 1,
@@ -116,7 +121,7 @@ function reset() {
   });
   load();
 }
-watch(mineScope, () => { filters.pageNum = 1; void load(); });
+watch(() => `${showingCases.value}:${mineScope.value}`, () => { filters.pageNum = 1; void load(); });
 watch(
   () => route.query.create,
   (v) => {
@@ -147,7 +152,7 @@ onMounted(async () => {
   filters.pageNum = Math.max(1, Number(route.query.pageNum) || 1);
   await Promise.all([
     load(),
-    loadCis(),
+    auth.isDemo ? Promise.resolve() : loadCis(),
   ]);
   await nextTick();
   try { const saved = Number(sessionStorage.getItem(scrollKey())); if (Number.isFinite(saved)) window.scrollTo({ top: saved, behavior: 'instant' }); } catch { /* Queue remains usable without storage. */ }
@@ -156,11 +161,14 @@ onMounted(async () => {
 <template>
   <div class="stack-page ticket-list-page">
     <PageHeader title="事件处置" >
-      <template #actions><button v-if="!auth.isDemo" class="button primary" @click="showCreate = true"><Plus :size="18" />报告问题</button></template>
+      <template #actions><button v-if="showingCases" class="button secondary" :disabled="publicCases?.loading" @click="publicCases?.refresh()"><RotateCw :size="16" />刷新</button><button v-if="!auth.isDemo" class="button primary" @click="showCreate = true"><Plus :size="18" />报告问题</button></template>
       <template #tabs><nav class="ticket-detail-tabs" aria-label="事件与协作"><RouterLink to="/tickets" class="active" aria-current="page">事件队列</RouterLink><RouterLink to="/itsm/alerts"><Siren :size="16" />原始告警</RouterLink><RouterLink to="/itsm/sla"><TimerReset :size="16" />SLA 与时效</RouterLink><RouterLink to="/itsm/oncall"><CalendarClock :size="16" />值班协作</RouterLink></nav></template>
     </PageHeader>
-    <section class="panel event-queue-summary" aria-label="事件队列汇总"><button @click="filters.eventScope = 'OPEN'; filters.eventStage = ''; filters.pageNum = 1; load()">未关闭事件 <strong>{{ summary?.counts.open ?? '—' }}</strong></button><button @click="filters.eventScope = 'OPEN'; filters.eventStage = 'HANDLING'; filters.pageNum = 1; load()">事件处置 <strong>{{ summary?.counts.handling ?? '—' }}</strong></button><button @click="filters.eventScope = 'OPEN'; filters.eventStage = 'VERIFYING'; filters.pageNum = 1; load()">恢复验证 <strong>{{ summary?.counts.verifying ?? '—' }}</strong></button><RouterLink :to="mineScope ? '/tickets' : '/tickets?scope=mine'">{{ mineScope ? '查看全部可见事件' : '查看我负责的' }} →</RouterLink><small v-if="summaryError">{{ summaryError }}</small></section>
-    <ListSurface class="ticket-list-surface">
+    <nav class="ticket-detail-tabs ticket-queue-tabs" aria-label="案例与个人事件"><RouterLink to="/tickets?view=cases" :class="{ active: showingCases }" :aria-current="showingCases ? 'page' : undefined">公共案例</RouterLink><RouterLink to="/tickets?view=mine" :class="{ active: !showingCases }" :aria-current="!showingCases ? 'page' : undefined">{{ auth.isDemo ? '我的演练' : '事件队列' }}</RouterLink></nav>
+    <PublicCases v-if="showingCases" ref="publicCases" @start="startFromCase" />
+    <InlineNotice v-if="auth.isDemo && !showingCases">这里保留属于当前体验身份的演练事件，包括已关闭的历史。其他访客的私有记录不会显示；完整示例可在公共案例查看。<RouterLink to="/automation?tab=experience">发起我的演练 →</RouterLink></InlineNotice>
+    <section v-if="!showingCases" class="panel event-queue-summary" aria-label="事件队列汇总"><button @click="filters.eventScope = 'OPEN'; filters.eventStage = ''; filters.pageNum = 1; load()">未关闭事件 <strong>{{ summary?.counts.open ?? '—' }}</strong></button><button @click="filters.eventScope = 'OPEN'; filters.eventStage = 'HANDLING'; filters.pageNum = 1; load()">事件处置 <strong>{{ summary?.counts.handling ?? '—' }}</strong></button><button @click="filters.eventScope = 'OPEN'; filters.eventStage = 'VERIFYING'; filters.pageNum = 1; load()">恢复验证 <strong>{{ summary?.counts.verifying ?? '—' }}</strong></button><RouterLink v-if="!auth.isDemo" :to="mineScope ? '/tickets?view=mine' : '/tickets?view=mine&scope=mine'">{{ mineScope ? '查看全部可见事件' : '查看我负责的' }} →</RouterLink><small v-if="summaryError">{{ summaryError }}</small></section>
+    <ListSurface v-if="!showingCases" class="ticket-list-surface">
 
       <template #toolbar><FilterBar>
       <select v-model="filters.eventScope" aria-label="事件关闭状态" @change="filters.pageNum = 1; load()"><option value="OPEN">未关闭事件</option><option value="CLOSED">已关闭事件</option><option value="ARCHIVED">历史档案</option><option value="">全部事件</option></select>
@@ -198,7 +206,7 @@ onMounted(async () => {
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
 
       <LoadingState v-if="loading && !page.records.length" text="正在加载事件…" />
-      <EmptyState v-else-if="!page.records.length" title="没有符合条件的事件" description="调整筛选条件，或报告一个需要处理的问题。" :icon="TicketCheck" />
+      <EmptyState v-else-if="!page.records.length" :title="auth.isDemo ? '当前体验暂无符合条件的演练事件' : '没有符合条件的事件'" :description="auth.isDemo ? '可以先查看公共案例，或发起自己的演练。刚发起的演练需等待监控确认持续故障后建单。' : '调整筛选条件，或报告一个需要处理的问题。'" :icon="TicketCheck" />
       <template v-else>
         <div class="responsive-table" role="region" aria-label="事件列表" tabindex="0"><table class="ticket-table">
           <thead>

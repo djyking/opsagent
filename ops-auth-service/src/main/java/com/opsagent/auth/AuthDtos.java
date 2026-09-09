@@ -72,7 +72,31 @@ final class AuthDtos {
             Instant sessionStartedAt,
             Instant sessionExpiresAt,
             Instant idleExpiresAt,
-            Instant lastActivityAt) {
+            Instant lastActivityAt,
+            String visitorExperience) {
+        TokenResponse(
+                String accessToken,
+                String refreshToken,
+                String tokenType,
+                Instant expiresAt,
+                String sessionId,
+                Instant sessionStartedAt,
+                Instant sessionExpiresAt,
+                Instant idleExpiresAt,
+                Instant lastActivityAt) {
+            this(
+                    accessToken,
+                    refreshToken,
+                    tokenType,
+                    expiresAt,
+                    sessionId,
+                    sessionStartedAt,
+                    sessionExpiresAt,
+                    idleExpiresAt,
+                    lastActivityAt,
+                    null);
+        }
+
         TokenResponse(
                 String accessToken, String refreshToken, String tokenType, Instant expiresAt) {
             this(

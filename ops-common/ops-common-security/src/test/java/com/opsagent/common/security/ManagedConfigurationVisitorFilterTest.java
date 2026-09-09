@@ -28,11 +28,19 @@ class ManagedConfigurationVisitorFilterTest {
     @Test
     void fixedReadRoutesPreserveVisitorIdentity() throws Exception {
         for (String role : List.of("DEMO", "ROLE_DEMO")) {
-            for (String suffix : List.of("", "/order-business", "/order-runtime",
-                    "/order-business/history", "/order-runtime/history")) {
+            for (String suffix :
+                    List.of(
+                            "",
+                            "/order-business",
+                            "/order-runtime",
+                            "/order-business/history",
+                            "/order-runtime/history")) {
                 assertThat(invoke("GET", ROOT + suffix, role)).isTrue();
-                var principal = (OpsPrincipal) SecurityContextHolder.getContext()
-                        .getAuthentication().getPrincipal();
+                var principal =
+                        (OpsPrincipal)
+                                SecurityContextHolder.getContext()
+                                        .getAuthentication()
+                                        .getPrincipal();
                 assertThat(principal.userId()).isEqualTo(-23);
             }
         }
@@ -40,14 +48,26 @@ class ManagedConfigurationVisitorFilterTest {
 
     @Test
     void writesAndUnmanagedReadsNeverReachController() throws Exception {
-        for (String suffix : List.of("/order-business/publish", "/order-business/rollback",
-                "/order-business/validate", "/order-runtime/publish", "")) {
+        for (String suffix :
+                List.of(
+                        "/order-business/publish",
+                        "/order-business/rollback",
+                        "/order-business/validate",
+                        "/order-runtime/publish",
+                        "")) {
             for (String method : List.of("POST", "PUT", "DELETE", "PATCH")) {
                 assertThat(invoke(method, ROOT + suffix, "DEMO")).isFalse();
             }
         }
-        for (String suffix : List.of("/", "/secrets", "/order-business/secret", "/order-runtime/raw",
-                "/order-business-extra", "/order-business/history/1", "-extra")) {
+        for (String suffix :
+                List.of(
+                        "/",
+                        "/secrets",
+                        "/order-business/secret",
+                        "/order-runtime/raw",
+                        "/order-business-extra",
+                        "/order-business/history/1",
+                        "-extra")) {
             assertThat(invoke("GET", ROOT + suffix, "DEMO")).isFalse();
         }
     }
@@ -58,10 +78,12 @@ class ManagedConfigurationVisitorFilterTest {
         properties.setSecret("managed-config-filter-test-secret-at-least-32-bytes");
         var jwt = new JwtService(properties);
         var request = new MockHttpServletRequest(method, path);
-        request.addHeader("Authorization", "Bearer " + jwt.issue(-23, "visitor", List.of(role)).token());
+        request.addHeader(
+                "Authorization", "Bearer " + jwt.issue(-23, "visitor", List.of(role)).token());
         var response = new MockHttpServletResponse();
         var reached = new AtomicBoolean();
-        new JwtAuthenticationFilter(jwt).doFilter(request, response, (req, res) -> reached.set(true));
+        new JwtAuthenticationFilter(jwt, principal -> {})
+                .doFilter(request, response, (req, res) -> reached.set(true));
         if (!reached.get()) {
             assertThat(response.getStatus()).isEqualTo(403);
             assertThat(response.getContentAsString()).contains("\"code\":40300");

@@ -74,7 +74,14 @@ class InternalAgentStore {
                 configured,
                 configured && "VERIFIED".equals(status),
                 status,
-                verifiedAt);
+                verifiedAt,
+                settings.getApiKey() == null || settings.getApiKey().isBlank()
+                        ? "MISSING_API_KEY"
+                        : settings.getModel() == null || settings.getModel().isBlank()
+                                ? "MISSING_MODEL"
+                                : !settings.selectable()
+                                        ? "INVALID_ENDPOINT"
+                                        : configured ? "CONFIGURED" : "DISABLED");
     }
 
     void capability(String provider, AiProperties.ProviderSettings settings, String status) {

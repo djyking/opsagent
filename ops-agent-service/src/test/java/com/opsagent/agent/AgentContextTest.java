@@ -520,6 +520,7 @@ class AgentContextTest {
         assertEquals(
                 1900 * clients.modelRequests.size()
                         + retrievals
+                                * 2
                                 * com.opsagent.common.core.QueryEmbeddingBudget.reserve("故障诊断证据"),
                 run.state().path("tokens").asInt());
         assertTrue(run.state().path("tokens").asInt() < 40000);

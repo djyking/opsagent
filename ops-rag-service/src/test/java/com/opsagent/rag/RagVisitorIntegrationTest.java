@@ -70,7 +70,7 @@ class RagVisitorIntegrationTest {
                                         rag,
                                         new RagRateLimiter(mock(AiBudgetGuard.class), metrics),
                                         streaming))
-                        .addFilters(new JwtAuthenticationFilter(jwt))
+                        .addFilters(new JwtAuthenticationFilter(jwt, principal -> {}))
                         .build();
         var started =
                 mvc.perform(

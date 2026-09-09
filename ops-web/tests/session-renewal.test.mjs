@@ -159,6 +159,9 @@ for (const method of ['POST', 'GET']) {
   const before = t.api.readSession().accessToken;
   await assert.rejects(module.exports.request({ url: '/api/auth/login', method: 'POST' }));
   assert.equal(t.api.readSession().accessToken, before);
+  const sentBefore = writes;
+  await assert.rejects(module.exports.request({ url: '/api/auth/end-experience', method: 'POST', expectedIdentity: 'previous-visitor' }), /身份已变化/);
+  assert.equal(writes, sentBefore, 'an old confirmation must not submit under a newer visitor identity');
   console.log('PASS real Axios interceptors: business 40100 refreshes reads, writes never replay, login errors retain existing state');
 }
 {

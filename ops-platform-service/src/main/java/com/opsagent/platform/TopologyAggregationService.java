@@ -9,6 +9,7 @@ import com.opsagent.common.security.SecurityUsers;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,8 +57,10 @@ class TopologyAggregationService {
     private final PlatformAuditRepository audit;
     private final ObjectMapper json;
     private final NodeObservationService observations = new NodeObservationService();
-    private final Map<String, PrometheusAdapter.Snapshot> metricsCache = new LinkedHashMap<>();
-    private AlertmanagerAdapter.Snapshot alertCache;
+    private final ObservationSnapshotCache<PrometheusAdapter.Snapshot> metricsCache =
+            new ObservationSnapshotCache<>(Duration.ofSeconds(10));
+    private final ObservationSnapshotCache<AlertmanagerAdapter.Snapshot> alertCache =
+            new ObservationSnapshotCache<>(Duration.ofSeconds(10));
 
     TopologyAggregationService(
             ItsmPlatformService cmdb,
@@ -228,20 +231,12 @@ class TopologyAggregationService {
         }
     }
 
-    synchronized PrometheusAdapter.Snapshot metrics(String range) {
-        var cached = metricsCache.get(range);
-        if (cached != null && cached.checkedAt().isAfter(Instant.now().minusSeconds(10)))
-            return cached;
-        var data = prometheus.collect(range);
-        metricsCache.put(range, data);
-        return data;
+    PrometheusAdapter.Snapshot metrics(String range) {
+        return metricsCache.get(range, () -> prometheus.collect(range));
     }
 
-    private synchronized AlertmanagerAdapter.Snapshot alerts() {
-        if (alertCache != null && alertCache.checkedAt().isAfter(Instant.now().minusSeconds(10)))
-            return alertCache;
-        alertCache = alertmanager.collect();
-        return alertCache;
+    private AlertmanagerAdapter.Snapshot alerts() {
+        return alertCache.get("active", alertmanager::collect);
     }
 
     private Map<String, Object> node(

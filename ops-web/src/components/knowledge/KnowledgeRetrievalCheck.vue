@@ -10,7 +10,7 @@ onBeforeUnmount(() => { active = false; });
 async function search() {
   if (busy.value || !query.value.trim()) return;
   busy.value = true; error.value = ''; searched.value = false; rows.value = [];
-  try { const result = await request<typeof rows.value>({ url: '/api/knowledge/internal/search', params: { query: query.value.trim(), documentId: props.documentId, topK: 3 } }); if (active) { rows.value = result; searched.value = true; } }
+  try { const result = await request<typeof rows.value>({ url: '/api/knowledge/search', params: { query: query.value.trim(), documentId: props.documentId, topK: 3 } }); if (active) { rows.value = result; searched.value = true; } }
   catch (cause) { if (active) error.value = cause instanceof Error ? cause.message : '检索失败'; }
   finally { if (active) busy.value = false; }
 }

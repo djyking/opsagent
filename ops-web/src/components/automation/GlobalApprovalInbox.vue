@@ -5,11 +5,12 @@ import BaseModal from '@/components/BaseModal.vue';
 import ApprovalCard from './ApprovalCard.vue';
 import { useApprovalInboxStore } from '@/stores/approval-inbox';
 import { approvalDescription, approvalKey } from '@/utils/automation-presentation';
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 const inbox = useApprovalInboxStore();
 const router = useRouter();
 const route = useRoute();
 const decisionError = ref('');
+const blockedApprovals = computed(() => inbox.items.filter(item => item.canOperate === false));
 watch(() => route.fullPath, () => { if (inbox.open) inbox.later(); });
 watch(() => inbox.selected && approvalKey(inbox.selected), () => { decisionError.value = ''; });
 async function decide(decision: { approved: boolean; reason: string }) {
@@ -32,10 +33,11 @@ function viewRun() {
       <div class="approval-inbox-toolbar"><span>{{ inbox.error ? '待审批数据未能更新' : `${inbox.count} 项待处理` }}</span><button type="button" class="button text" :disabled="inbox.loading || !!inbox.busy" @click="decisionError = ''; inbox.refresh(false)"><RefreshCw :size="15" />刷新</button></div>
       <p v-if="decisionError || inbox.error" class="approval-inbox-error" role="alert">{{ decisionError || inbox.error }}</p>
       <p v-if="inbox.notice" class="approval-inbox-notice" role="status">{{ inbox.notice }}</p>
+      <section v-for="item in blockedApprovals" :key="item.id" class="approval-card"><strong>执行权限需要处理 · 工单 #{{ item.ticketId }}</strong><p>{{ item.hint || '原执行身份当前不可用，不能直接审批后继续执行。' }}</p><RouterLink class="button secondary" :to="{ path: '/automation', query: { tab: 'runs', run: item.run_id } }" @click="inbox.later">查看运行与接管条件<ArrowUpRight :size="15" /></RouterLink></section>
       <nav v-if="inbox.availableItems.length > 1 || (!inbox.selected && inbox.count)" class="approval-inbox-list" aria-label="选择待审批动作"><button v-for="item in inbox.availableItems" :key="approvalKey(item)" type="button" :disabled="!!inbox.busy" :aria-pressed="inbox.selected?.id === item.id" @click="decisionError = ''; inbox.select(item)"><ShieldCheck :size="17" /><span><strong>{{ approvalDescription(item).title }}</strong><small>工单 #{{ item.ticketId }} · {{ item.nodeLabel }}</small></span></button></nav>
       <template v-if="inbox.selected"><ApprovalCard :key="approvalKey(inbox.selected)" :approval="inbox.selected" :available="inbox.isCurrent(inbox.selected)" :busy="!!inbox.busy" unavailable-reason="此审批已不在当前待处理列表中，可能已处理、过期或运行已暂停。可刷新或进入运行详情核对。" @decision="decide" /><button type="button" class="button text approval-inbox-run" @click="viewRun">查看完整运行与证据<ArrowUpRight :size="15" /></button></template>
       <p v-else-if="inbox.loading && !inbox.count" class="approval-inbox-empty" role="status">正在核对待审批动作…</p>
-      <p v-else-if="!inbox.error && !inbox.count" class="approval-inbox-empty">当前没有需要您处理的审批。</p>
+      <p v-else-if="!inbox.error && !inbox.count" class="approval-inbox-empty">{{ blockedApprovals.length ? '上述运行需先处理执行权限，当前不可直接审批。' : '当前没有需要您处理的审批。' }}</p>
     </div>
     <template #footer><button type="button" class="button secondary" @click="inbox.later">{{ inbox.count ? '稍后处理' : '关闭' }}</button></template>
   </BaseModal>

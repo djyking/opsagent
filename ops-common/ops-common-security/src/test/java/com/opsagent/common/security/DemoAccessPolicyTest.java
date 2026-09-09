@@ -12,6 +12,40 @@ import org.junit.jupiter.api.Test;
  */
 class DemoAccessPolicyTest {
     @Test
+    void exposesOnlyTheExactReadOnlyDocumentContentRoute() {
+        assertThat(DemoAccessPolicy.allows("GET", "/api/knowledge/documents/1036/content"))
+                .isTrue();
+        for (String method : new String[] {"POST", "PUT", "DELETE"})
+            assertThat(DemoAccessPolicy.allows(method, "/api/knowledge/documents/1036/content"))
+                    .isFalse();
+        assertThat(DemoAccessPolicy.allows("GET", "/api/knowledge/documents/1036/content/source"))
+                .isFalse();
+        assertThat(DemoAccessPolicy.allows("GET", "/api/knowledge/documents/../content")).isFalse();
+    }
+
+    @Test
+    void permitsOnlyPrivateKnowledgeExperienceMutations() {
+        assertThat(DemoAccessPolicy.allows("GET", "/api/knowledge/search")).isTrue();
+        assertThat(DemoAccessPolicy.allows("POST", "/api/knowledge/search")).isFalse();
+        assertThat(DemoAccessPolicy.allows("GET", "/api/knowledge/experience")).isTrue();
+        assertThat(DemoAccessPolicy.allows("POST", "/api/knowledge/experience/documents")).isTrue();
+        assertThat(DemoAccessPolicy.allows("POST", "/api/knowledge/experience/documents/12/parse"))
+                .isTrue();
+        assertThat(DemoAccessPolicy.allows("POST", "/api/knowledge/experience/documents/12/index"))
+                .isTrue();
+        assertThat(DemoAccessPolicy.allows("DELETE", "/api/knowledge/experience/documents/12"))
+                .isTrue();
+        assertThat(DemoAccessPolicy.allows("POST", "/api/knowledge/documents/12/parse")).isFalse();
+        assertThat(
+                        DemoAccessPolicy.allows(
+                                "POST", "/api/knowledge/experience/documents/12/publish"))
+                .isFalse();
+        assertThat(DemoAccessPolicy.allows("POST", "/api/knowledge/documents/12/approve"))
+                .isFalse();
+        assertThat(DemoAccessPolicy.allows("GET", "/api/knowledge/experience/users/12")).isFalse();
+    }
+
+    @Test
     void blocksBusinessMutationsAndAdministrativeReads() {
         for (String path :
                 new String[] {
@@ -83,6 +117,16 @@ class DemoAccessPolicyTest {
     }
 
     @Test
+    void permitsOnlyTheExactAggregatedTrafficOverviewRead() {
+        String path = "/api/platform/traffic/overview";
+        assertThat(DemoAccessPolicy.allows("GET", path)).isTrue();
+        for (String method : new String[] {"POST", "PUT", "PATCH", "DELETE"})
+            assertThat(DemoAccessPolicy.allows(method, path)).as(method).isFalse();
+        assertThat(DemoAccessPolicy.allows("GET", path + "/raw")).isFalse();
+        assertThat(DemoAccessPolicy.allows("GET", path + "-extra")).isFalse();
+    }
+
+    @Test
     void permitsObservabilityReadsAndReadOnlyChecksWithoutGovernanceWrites() {
         for (String path :
                 new String[] {
@@ -129,7 +173,6 @@ class DemoAccessPolicyTest {
                 new String[] {
                     "/api/tickets/queue",
                     "/api/tickets/queue/summary",
-                    "/api/tickets/12/event-lifecycle",
                     "/api/tickets/12/event-lifecycle/recovery-binding",
                     "/api/platform/observability/topology/layout",
                     "/api/platform/observability/services/ops-rag-service/metric-history"
@@ -148,8 +191,36 @@ class DemoAccessPolicyTest {
                     "/api/platform/observability/topology/layout/personal",
                     "/api/platform/observability/services/ops-rag-service/metric-history/raw",
                     "/api/platform/operations/host-resources",
-                    "/api/platform/operations/host-resources/credentials",
-                    "/api/platform/configuration/files"
+                    "/api/platform/operations/host-resources/credentials"
                 }) assertThat(DemoAccessPolicy.allows("GET", path)).as(path).isFalse();
+    }
+
+    @Test
+    void permitsOwnedLifecycleAndSanitizedCasesButNeverTakeoverOrCaseWrites() {
+        assertThat(DemoAccessPolicy.allows("POST", "/api/auth/end-experience")).isTrue();
+        assertThat(DemoAccessPolicy.allows("POST", "/api/tickets/12/event-lifecycle")).isTrue();
+        for (String path :
+                new String[] {
+                    "/api/automation/public-cases",
+                    "/api/automation/public-cases/redis-case",
+                    "/api/platform/configuration/files",
+                    "/api/platform/configuration/files/order.yml",
+                    "/api/platform/configuration/files/order.yml/history"
+                }) {
+            assertThat(DemoAccessPolicy.allows("GET", path)).as(path).isTrue();
+            for (String method : new String[] {"POST", "PUT", "DELETE"})
+                assertThat(DemoAccessPolicy.allows(method, path)).as(method + " " + path).isFalse();
+        }
+        for (String path :
+                new String[] {
+                    "/api/platform/configuration/files/drafts/123",
+                    "/api/platform/configuration/files/tasks/123",
+                    "/api/automation/runs/abc-123/takeover-preview",
+                    "/api/automation/runs/abc-123/takeover",
+                    "/api/automation/public-cases/redis-case/execute"
+                }) {
+            assertThat(DemoAccessPolicy.allows("GET", path)).as(path).isFalse();
+            assertThat(DemoAccessPolicy.allows("POST", path)).as(path).isFalse();
+        }
     }
 }

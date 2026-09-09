@@ -5,7 +5,7 @@ export interface ConfigurationFile { id: string; serviceId: string; label: strin
 export interface ConfigurationFileDetail extends ConfigurationFile { version: string; fields: ConfigurationField[]; redactedContent: string; rawEditable: boolean; loadedVersion?: string; publishedVersion?: string; lastTaskId?: string }
 export interface ConfigurationDraft { id: string; fileId: string; baseVersion: string; targetVersion: string; digest: string; action: FileAction; rollbackOnFailure: boolean; affectedServices: string[]; diff: { key: string; label: string; before: unknown; after: unknown; sensitive: boolean }[]; status: string; createdBy: number; createdAt: string; approvedBy?: number; approvedAt?: string; taskId?: string; impact: string }
 export interface ConfigurationTask { id: string; draftId: string; fileId: string; action: FileAction; status: string; baseVersion: string; targetVersion: string; createdAt: string; updatedAt: string; message: string; filePublished: boolean; rollbackStatus: string; awaitingVerification?: boolean; targets: { serviceId: string; status: string; beforePid?: number; afterPid?: number; loaded: boolean; healthy: boolean; businessVerified: boolean; evidence: unknown[] }[]; events: { at: string; stage: string; message: string }[] }
-export interface ConfigurationHistory { drafts: ConfigurationDraft[]; tasks: ConfigurationTask[] }
+export interface ConfigurationHistory { drafts: ConfigurationDraft[]; tasks: ConfigurationTask[]; versions?: Pick<ConfigurationDraft, 'id' | 'baseVersion' | 'targetVersion' | 'action' | 'createdAt' | 'status' | 'diff'>[] }
 const base = '/api/platform/configuration/files';
 export const configurationFilesApi = {
   list: () => request<{ items: ConfigurationFile[]; executorStatus: string }>({ url: base }),

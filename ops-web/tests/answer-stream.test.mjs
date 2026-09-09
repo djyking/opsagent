@@ -27,7 +27,7 @@ assert.ok(!html.includes('<script>') && !html.includes('href="javascript:'));
 console.log('PASS markdown: headings, emphasis, code, tables, trailing content and HTML/link safety');
 globalThis.window = { setTimeout, clearTimeout };
 globalThis.localStorage = { getItem: () => null };
-const { streamRagAnswer, ragCompletionLabel, ragIncompleteMessage, ragAnswerLabel, normalizeReferences } = load('api/rag-stream.ts', source => source.replaceAll('import.meta.env.VITE_API_BASE_URL', "''"));
+const { streamRagAnswer, ragCompletionLabel, ragIncompleteMessage, ragCanRetry, ragAnswerLabel, normalizeReferences } = load('api/rag-stream.ts', source => source.replaceAll('import.meta.env.VITE_API_BASE_URL', "''"));
 const encoder = new TextEncoder();
 const events = 'event: token\r\ndata: {"delta":"三、证据"}\r\n\r\nevent: token\r\ndata: {"delta":"\\n结尾完整。"}\r\n\r\nevent: done\r\ndata: {"answer":"三、证据\\n结尾完整。","provider":"test","model":"test","references":[],"metadata":{"generationComplete":true}}\r\n\r\n';
 const bytes = encoder.encode(events);
@@ -93,7 +93,18 @@ console.log('PASS model selection payload and runtime source provenance survive 
 
 const budgetResult = { answer: '保留已生成的内容', metadata: { generationComplete: false, finishReason: 'budget_exhausted', budgetLimit: 10000, budgetUsageKnown: false } };
 assert.match(ragIncompleteMessage(budgetResult), /输入、输出和重试累计额度 10,000 token/);
-assert.match(ragIncompleteMessage(budgetResult), /已保留生成内容.*缩小问题范围/);
+assert.match(ragIncompleteMessage(budgetResult), /已保留已有内容.*缩小问题范围/);
 assert.doesNotMatch(ragIncompleteMessage(budgetResult), /继续追问/);
 assert.equal(budgetResult.answer, '保留已生成的内容');
 console.log('PASS cumulative per-question budget stops preserve partial output and request narrower scope');
+assert.equal(ragAnswerLabel({ provider: 'deepseek', model: 'test', metadata: { retrievalMode: 'GENERAL_AI' } }), '通用 AI 回答 · deepseek/test');
+assert.equal(ragAnswerLabel({ provider: 'system', model: 'product-guide', metadata: { retrievalMode: 'PRODUCT_GUIDE' } }), '系统使用指南');
+assert.equal(ragCanRetry({ metadata: { generationComplete: false, finishReason: 'provider_timeout' } }), true);
+assert.equal(ragCanRetry({ metadata: { generationComplete: false, finishReason: 'provider_authentication' } }), false);
+assert.match(ragIncompleteMessage({ metadata: { generationComplete: false, finishReason: 'provider_timeout' } }), /超时/);
+console.log('PASS general answer and product help provenance, provider failure classification and retry eligibility');
+const guideHtml = await renderToString(createSSRApp({render: () => renderAnswer('[知识与经验](/knowledge) · [受控配置变更](/observability/config/managed) · [不能外跳](//example.test) · [不支持动作链接](/api/auth/logout)')}));
+assert.ok(guideHtml.includes('href="/knowledge" target="_self"'));
+assert.ok(guideHtml.includes('href="/observability/config/managed"'));
+assert.ok(!guideHtml.includes('href="//example.test"') && !guideHtml.includes('href="/api/auth/logout"'));
+console.log('PASS maintained product guide routes are clickable while protocol-relative and API action links remain plain text');

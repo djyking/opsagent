@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { ArrowUpRight, BookCheck, BookOpen, Database, FileText, Layers3, Play, Plus, Trash2, Upload } from "@lucide/vue";
+import { ArrowLeft, ArrowUpRight, BookCheck, BookOpen, Database, FileText, Layers3, Play, Plus, Trash2, Upload } from "@lucide/vue";
 import { request } from "@/api/http";
 import BaseModal from "@/components/BaseModal.vue";
 import StatusBadge from "@/components/StatusBadge.vue";
@@ -16,10 +16,14 @@ import { usePageFeedback } from "@/composables/usePageFeedback";
 import { useAuthStore } from "@/stores/auth";
 import KnowledgeDocumentRevision from '@/components/knowledge/KnowledgeDocumentRevision.vue';
 import KnowledgeRetrievalCheck from '@/components/knowledge/KnowledgeRetrievalCheck.vue';
+import KnowledgeDocumentContent from '@/components/knowledge/KnowledgeDocumentContent.vue';
+import VisitorKnowledgeLibrary from '@/components/knowledge/VisitorKnowledgeLibrary.vue';
+import { visitorKnowledgeApi } from '@/api/visitor-knowledge';
 import { knowledgeStage } from '@/utils/knowledge-stage';
 import '@/styles/pages/knowledge-workspace.css';
 
 const auth = useAuthStore();
+const knowledgeScope = ref<'public' | 'experience'>('public');
 let actorEpoch = 0, documentRead = 0, chunkRead = 0;
 let routeSelectionPending = true;
 onBeforeUnmount(() => { actorEpoch++; documentRead++; chunkRead++; });
@@ -39,7 +43,7 @@ interface KnowledgeDocument {
   index_status?: string;
   chunk_count?: number;
   embedding_model?: string;
-  version?: number;
+  version: number;
   parse_error?: string;
   review_comment?: string;
   ticket_id?: number;
@@ -49,6 +53,9 @@ interface KnowledgeDocument {
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const bases = ref<KnowledgeBase[]>([]);
+const baseKeyword = ref('');
+const visibleBases = computed(() => bases.value.filter(base => `${base.name} ${base.description || ''}`.toLowerCase().includes(baseKeyword.value.trim().toLowerCase())));
+const mobileDocuments = ref(false);
 const documents = ref<KnowledgeDocument[]>([]);
 const selectedBaseId = ref<number>();
 const selectedFile = ref<File>();
@@ -91,7 +98,7 @@ async function load() {
     if (followRoute && requestedBase && bases.value.some(base => base.id === requestedBase)) selectedBaseId.value = requestedBase;
     if (!selectedBaseId.value && bases.value.length) selectedBaseId.value = bases.value[0].id;
     await loadDocuments();
-    if (followRoute) { routeSelectionPending = false; focusDocument(); }
+    if (followRoute) { routeSelectionPending = false; await focusDocument(); }
   } catch (cause) {
     if (epoch === actorEpoch) error.value = cause instanceof Error ? cause.message : "加载失败";
   }
@@ -109,18 +116,32 @@ async function loadDocuments() {
   } finally { if (epoch === actorEpoch && own === documentRead) loadingDocuments.value = false; }
 }
 async function selectBase(id: number) {
+  mobileDocuments.value = true;
   selectedBaseId.value = id; detailDocument.value = undefined; chunkDocument.value = undefined; chunks.value = []; chunkRead++;
   error.value = "";
   documents.value = [];
   try { await loadDocuments(); }
   catch (cause) { error.value = cause instanceof Error ? cause.message : "文档加载失败"; }
 }
-function focusDocument() {
+async function focusDocument() {
   const id = Number(route.query.documentId);
   if (!id) return;
+  const epoch = actorEpoch;
   const document = documents.value.find(row => row.id === id);
-  if (document) { detailDocument.value = document; error.value = ''; }
-  else error.value = '未找到指定文档，请核对知识库或访问权限';
+  if (document) { knowledgeScope.value = 'public'; detailDocument.value = document; mobileDocuments.value = true; error.value = ''; return; }
+  if (auth.isDemo) {
+    const experience = await visitorKnowledgeApi.get();
+    if (epoch !== actorEpoch || Number(route.query.documentId) !== id) return;
+    if (experience.documents.some(row => row.id === id)) { knowledgeScope.value = 'experience'; error.value = ''; return; }
+  }
+  // A citation contains a document ID, so locate it only within already-authorized libraries.
+  for (const base of bases.value.filter(base => base.id !== selectedBaseId.value)) {
+    const rows = await request<KnowledgeDocument[]>({ url: `/api/knowledge/bases/${base.id}/documents` });
+    if (epoch !== actorEpoch || Number(route.query.documentId) !== id) return;
+    const found = rows.find(row => row.id === id);
+    if (found) { selectedBaseId.value = base.id; documents.value = rows; knowledgeScope.value = 'public'; detailDocument.value = found; mobileDocuments.value = true; error.value = ''; return; }
+  }
+  knowledgeScope.value = 'public'; error.value = '未找到指定文档，文档可能已过期、删除或当前身份无权访问';
 }
 watch(() => [route.query.baseId, route.query.documentId], () => { routeSelectionPending = true; void load(); });
 async function create() {
@@ -262,20 +283,29 @@ onMounted(async () => { await load(); await focusUpload(); });
       <template #actions><button v-if="!auth.isDemo" class="button secondary" @click="createOpen = true"><Plus :size="16" />新建知识库</button><button v-if="!auth.isDemo" class="button primary" @click="guideUpload"><Upload :size="16" />上传文档</button></template>
     </PageHeader>
     <nav class="knowledge-section-nav" aria-label="知识与经验视图">
-      <RouterLink to="/knowledge" class="active" aria-current="page"><BookOpen :size="17" />知识文档</RouterLink>
+      <template v-if="auth.isDemo"><button type="button" :class="{ active: knowledgeScope === 'public' }" :aria-pressed="knowledgeScope === 'public'" @click="knowledgeScope = 'public'"><BookOpen :size="17" />公共知识</button><button type="button" :class="{ active: knowledgeScope === 'experience' }" :aria-pressed="knowledgeScope === 'experience'" @click="knowledgeScope = 'experience'"><Layers3 :size="17" />我的体验库</button></template>
+      <RouterLink v-else to="/knowledge" class="active" aria-current="page"><BookOpen :size="17" />知识文档</RouterLink>
       <template v-if="auth.isAdmin && !auth.isDemo">
         <RouterLink to="/knowledge/review"><BookCheck :size="17" />知识审核<ArrowUpRight :size="13" /></RouterLink>
         <RouterLink to="/knowledge/index-admin"><Database :size="17" />索引管理<ArrowUpRight :size="13" /></RouterLink>
       </template>
     </nav>
+    <VisitorKnowledgeLibrary v-if="auth.isDemo && knowledgeScope === 'experience'" :key="auth.user?.userId" :initial-document-id="Number(route.query.documentId) || undefined" />
+    <template v-if="!auth.isDemo || knowledgeScope === 'public'">
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" /><p v-if="success" class="inline-success">{{ success }}</p>
-    <section class="panel knowledge-documents-surface">
-      <div class="knowledge-library-toolbar"><label>知识库<select :value="selectedBaseId" aria-label="选择知识库" @change="selectBase(Number(($event.target as HTMLSelectElement).value))"><option v-if="!bases.length" value="">尚未创建</option><option v-for="base in bases" :key="base.id" :value="base.id">{{ base.name }}</option></select></label><input v-model="keyword" placeholder="搜索文档名称" aria-label="搜索知识文档" /><select v-model="documentStage" aria-label="文档当前阶段"><option value="">全部阶段</option><option v-for="stage in stageOptions" :key="stage">{{ stage }}</option></select><button class="button secondary" :disabled="loadingDocuments" @click="load">刷新</button><small>{{ loadingDocuments ? '读取中' : `${documents.length} 份文档` }}</small></div>
+    <div class="knowledge-split" :class="{ 'mobile-documents': mobileDocuments }">
+    <aside class="panel knowledge-base-directory" aria-label="知识库列表"><header><strong>知识库</strong><span>{{ bases.length }}</span></header><input v-model="baseKeyword" placeholder="搜索知识库" aria-label="搜索知识库" /><nav><button v-for="base in visibleBases" :key="base.id" type="button" :class="{ active: selectedBaseId === base.id }" :aria-pressed="selectedBaseId === base.id" @click="selectBase(base.id)"><BookOpen :size="18" /><span><strong>{{ base.name }}</strong><small>{{ base.description || '查看知识库文档' }}</small></span></button></nav><p v-if="!visibleBases.length">{{ bases.length ? '没有匹配的知识库' : auth.isDemo ? '暂时没有可公开浏览的知识库' : '尚未创建知识库' }}</p></aside>
+    <main class="knowledge-library-main">
+    <section class="panel knowledge-documents-surface" aria-label="当前知识库文档">
+      <header class="knowledge-library-heading"><button type="button" class="text-button knowledge-library-back" @click="mobileDocuments = false"><ArrowLeft :size="16" />知识库列表</button><h2>{{ selectedBase?.name || '选择知识库' }}</h2><small>{{ loadingDocuments ? '读取中…' : `${documents.length} 份文档` }}</small></header>
+      <div class="knowledge-library-toolbar"><input v-model="keyword" placeholder="搜索文档名称" aria-label="搜索知识文档" /><select v-model="documentStage" aria-label="文档当前阶段"><option value="">全部阶段</option><option v-for="stage in stageOptions" :key="stage">{{ stage }}</option></select><button class="button secondary" :disabled="loadingDocuments" @click="load">刷新</button></div>
       <TableSurface v-if="selectedBase && visibleDocuments.length" class="knowledge-document-table"><table><thead><tr><th>文档 / 来源</th><th>当前阶段</th><th>创建时间</th><th>下一步</th></tr></thead><tbody><tr v-for="document in visibleDocuments" :key="document.id"><td><button class="knowledge-document-link" @click="detailDocument = document"><FileText :size="20" /><span><strong>{{ document.original_name }}</strong><small>{{ document.file_type || '文档' }} · {{ (document.file_size / 1024).toFixed(1) }} KB</small></span></button></td><td><span class="knowledge-stage" :data-tone="knowledgeStage(document).tone">{{ knowledgeStage(document).label }}</span></td><td><time :title="formatDateTime(document.create_time)">{{ formatShortDateTime(document.create_time) }}</time></td><td><div class="row-actions"><button v-if="!auth.isDemo && ['待解析','解析失败'].includes(knowledgeStage(document).label)" class="button secondary small" :disabled="!!busy" @click="parse(document)">解析文档</button><button v-else-if="!auth.isDemo && knowledgeStage(document).label === '待提交审核'" class="button secondary small" :disabled="!!busy" @click="submitReview(document)">提交审核</button><button v-else-if="canEdit(document) && knowledgeStage(document).label === '审核退回'" class="button secondary small" @click="revisionDocument = document">修改后重提</button><RouterLink v-else-if="auth.isAdmin && knowledgeStage(document).label === '待审核'" class="button secondary small" :to="reviewLink(document)">进入审核</RouterLink><button class="text-button" @click="detailDocument = document">查看详情 →</button></div></td></tr></tbody></table></TableSurface>
       <div v-else-if="loadingDocuments" class="loading-state">正在加载文档…</div><EmptyState v-else-if="documents.length" title="没有符合筛选的文档" description="调整名称或阶段筛选后查看。" />
-      <GuidedEmptyState v-else kind="knowledge" :title="selectedBase ? '这个知识库还没有文档' : '尚未创建知识库'" :description="selectedBase ? '上传一份真实文档，解析并审核后发布。' : '先创建知识库，再上传用于检索的文档。'" :steps="['上传', '解析', '审核发布', '检索引用']" :action="auth.isDemo ? undefined : selectedBase ? '上传第一个文档' : '创建知识库'" @action="guideUpload" />
+      <EmptyState v-else-if="auth.isDemo" title="暂时没有可公开浏览的文档" description="可以选择其他知识库，或前往 AI 自动化查看公共案例。" />
+      <GuidedEmptyState v-else kind="knowledge" :title="selectedBase ? '这个知识库还没有文档' : '尚未创建知识库'" :description="selectedBase ? '上传一份真实文档，解析并审核后发布。' : '先创建知识库，再上传用于检索的文档。'" :steps="['上传', '解析', '审核发布', '检索引用']" :action="selectedBase ? '上传第一个文档' : '创建知识库'" @action="guideUpload" />
     </section>
     <details v-if="selectedBase?.description" class="panel knowledge-library-description"><summary>知识库用途与说明</summary><p>{{ selectedBase.description }}</p></details>
+    </main></div>
     <BaseModal v-if="uploadOpen && selectedBase && !auth.isDemo" title="上传知识文档" :description="`上传到 ${selectedBase.name}`" @close="uploadOpen = false"><div class="knowledge-upload" :class="{ 'drag-active': dragActive }" @dragenter.prevent="dragActive = true" @dragover.prevent="dragActive = true" @dragleave.prevent="dragActive = false" @drop.prevent="chooseFile($event.dataTransfer?.files?.[0])"><label><Upload :size="25" /><span>{{ selectedFile?.name || '选择或拖入文件' }}<small>PDF / DOCX / TXT / Markdown · 最大 10 MB</small></span><input ref="fileInput" type="file" aria-label="选择知识文档" accept=".pdf,.docx,.txt,.md,.markdown" @change="chooseFile(($event.target as HTMLInputElement).files?.[0])" /></label></div><p class="knowledge-modal-note">上传后解析正文，再审核发布；发布与索引状态分别核对。</p><InlineError v-if="error" :message="error" /><div class="form-actions"><button class="button secondary" @click="uploadOpen = false">取消</button><ActionButton class="primary" :disabled="!selectedFile || !!busy" :loading="busy === 'upload'" @click="upload">上传文档</ActionButton></div></BaseModal>
     <BaseModal v-if="detailDocument && !revisionDocument" :title="detailDocument.original_name" wide @close="detailDocument = undefined">
       <section class="knowledge-document-detail">
@@ -292,8 +322,9 @@ onMounted(async () => { await load(); await focusUpload(); });
           <RouterLink v-if="auth.isAdmin && ['IN_REVIEW','PUBLISHED','REJECTED'].includes(detailDocument.review_status)" class="button primary" :to="reviewLink(detailDocument)">{{ detailDocument.review_status === 'IN_REVIEW' ? '审核此文档 →' : '查看审核记录' }}</RouterLink>
           <button class="button secondary" :disabled="loadingDocuments || !!busy" @click="loadDocuments">刷新状态</button>
         </div>
+        <KnowledgeDocumentContent :key="`body-${detailDocument.id}`" :document-id="detailDocument.id" :version="detailDocument.version" />
         <KnowledgeRetrievalCheck v-if="knowledgeStage(detailDocument).label === '可检索'" :key="detailDocument.id" :document-id="detailDocument.id" />
-        <details><summary>正文与处理记录</summary><button class="button secondary" :disabled="!['PARSED','INDEXED'].includes(detailDocument.status) || !detailDocument.chunk_count" @click="showChunks(detailDocument)">查看正文切片</button><dl><div><dt>解析</dt><dd><StatusBadge :value="detailDocument.status" /></dd></div><div><dt>审核</dt><dd><StatusBadge :value="detailDocument.review_status || 'DRAFT'" /></dd></div><div><dt>索引</dt><dd><StatusBadge :value="detailDocument.index_status || 'PENDING'" /></dd></div><div><dt>切片</dt><dd>{{ detailDocument.chunk_count ?? '未取得' }}</dd></div><div><dt>嵌入模型</dt><dd>{{ detailDocument.embedding_model || '未记录' }}</dd></div></dl><RouterLink v-if="auth.isAdmin && detailDocument.index_status === 'FAILED'" to="/knowledge/index-admin">查看索引失败原因与重试</RouterLink></details>
+        <details><summary>切片与处理记录</summary><button class="button secondary" :disabled="!['PARSED','INDEXED'].includes(detailDocument.status) || !detailDocument.chunk_count" @click="showChunks(detailDocument)">查看检索切片</button><dl><div><dt>解析</dt><dd><StatusBadge :value="detailDocument.status" /></dd></div><div><dt>审核</dt><dd><StatusBadge :value="detailDocument.review_status || 'DRAFT'" /></dd></div><div><dt>索引</dt><dd><StatusBadge :value="detailDocument.index_status || 'PENDING'" /></dd></div><div><dt>切片</dt><dd>{{ detailDocument.chunk_count ?? '未取得' }}</dd></div><div><dt>嵌入模型</dt><dd>{{ detailDocument.embedding_model || '未记录' }}</dd></div></dl><RouterLink v-if="auth.isAdmin && detailDocument.index_status === 'FAILED'" to="/knowledge/index-admin">查看索引失败原因与重试</RouterLink></details>
         <details v-if="!auth.isDemo"><summary>文档管理</summary><button class="button secondary" :disabled="!!busy" @click="remove(detailDocument)">删除此文档</button></details>
       </section>
     </BaseModal>
@@ -302,5 +333,6 @@ onMounted(async () => { await load(); await focusUpload(); });
     <BaseModal v-if="chunkDocument" :title="`${chunkDocument.original_name} · 文本切片`" wide @close="chunkDocument = undefined">
       <div class="chunk-list"><article v-for="chunk in chunks" :key="String(chunk.id)"><header><strong>Chunk {{ chunk.chunk_index }}</strong><span>{{ chunk.token_count || 0 }} tokens</span></header><p>{{ chunk.content }}</p></article></div>
     </BaseModal>
+    </template>
   </div>
 </template>

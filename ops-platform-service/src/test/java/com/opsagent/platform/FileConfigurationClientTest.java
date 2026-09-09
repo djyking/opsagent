@@ -103,6 +103,73 @@ class FileConfigurationClientTest {
                 .isInstanceOf(BusinessException.class);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void visitorUsesSanitizedExecutorViewAndCannotReadDraftsOrWrite() throws Exception {
+        var visitor = new OpsPrincipal(-99, "visitor", "visitor", List.of("DEMO"));
+        SecurityContextHolder.getContext()
+                .setAuthentication(
+                        new UsernamePasswordAuthenticationToken(visitor, null, List.of()));
+        HttpClient http = mock(HttpClient.class);
+        HttpResponse<InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body())
+                .thenReturn(
+                        new ByteArrayInputStream(
+                                ("{\"code\":0,\"data\":{\"accessMode\":\"VISITOR_READ_ONLY\","
+                                     + "\"fields\":[{\"key\":\"server.port\",\"value\":8101}]}}")
+                                        .getBytes(StandardCharsets.UTF_8)));
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(response);
+        var client =
+                new FileConfigurationClient(
+                        "http://127.0.0.1:18110",
+                        "test-secret-".repeat(4),
+                        new ObjectMapper(),
+                        http);
+        assertThat(client.get("/files/auth").path("fields").get(0).path("value").asInt())
+                .isEqualTo(8101);
+        ArgumentCaptor<HttpRequest> captured = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(http).send(captured.capture(), any(HttpResponse.BodyHandler.class));
+        assertThat(captured.getValue().headers().firstValue("X-Ops-Actor-Id")).contains("-99");
+        assertThat(captured.getValue().headers().firstValue("X-Ops-Actor-Role")).contains("DEMO");
+        for (String path :
+                List.of("/drafts/a", "/tasks/a", "/files/auth/download", "/files/drafts")) {
+            assertThatThrownBy(() -> client.get(path)).isInstanceOf(BusinessException.class);
+        }
+        assertThatThrownBy(
+                        () ->
+                                client.post(
+                                        "/files/auth/drafts",
+                                        new ObjectMapper().createObjectNode()))
+                .isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void visitorFailsClosedWhenExecutorHasNotBeenUpgraded() throws Exception {
+        actor("DEMO");
+        HttpClient http = mock(HttpClient.class);
+        HttpResponse<InputStream> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body())
+                .thenReturn(
+                        new ByteArrayInputStream(
+                                "{\"code\":0,\"data\":{\"redactedContent\":\"private\"}}"
+                                        .getBytes(StandardCharsets.UTF_8)));
+        when(http.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(response);
+        var client =
+                new FileConfigurationClient(
+                        "http://127.0.0.1:18110",
+                        "test-secret-".repeat(4),
+                        new ObjectMapper(),
+                        http);
+        assertThatThrownBy(() -> client.get("/files/auth"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("脱敏视图");
+    }
+
     private static void actor(String role) {
         var actor = new OpsPrincipal(7, "test", "test", List.of(role));
         SecurityContextHolder.getContext()

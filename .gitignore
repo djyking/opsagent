@@ -1,5 +1,6 @@
 HELP.md
 *.md
+!ops-knowledge-service/src/test/resources/rag-test-docs/redis_sop.md
 !opsAgent使用文档.md
 !docs/OpsAgent_企业级改造与验收报告.md
 !docs/OpsAgent_AI_RAG_实施与验收报告.md
@@ -62,6 +63,9 @@ data/
 /nbdist/
 /.nb-gradle/
 build/
+!/ops-web/build/
+/ops-web/build/*
+!/ops-web/build/graph-cdn-plugin.ts
 !**/src/main/**/build/
 !**/src/test/**/build/
 

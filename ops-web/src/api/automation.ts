@@ -4,9 +4,10 @@ export interface Graph { nodes: WorkflowNode[]; edges: { from: string; to: strin
 export interface RunRow { id: string; definition_id: string; version: number; owner_id: number; status: string; node_id: string; created_at: string;
   ticketId?: number; incidentId?: string; ticket_id?: number; incident_id?: string; pause_requested?: boolean }
 export interface RunFilters { ticketId?: number; incidentId?: string }
+export interface TakeoverInput { reason: string; requestId: string; incidentId: string; expectedRevision: string }
 export interface Approval { id: string; run_id: string; status: string; args_hash: string; revision: number; reason?: string; expires_at: string; payload: Record<string, unknown> }
 export interface PendingApproval extends Approval { runStatus: string; ownerId: number; ticketId: number; incidentId: string;
-  nodeId: string; nodeLabel: string; runDeadline: string; pauseRequested: boolean }
+  nodeId: string; nodeLabel: string; runDeadline: string; pauseRequested: boolean; canOperate?: boolean; hint?: string }
 export interface ModelFailure { code: string; reason: string; canResume: boolean; retryable: boolean;
   recoveryAction: 'NEW_RUN' | 'CHECK_CONFIGURATION' }
 export type RunTokenBudgetMode = 'UNLIMITED' | 'LIMITED';
@@ -23,12 +24,14 @@ export interface RunUsage {
   embedding: { reservedTokens: number; reservationCount: number; actualTokens?: number | null; actualUsageKnown: boolean };
 }
 export interface RunDetail { id: string; ownerId: number; status: string; nodeId: string; createdAt: string; pauseRequested?: boolean;
+  authorization?: { reasonCode: string; hint?: string; canOperate: boolean; takeoverRequired: boolean; canTakeover: boolean };
+  takeoverRecovery?: { status: string; takenOverAt: string; updatedAt: string; message: string };
   snapshot: { graph: Graph; model: Model; hash: string }; approvals: Approval[];
   state: { ticketId: number; incidentId: string; turns: number; toolCount: number; tokens: number; tokenBudget?: number; tokenBudgetMode?: RunTokenBudgetMode; summary?: string;
     deadline: string; message?: string; modelFailure?: ModelFailure; ticketResolved: boolean;
     recoveryVerification?: { resolved?: boolean; toStatus?: string; reason?: string };
     outputs?: Record<string, unknown>; observations?: Record<string, unknown> } }
-export interface Model { provider: string; model: string; configured: boolean; toolCalling: boolean; verificationStatus: string }
+export interface Model { provider: string; model: string; configured: boolean; toolCalling: boolean; verificationStatus: string; configurationStatus?: 'MISSING_API_KEY' | 'MISSING_MODEL' | 'INVALID_ENDPOINT' | 'CONFIGURED' | 'DISABLED' }
 export interface RunEvent { id: number; type: string; nodeId: string; createdAt: string; payload: unknown }
 export interface Definition { id: string; name: string; draft_revision: number; published_version: number; graph?: Graph }
 export interface Target { targetCode: string; status: string; incidentId?: string; scenarioCode?: string; expectedRevision?: string; appliedRevision?: string;
@@ -57,6 +60,8 @@ export const automationApi = {
   cancel: (id: string) => request({ method: 'POST', url: `${base}/runs/${id}/cancel` }),
   pause: (id: string) => request({ method: 'POST', url: `${base}/runs/${id}/pause` }),
   resume: (id: string) => request({ method: 'POST', url: `${base}/runs/${id}/resume` }),
+  takeover: (id: string, data: TakeoverInput) => request<{ id: string }>({ method: 'POST', url: `${base}/runs/${encodeURIComponent(id)}/takeover`, data }),
+  takeoverPreview: (id: string) => request<{ sourceRunId: string; originalOwnerId: number; incidentId: string; targetCode: string; expectedRevision: string; canTakeover: boolean; reasonCode: string; hint: string }>({ url: `${base}/runs/${encodeURIComponent(id)}/takeover-preview` }),
   pendingApprovals: () => request<{ items: PendingApproval[]; total: number }>({ url: `${base}/approvals/pending`, params: { limit: 50 } }),
   decide: (approval: Approval, approved: boolean, reason: string) => request({ method: 'POST', url: `${base}/approvals/${approval.id}/decision`, data: { revision: approval.revision, argsHash: approval.args_hash, approved, reason } }),
   target: (targetCode = 'ops-demo-order-service') => request<Target>({ url: '/api/platform/operations/demo/target', params: { targetCode } }),

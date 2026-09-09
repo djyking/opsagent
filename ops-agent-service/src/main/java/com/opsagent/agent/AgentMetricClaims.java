@@ -39,12 +39,22 @@ final class AgentMetricClaims {
                             + "(?:约|≈)?[ \\t]*"
                             + "(?<prefixUnit>百分之)?"
                             + "(?<value>[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)(?:[eE][+-]?\\d+)?|NaN|Infinity)"
-                            + "(?![0-9.])[ \\t]*(?<unit>(?!(?:and|but)\\b)(?:"
+                            + "(?![0-9.])[ \\t]*(?:\\([ \\t]*(?:unit[ \\t]*[=:][ \\t]*|单位[ \\t]*(?:[=:为][ \\t]*)?)?"
+                            + "(?<bracketUnit>"
                             + UNIT
-                            + "))?",
+                            + ")[ \\t]*\\)(?![A-Za-z0-9/%_(])|(?<unit>(?!(?:and|but)\\b)(?:"
+                            + UNIT
+                            + ")))?",
                     Pattern.CASE_INSENSITIVE);
     private static final Pattern REFERENCE =
             Pattern.compile("ev-[a-f0-9]{8,24}", Pattern.CASE_INSENSITIVE);
+    private static final Pattern REFERENCE_TOKEN =
+            Pattern.compile(
+                    "(?<![A-Za-z0-9])ev-[a-f0-9]+(?:\\.{2,}|…+)?", Pattern.CASE_INSENSITIVE);
+    private static final Pattern BRACKET_UNIT_DECLARATION =
+            Pattern.compile(
+                    "\\([ \\t]*(?:unit\\b|单位|%|次/秒|毫秒|秒|(?:requests/s|/s|percent|ratio|rpm|ms|seconds?|s)(?![A-Za-z]))",
+                    Pattern.CASE_INSENSITIVE);
     private static final Pattern THRESHOLD =
             Pattern.compile(
                     "[ \\t]*(?:阈值|门限|目标值|建议设置(?:阈值|门限)?|建议将|threshold|target value)[ \\t:=]*",
@@ -94,6 +104,16 @@ final class AgentMetricClaims {
                 if (!observed.isNumber() || expectedUnit.isBlank())
                     throw invalid(field, metric, "原始数值或单位缺失，保持未知");
                 String givenUnit = claims.group("unit");
+                if (givenUnit == null) givenUnit = claims.group("bracketUnit");
+                if (givenUnit == null
+                        && BRACKET_UNIT_DECLARATION
+                                .matcher(text.substring(claims.end()))
+                                .lookingAt())
+                    throw invalid(
+                            field,
+                            metric,
+                            "括号内只能紧邻原值标明单个原始单位，且须完整闭合"
+                                    + unitExample(metric, observed, expectedUnit, entry));
                 if (givenUnit == null) givenUnit = claims.group("labelUnit");
                 if (givenUnit == null
                         && (claims.group("percent") != null || claims.group("prefixUnit") != null))
@@ -103,10 +123,19 @@ final class AgentMetricClaims {
                         && claims.group("metric").toLowerCase(java.util.Locale.ROOT).endsWith("ms"))
                     givenUnit = "ms";
                 if (!expectedUnit.equals(unit(givenUnit)))
-                    throw invalid(field, metric, "单位须为原始 " + expectedUnit + "，不得隐式换算或省略");
+                    throw invalid(
+                            field,
+                            metric,
+                            "单位须为原始 "
+                                    + expectedUnit
+                                    + "，不得隐式换算或省略"
+                                    + unitExample(metric, observed, expectedUnit, entry));
                 if (claims.group("labelUnit") != null
                         && !expectedUnit.equals(unit(claims.group("labelUnit"))))
-                    throw invalid(field, metric, "指标标签单位与原始单位不一致");
+                    throw invalid(
+                            field,
+                            metric,
+                            "指标标签单位与原始单位不一致" + unitExample(metric, observed, expectedUnit, entry));
                 BigDecimal reported;
                 try {
                     reported = new BigDecimal(claims.group("value"));
@@ -144,6 +173,14 @@ final class AgentMetricClaims {
         int end = text.indexOf('\n', position);
         String line = text.substring(start, end < 0 ? text.length() : end);
         Set<String> explicit = new HashSet<>();
+        var tokens = REFERENCE_TOKEN.matcher(line);
+        while (tokens.find()) {
+            if (!REFERENCE.matcher(tokens.group()).matches())
+                throw new AgentEvidenceRegistry.ReferenceError(
+                        "指标所在行的证据 ID 不完整："
+                                + tokens.group()
+                                + "；请复制 evidenceIds 中对应指标的完整 ev- ID，不得用省略号或不足 8 位的缩写");
+        }
         var ids = REFERENCE.matcher(line);
         while (ids.find()) {
             String shortId = ids.group().toLowerCase(java.util.Locale.ROOT);
@@ -192,6 +229,17 @@ final class AgentMetricClaims {
             case "s", "second", "seconds", "秒" -> "s";
             default -> raw;
         };
+    }
+
+    private static String unitExample(
+            String metric, JsonNode observed, String expectedUnit, JsonNode entry) {
+        return "；合法示例："
+                + entry.path("id").asText()
+                + " metrics."
+                + metric
+                + ".value="
+                + observed.asText()
+                + expectedUnit;
     }
 
     private static AgentEvidenceRegistry.ReferenceError invalid(

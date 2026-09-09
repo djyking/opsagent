@@ -111,6 +111,17 @@ class AgentService {
 
     private String create(
             long ticketId, String definition, String provider, String trigger, Context actor) {
+        return create(ticketId, definition, provider, trigger, actor, null, null);
+    }
+
+    private String create(
+            long ticketId,
+            String definition,
+            String provider,
+            String trigger,
+            Context actor,
+            ObjectNode takeover,
+            AgentStore.Run source) {
         JsonNode ticket =
                 clients.call(
                         "ticket",
@@ -125,11 +136,22 @@ class AgentService {
                 || ticket.path("incidentId").asText().isBlank()
                 || (ticket.path("ownerActorId").asLong() != actor.userId()
                         && !actor.roles().contains("ADMIN"))) {
-            throw AgentClients.denied();
+            throw new AgentAccessFailure(
+                    ticket.path("ownerActorId").asLong() != actor.userId()
+                                    && !actor.roles().contains("ADMIN")
+                            ? "RUN_NOT_OWNED"
+                            : "ISOLATED_SCOPE_REQUIRED");
         }
         actor = AgentTargets.bind(actor, ticket.path("affectedCiCode").asText());
+        if (takeover != null
+                && (!source.state()
+                                .path("incidentId")
+                                .asText()
+                                .equals(ticket.path("incidentId").asText())
+                        || !takeover.path("targetCode").asText().equals(actor.targetCode())))
+            throw new AgentAccessFailure("INCIDENT_CHANGED");
         if (actor.roles().contains("DEMO") && !definition.equals("isolated-recovery"))
-            throw AgentClients.denied();
+            throw new AgentAccessFailure("WORKFLOW_NOT_ALLOWED");
         JsonNode model = null;
         JsonNode models = clients.call("rag", "/internal/ai/models", "GET", null, actor);
         for (JsonNode candidate : models.path("models")) {
@@ -147,6 +169,7 @@ class AgentService {
         snapshot.set("graph", store.version(definition));
         snapshot.set("model", model);
         snapshot.set("tools", AgentTools.schemas(actor.targetCode()));
+        if (takeover != null) snapshot.set("takeover", takeover);
         snapshot.put("hash", AgentJson.hash(snapshot));
         ObjectNode state =
                 AgentJson.object()
@@ -164,6 +187,11 @@ class AgentService {
                         .put("tokenBudgetMode", tokenBudgetMode())
                         .put("ticketResolved", false);
         state.set("actor", clients.actorJson(actor));
+        if (takeover != null) {
+            state.set("takeover", takeover);
+            return store.createTakeover(
+                    source, definition, trigger, actor.userId(), snapshot, state);
+        }
         return store.create(definition, trigger, actor.userId(), snapshot, state);
     }
 
@@ -190,6 +218,9 @@ class AgentService {
         state.remove("messages");
         view.set("state", state);
         view.set("approvals", AgentJson.tree(store.approvals(id)));
+        view.set("authorization", authorization(run));
+        JsonNode recovery = store.takeoverRecovery(id);
+        if (recovery != null) view.set("takeoverRecovery", recovery);
         return view;
     }
 
@@ -234,7 +265,17 @@ class AgentService {
     Map<String, Object> pendingApprovals(int limit) {
         if (limit < 1 || limit > 50) throw AgentJson.invalid("待审批数量范围应为 1 至 50");
         Context actor = clients.current(SecurityUsers.current(), "pending-approvals");
-        return store.pendingApprovals(limit, actor.userId(), actor.roles().contains("ADMIN"));
+        Map<String, Object> pending =
+                store.pendingApprovals(limit, actor.userId(), actor.roles().contains("ADMIN"));
+        var items = AgentJson.tree(pending.get("items"));
+        for (JsonNode item : items) {
+            ObjectNode access = authorization(store.get(item.path("run_id").asText()));
+            ((ObjectNode) item).set("authorization", access);
+            ((ObjectNode) item)
+                    .put("canOperate", access.path("canOperate").asBoolean())
+                    .put("hint", access.path("message").asText());
+        }
+        return Map.of("items", items, "total", pending.get("total"));
     }
 
     Map<String, Object> summary() {
@@ -261,19 +302,179 @@ class AgentService {
     void own(String id) {
         OpsPrincipal principal = SecurityUsers.current();
         Context actor = clients.current(principal, "run-management");
-        if (store.get(id).owner() != actor.userId() && !actor.roles().contains("ADMIN"))
-            throw AgentClients.denied();
+        AgentStore.Run run = store.get(id);
+        if (run.owner() != actor.userId() && !actor.roles().contains("ADMIN"))
+            throw new AgentAccessFailure("RUN_NOT_OWNED");
+        if (actor.roles().contains("DEMO") && !isolated(run))
+            throw new AgentAccessFailure("ISOLATED_SCOPE_REQUIRED");
     }
 
     void decide(String id, int revision, String hash, boolean approved, String reason) {
         JsonNode approval = store.approval(id);
         own(approval.path("run_id").asText());
-        if (reason == null || reason.length() > 500) throw AgentJson.invalid("审批说明超出范围");
+        if (reason == null || reason.isBlank() || reason.length() > 500)
+            throw AgentJson.invalid("审批原因必填，且不能超过500字");
         AgentStore.Run run = store.get(approval.path("run_id").asText());
         if (!run.status().equals("WAITING_APPROVAL") && !run.status().equals("WAITING_INPUT")) {
             throw AgentJson.invalid("运行当前没有等待审批或补充信息");
         }
+        if (approved) {
+            // An administrator decision does not replace the original executor's identity.
+            Context executor = clients.refresh(clients.fromState(run.state()));
+            if (run.state().path("authorizationFailure").path("requiresNewRun").asBoolean())
+                throw new AgentAccessFailure("NEW_RUN_REQUIRED");
+            JsonNode intent = run.state().path("toolIntent");
+            if (java.util.Set.of("demo_config_restore", "demo_flow_restore", "demo_queue_restore")
+                    .contains(intent.path("name").asText())) {
+                JsonNode target = currentTakeoverTarget(run, executor);
+                if (!target.path("expectedRevision")
+                        .asText()
+                        .equals(intent.path("arguments").path("expectedRevision").asText()))
+                    throw new AgentAccessFailure("TARGET_REVISION_CHANGED");
+            }
+        }
         store.decide(id, revision, hash, approved, reason, SecurityUsers.current().userId());
+    }
+
+    private boolean isolated(AgentStore.Run run) {
+        return AgentTargets.supported(run.state().path("targetCode").asText(AgentTargets.ORDER))
+                && !run.state().path("incidentId").asText().isBlank()
+                && !run.snapshot().has("configurationProposal");
+    }
+
+    private ObjectNode authorization(AgentStore.Run run) {
+        String code = "";
+        boolean invalidIdentity = false;
+        try {
+            Context original = clients.fromState(run.state());
+            JsonNode identity = clients.inspectActor(original);
+            if (identity.path("userId").asLong() != run.owner()) code = "ACTOR_ID_MISMATCH";
+            else if (!identity.path("active").asBoolean()) {
+                code = AgentClients.inactiveReason(identity);
+                invalidIdentity = true;
+            } else if (original.roles().stream()
+                    .noneMatch(
+                            role -> {
+                                for (JsonNode current : identity.path("roles"))
+                                    if (role.equals(current.asText())) return true;
+                                return false;
+                            })) {
+                code = "ACTOR_ROLE_REVOKED";
+                invalidIdentity = true;
+            } else if (run.state().path("authorizationFailure").path("requiresNewRun").asBoolean())
+                code = "NEW_RUN_REQUIRED";
+            else if (!Instant.parse(run.state().path("deadline").asText()).isAfter(Instant.now()))
+                code = "RUN_DEADLINE_EXPIRED";
+        } catch (RuntimeException unavailable) {
+            code = "ACTOR_STATUS_UNAVAILABLE";
+        }
+        boolean canTakeover =
+                invalidIdentity
+                        && isolated(run)
+                        && AgentStore.takeoverIdle(run)
+                        && SecurityUsers.current().roles().contains("ADMIN");
+        String hint = code.isBlank() ? "" : AgentAccessFailure.message(code);
+        return AgentJson.object()
+                .put("canOperate", code.isBlank())
+                .put("reasonCode", code)
+                .put("message", hint)
+                .put("hint", hint)
+                .put("takeoverRequired", invalidIdentity)
+                .put("canTakeover", canTakeover);
+    }
+
+    JsonNode takeoverPreview(String id) {
+        admin();
+        AgentStore.Run source = store.get(id);
+        ObjectNode access = authorization(source);
+        if (!access.path("canTakeover").asBoolean())
+            throw new AgentAccessFailure(
+                    access.path("takeoverRequired").asBoolean()
+                            ? "RUN_BUSY"
+                            : "TAKEOVER_NOT_REQUIRED");
+        Context actor =
+                AgentTargets.bind(
+                        clients.current(SecurityUsers.current(), "takeover-preview"),
+                        source.state().path("targetCode").asText());
+        JsonNode target = currentTakeoverTarget(source, actor);
+        return AgentJson.object()
+                .put("sourceRunId", id)
+                .put("originalOwnerId", source.owner())
+                .put("incidentId", source.state().path("incidentId").asText())
+                .put("targetCode", actor.targetCode())
+                .put("expectedRevision", target.path("expectedRevision").asText())
+                .put("canTakeover", true)
+                .put("reasonCode", access.path("reasonCode").asText())
+                .put("hint", "将创建管理员负责的新运行，重新诊断并生成新的精确审批；旧运行保持历史结果。");
+    }
+
+    String takeover(
+            String id, String requestId, String reason, String incidentId, String revision) {
+        admin();
+        if (!requestId.matches("[a-zA-Z0-9_-]{10,80}")
+                || reason.isBlank()
+                || reason.length() > 500
+                || !revision.matches("[a-f0-9]{64}")) throw AgentJson.invalid("接管原因、请求标识或现场版本无效");
+        long operator = SecurityUsers.current().userId();
+        String existing = store.takeoverRun(id, operator, requestId, reason, incidentId, revision);
+        if (existing != null) return existing;
+        AgentStore.Run source = store.get(id);
+        ObjectNode authorization = authorization(source);
+        if (!authorization.path("canTakeover").asBoolean())
+            throw new AgentAccessFailure(
+                    authorization.path("takeoverRequired").asBoolean()
+                            ? "RUN_BUSY"
+                            : "TAKEOVER_NOT_REQUIRED");
+        if (!source.state().path("incidentId").asText().equals(incidentId))
+            throw new AgentAccessFailure("INCIDENT_CHANGED");
+        Context actor =
+                AgentTargets.bind(
+                        clients.current(SecurityUsers.current(), UUID.randomUUID().toString()),
+                        source.state().path("targetCode").asText());
+        JsonNode target = currentTakeoverTarget(source, actor);
+        if (!revision.equals(target.path("expectedRevision").asText()))
+            throw new AgentAccessFailure("TARGET_REVISION_CHANGED");
+        ObjectNode handoff =
+                AgentJson.object()
+                        .put("sourceRunId", id)
+                        .put("originalOwnerId", source.owner())
+                        .put("takenOverBy", operator)
+                        .put("requestId", requestId)
+                        .put("reason", reason)
+                        .put("incidentId", incidentId)
+                        .put("targetCode", actor.targetCode())
+                        .put("expectedRevision", revision)
+                        .put("at", Instant.now().toString())
+                        .put("identityReasonCode", authorization.path("reasonCode").asText());
+        return create(
+                source.state().path("ticketId").asLong(),
+                "isolated-recovery",
+                source.snapshot().path("model").path("provider").asText(),
+                "takeover:" + id,
+                actor,
+                handoff,
+                source);
+    }
+
+    private JsonNode currentTakeoverTarget(AgentStore.Run source, Context actor) {
+        JsonNode target =
+                clients.call(
+                        "platform",
+                        AgentTargets.path(actor.targetCode()) + "/snapshot",
+                        "GET",
+                        null,
+                        actor);
+        if (!"ISOLATED_DEMO".equals(target.path("scope").asText())
+                || !actor.targetCode().equals(target.path("targetCode").asText()))
+            throw new AgentAccessFailure("ISOLATED_SCOPE_REQUIRED");
+        if (!source.state().path("incidentId").asText().equals(target.path("incidentId").asText()))
+            throw new AgentAccessFailure("INCIDENT_CHANGED");
+        if (!"FAULT_ACTIVE".equals(target.path("status").asText()))
+            throw new AgentAccessFailure("TARGET_ALREADY_RECOVERED");
+        if (!"APPLIED".equals(target.path("configurationStatus").asText())
+                || !target.path("expectedRevision").asText().matches("[a-f0-9]{64}"))
+            throw new AgentAccessFailure("TARGET_REVISION_CHANGED");
+        return target;
     }
 
     void admin() {

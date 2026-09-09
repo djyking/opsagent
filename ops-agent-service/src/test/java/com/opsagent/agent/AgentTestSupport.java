@@ -56,6 +56,7 @@ class AgentTestSupport {
                 AgentJson.object()
                         .put("runId", id)
                         .put("ticketId", 7)
+                        .put("targetCode", AgentTargets.ORDER)
                         .put("incidentId", "incident-1")
                         .put("episodeId", "a".repeat(64))
                         .put("trigger", trigger)
@@ -169,6 +170,15 @@ class AgentTestSupport {
 
         @Override
         JsonNode call(String audience, String path, String method, JsonNode body, Context actor) {
+            if (audience.equals("auth")) {
+                ObjectNode identity =
+                        AgentJson.object()
+                                .put("active", true)
+                                .put("userId", actor.userId())
+                                .put("expiresAt", Instant.now().plusSeconds(600).toString());
+                identity.set("roles", AgentJson.tree(actor.roles()));
+                return identity;
+            }
             if (path.equals("/internal/ai/turns")) {
                 modelRequests.add(body.deepCopy());
                 return model.apply(body);

@@ -220,7 +220,7 @@ class AgentStore {
                     }
                     long active =
                             jdbc.queryForObject(
-                                    """
+"""
 SELECT COUNT(*) FROM agent_run
 WHERE status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
 """,
@@ -279,6 +279,142 @@ WHERE status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
                         owner,
                         incident);
         return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    String takeoverRun(
+            String sourceId,
+            long owner,
+            String requestId,
+            String reason,
+            String incidentId,
+            String revision) {
+        List<String> ids =
+                jdbc.queryForList(
+                        "SELECT id FROM agent_run WHERE trigger_key=?",
+                        String.class,
+                        "takeover:" + sourceId);
+        if (ids.isEmpty()) return null;
+        Run run = get(ids.get(0));
+        JsonNode handoff = run.snapshot().path("takeover");
+        if (run.owner() != owner
+                || !requestId.equals(handoff.path("requestId").asText())
+                || !reason.equals(handoff.path("reason").asText())
+                || !incidentId.equals(handoff.path("incidentId").asText())
+                || !revision.equals(handoff.path("expectedRevision").asText()))
+            throw new AgentAccessFailure("TAKEOVER_ALREADY_CREATED");
+        return run.id();
+    }
+
+    JsonNode takeoverRecovery(String sourceId) {
+        List<String> ids =
+                jdbc.queryForList(
+                        "SELECT id FROM agent_run WHERE trigger_key=?",
+                        String.class,
+                        "takeover:" + sourceId);
+        if (ids.isEmpty()) return null;
+        Run successor = get(ids.get(0));
+        String updated =
+                jdbc.queryForObject(
+                        "SELECT updated_at FROM agent_run WHERE id=?",
+                        (rs, row) -> rs.getTimestamp(1).toInstant().toString(),
+                        successor.id());
+        return AgentJson.object()
+                .put("status", successor.status())
+                .put("takenOverAt", successor.snapshot().path("takeover").path("at").asText())
+                .put("updatedAt", updated)
+                .put("message", "管理员已创建独立接管运行；恢复证据和最终确认请在原事件中查看。");
+    }
+
+    static boolean takeoverIdle(Run run) {
+        if (!List.of(
+                        "PAUSED",
+                        "WAITING_APPROVAL",
+                        "WAITING_INPUT",
+                        "NEEDS_ATTENTION",
+                        "EXPIRED",
+                        "REJECTED",
+                        "CANCELLED",
+                        "BUDGET_EXCEEDED")
+                .contains(run.status())) return false;
+        JsonNode intent = run.state().path("toolIntent");
+        return !intent.has("preparedRequest")
+                || run.state().path("observations").has(intent.path("id").asText());
+    }
+
+    String createTakeover(
+            Run source,
+            String definition,
+            String trigger,
+            long owner,
+            ObjectNode snapshot,
+            ObjectNode state) {
+        return tx.execute(
+                transaction -> {
+                    jdbc.queryForObject(
+                            "SELECT id FROM agent_runtime_guard WHERE id=1 FOR UPDATE",
+                            Integer.class);
+                    JsonNode handoff = snapshot.path("takeover");
+                    String prior =
+                            takeoverRun(
+                                    source.id(),
+                                    owner,
+                                    handoff.path("requestId").asText(),
+                                    handoff.path("reason").asText(),
+                                    handoff.path("incidentId").asText(),
+                                    handoff.path("expectedRevision").asText());
+                    if (prior != null) return prior;
+                    jdbc.queryForObject(
+                            "SELECT id FROM agent_run WHERE id=? FOR UPDATE",
+                            String.class,
+                            source.id());
+                    Run current = get(source.id());
+                    if (!takeoverIdle(current)
+                            || !current.status().equals(source.status())
+                            || !current.state().equals(source.state())
+                            || current.owner() != source.owner())
+                        throw new AgentAccessFailure("RUN_BUSY");
+                    Long inFlight =
+                            jdbc.queryForObject(
+                                    "SELECT COUNT(*) FROM agent_run WHERE incident_id=? AND id<>?"
+                                        + " AND status IN"
+                                        + " ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')",
+                                    Long.class,
+                                    source.state().path("incidentId").asText(),
+                                    source.id());
+                    if (inFlight != null && inFlight > 0) throw new AgentAccessFailure("RUN_BUSY");
+                    if (List.of("PAUSED", "WAITING_APPROVAL", "WAITING_INPUT")
+                            .contains(current.status())) {
+                        ObjectNode stopped = current.state().deepCopy();
+                        String code = handoff.path("identityReasonCode").asText();
+                        stopped.put("message", code + "：" + AgentAccessFailure.message(code));
+                        stopped.set(
+                                "authorizationFailure",
+                                AgentJson.object()
+                                        .put("reasonCode", code)
+                                        .put("message", stopped.path("message").asText())
+                                        .put("at", Instant.now().toString())
+                                        .put("requiresNewRun", true)
+                                        .put("originalOwnerId", source.owner()));
+                        jdbc.update(
+                                "UPDATE agent_run SET"
+                                        + " status='NEEDS_ATTENTION',state_json=?,updated_at=NOW(3)"
+                                        + " WHERE id=?",
+                                stopped.toString(),
+                                current.id());
+                        jdbc.update(
+                                "UPDATE agent_approval SET status='EXPIRED',revision=revision+1"
+                                        + " WHERE run_id=? AND status='PENDING'",
+                                current.id());
+                        event(
+                                current.id(),
+                                "RUN_AUTHORIZATION_EXPIRED",
+                                current.node(),
+                                stopped.path("authorizationFailure"));
+                    }
+                    String created = create(definition, trigger, owner, snapshot, state);
+                    event(created, "ADMIN_TAKEOVER_CREATED", "", handoff);
+                    return created;
+                });
     }
 
     Run get(String id) {
@@ -362,7 +498,7 @@ WHERE status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
                 status -> {
                     List<String> ids =
                             jdbc.queryForList(
-                                    """
+"""
 SELECT id FROM agent_run WHERE status IN ('QUEUED','RUNNING')
 AND next_attempt<=NOW(3) AND (lease_until IS NULL OR lease_until<NOW(3))
 ORDER BY next_attempt LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -398,7 +534,7 @@ ORDER BY next_attempt LIMIT 1 FOR UPDATE SKIP LOCKED
                 transaction -> {
                     int updated =
                             jdbc.update(
-                                    """
+"""
 UPDATE agent_run SET status=CASE WHEN cancel_requested=TRUE
 AND ? IN ('QUEUED','WAITING_APPROVAL','WAITING_INPUT') THEN 'QUEUED'
 WHEN pause_requested=TRUE AND ?='QUEUED' THEN 'PAUSED' ELSE ? END,
@@ -577,7 +713,7 @@ WHERE id=? AND fence=? AND lease_until>NOW(3)
                 transaction -> {
                     String id = UUID.randomUUID().toString();
                     jdbc.update(
-                            """
+"""
 INSERT INTO agent_approval(id,run_id,call_id,args_hash,payload_json,status,expires_at)
 VALUES(?,?,?,?,?,'PENDING',?)
 """,
@@ -615,7 +751,7 @@ VALUES(?,?,?,?,?,'PENDING',?)
                                     .equals(approval.path("call_id").asText())) throw conflict();
                     int updated =
                             jdbc.update(
-                                    """
+"""
 UPDATE agent_approval SET status=?,revision=revision+1,decided_by=?,reason=?
 WHERE id=? AND status='PENDING' AND revision=? AND args_hash=? AND expires_at>NOW(3)
 """,
@@ -627,7 +763,7 @@ WHERE id=? AND status='PENDING' AND revision=? AND args_hash=? AND expires_at>NO
                                     hash);
                     if (updated != 1) throw conflict();
                     jdbc.update(
-                            """
+"""
 UPDATE agent_run SET status='QUEUED',next_attempt=NOW(3),updated_at=NOW(3)
 WHERE id=? AND status IN ('WAITING_APPROVAL','WAITING_INPUT')
 """,
@@ -656,7 +792,7 @@ WHERE id=? AND status IN ('WAITING_APPROVAL','WAITING_INPUT')
         tx.executeWithoutResult(
                 status -> {
                     jdbc.update(
-                            """
+"""
 UPDATE agent_run SET cancel_requested=TRUE,
 status=CASE WHEN lease_until>NOW(3) THEN status ELSE 'QUEUED' END,next_attempt=NOW(3)
 WHERE id=? AND status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITING_INPUT')
@@ -669,7 +805,7 @@ WHERE id=? AND status IN ('QUEUED','RUNNING','PAUSED','WAITING_APPROVAL','WAITIN
 
     void expireWaiting() {
         jdbc.update(
-                """
+"""
 UPDATE agent_run r SET status='QUEUED',next_attempt=NOW(3)
 WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
 (SELECT 1 FROM agent_approval a WHERE a.run_id=r.id AND a.status='PENDING' AND a.expires_at<NOW(3))
@@ -704,6 +840,10 @@ WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
                     jdbc.queryForObject(
                             "SELECT id FROM agent_run WHERE id=? FOR UPDATE", String.class, id);
                     Run current = get(id);
+                    if (current.state()
+                            .path("authorizationFailure")
+                            .path("requiresNewRun")
+                            .asBoolean()) throw new AgentAccessFailure("NEW_RUN_REQUIRED");
                     if (current.cancelled()
                             || !List.of(
                                                     "PAUSED",

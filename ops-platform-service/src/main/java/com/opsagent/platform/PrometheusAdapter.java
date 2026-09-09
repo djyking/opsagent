@@ -3,6 +3,8 @@ package com.opsagent.platform;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import jakarta.annotation.PreDestroy;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -19,9 +21,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Flow;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * 固定 PromQL 的 Prometheus 适配器；不存在或过期的样本保留为缺失。
@@ -31,9 +38,23 @@ import java.util.concurrent.TimeUnit;
  */
 @Component
 class PrometheusAdapter {
+    private static final Duration COLLECTION_BUDGET = Duration.ofSeconds(8);
     private final ObjectMapper json;
     private final HttpClient http =
             HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+    private final ThreadPoolExecutor collectors =
+            new ThreadPoolExecutor(
+                    4,
+                    4,
+                    0,
+                    TimeUnit.SECONDS,
+                    new ArrayBlockingQueue<>(40),
+                    task -> {
+                        Thread thread = new Thread(task, "prometheus-collection");
+                        thread.setDaemon(true);
+                        return thread;
+                    },
+                    new ThreadPoolExecutor.AbortPolicy());
 
     @Value("${ops.monitor.prometheus-url:http://localhost:9090}")
     private String baseUrl;
@@ -105,43 +126,87 @@ class PrometheusAdapter {
     }
 
     Snapshot collect(String range) {
-        Instant now = Instant.now();
+        return collect(range, COLLECTION_BUDGET);
+    }
+
+    Snapshot collect(String range, Duration budget) {
+        long deadline = System.nanoTime() + budget.toNanos();
         Map<String, List<Sample>> data = new LinkedHashMap<>();
         Map<String, String> errors = new LinkedHashMap<>();
-        boolean healthy = true;
-        String message = "Prometheus 实时样本；请求指标为所选窗口平均速率";
-        Map<String, String> queries = queries(range);
-        for (var entry : queries.entrySet()) {
+        Map<String, String> work = new LinkedHashMap<>(queries(range));
+        work.put("targets", "");
+        Map<String, Future<Reading>> pending = new LinkedHashMap<>();
+        for (var entry : work.entrySet()) {
             try {
-                data.put(entry.getKey(), query(entry.getValue()));
-            } catch (Exception exception) {
-                if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
-                data.put(entry.getKey(), List.of());
+                pending.put(
+                        entry.getKey(),
+                        collectors.submit(
+                                () ->
+                                        "targets".equals(entry.getKey())
+                                                ? new Reading(List.of(), targets(deadline))
+                                                : new Reading(
+                                                        query(entry.getValue(), deadline),
+                                                        List.of())));
+            } catch (RejectedExecutionException exception) {
+                // A saturated collector remains bounded; missing sources never become zero.
                 errors.put(entry.getKey(), "QUERY_UNAVAILABLE");
-                healthy = false;
-                message = "Prometheus 部分数据暂不可用，缺失项显示未知";
-                if ("up".equals(entry.getKey())) break;
             }
         }
         List<Target> targets = List.of();
-        if (!errors.containsKey("up")) {
-            try {
-                targets = targets();
-            } catch (Exception exception) {
-                if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
-                errors.put("targets", "TARGETS_UNAVAILABLE");
-                healthy = false;
+        try {
+            for (var entry : pending.entrySet()) {
+                Future<Reading> future = entry.getValue();
+                try {
+                    long remaining = deadline - System.nanoTime();
+                    Reading result;
+                    if (future.isDone()) result = future.get();
+                    else if (remaining > 0) result = future.get(remaining, TimeUnit.NANOSECONDS);
+                    else throw new TimeoutException();
+                    if ("targets".equals(entry.getKey())) targets = result.targets();
+                    else data.put(entry.getKey(), result.samples());
+                } catch (Exception exception) {
+                    if (exception instanceof InterruptedException)
+                        Thread.currentThread().interrupt();
+                    errors.put(
+                            entry.getKey(),
+                            "targets".equals(entry.getKey())
+                                    ? "TARGETS_UNAVAILABLE"
+                                    : "QUERY_UNAVAILABLE");
+                }
             }
+        } finally {
+            pending.values()
+                    .forEach(
+                            future -> {
+                                if (!future.isDone()) future.cancel(true);
+                            });
+            collectors.purge();
         }
-        return new Snapshot(healthy, message, now, data, targets, errors);
+        work.keySet().stream()
+                .filter(key -> !"targets".equals(key))
+                .forEach(key -> data.putIfAbsent(key, List.of()));
+        return new Snapshot(
+                errors.isEmpty(),
+                errors.isEmpty() ? "Prometheus 实时样本；请求指标为所选窗口平均速率" : "Prometheus 部分数据暂不可用，缺失项显示未知",
+                Instant.now(),
+                data,
+                targets,
+                errors);
+    }
+
+    private record Reading(List<Sample> samples, List<Target> targets) {}
+
+    @PreDestroy
+    void close() {
+        collectors.shutdownNow();
     }
 
     long maximumSampleAge() {
         return Math.max(1, maximumSampleAge);
     }
 
-    private List<Target> targets() throws Exception {
-        JsonNode root = request("/api/v1/targets?state=active");
+    private List<Target> targets(long deadline) throws Exception {
+        JsonNode root = request("/api/v1/targets?state=active", deadline);
         if (!root.path("data").path("activeTargets").isArray()) {
             throw new IllegalStateException("Prometheus target response invalid");
         }
@@ -186,15 +251,24 @@ class PrometheusAdapter {
         return Map.copyOf(result);
     }
 
-    private JsonNode request(String path) throws Exception {
+    private JsonNode request(String path, long deadline) throws Exception {
+        long remaining = deadline - System.nanoTime();
+        if (remaining <= 0 || Thread.currentThread().isInterrupted()) throw new TimeoutException();
         HttpRequest request =
                 HttpRequest.newBuilder(URI.create(baseUrl + path))
-                        .timeout(Duration.ofSeconds(3))
+                        .timeout(Duration.ofNanos(Math.min(remaining, TimeUnit.SECONDS.toNanos(3))))
                         .GET()
                         .build();
         var future = http.sendAsync(request, ignored -> new LimitedBody());
         try {
-            var response = future.get(4, TimeUnit.SECONDS);
+            var response =
+                    future.get(
+                            Math.max(
+                                    1,
+                                    Math.min(
+                                            deadline - System.nanoTime(),
+                                            TimeUnit.SECONDS.toNanos(4))),
+                            TimeUnit.NANOSECONDS);
             if (response.statusCode() != 200)
                 throw new IllegalStateException("Prometheus HTTP unavailable");
             JsonNode root = json.readTree(response.body());
@@ -250,8 +324,14 @@ class PrometheusAdapter {
     }
 
     List<Sample> query(String query) throws Exception {
+        return query(query, System.nanoTime() + TimeUnit.SECONDS.toNanos(4));
+    }
+
+    private List<Sample> query(String query, long deadline) throws Exception {
         JsonNode root =
-                request("/api/v1/query?query=" + URLEncoder.encode(query, StandardCharsets.UTF_8));
+                request(
+                        "/api/v1/query?query=" + URLEncoder.encode(query, StandardCharsets.UTF_8),
+                        deadline);
         List<Sample> result = new ArrayList<>();
         for (JsonNode item : root.path("data").path("result")) {
             JsonNode values = item.path("values");

@@ -14,7 +14,7 @@ import java.util.Map;
  * @since 2026/9/3
  */
 final class AssistantTokenBudget implements AutoCloseable {
-    static final int LIMIT = 10_000;
+    static final int LIMIT = 50_000;
     private static final ThreadLocal<AssistantTokenBudget> CURRENT = new ThreadLocal<>();
     private static final ObjectMapper JSON = new ObjectMapper();
     private final AssistantTokenBudget previous;
@@ -62,7 +62,7 @@ final class AssistantTokenBudget implements AutoCloseable {
             throw new AiProviderException(
                     provider,
                     0,
-                    "本次回答的输入、输出及重试累计额度为 10,000 token，剩余额度不足，未发送新请求。请缩小问题范围或减少附件。",
+                    "本次回答的输入、输出及重试累计额度为 50,000 token，剩余额度不足，未发送新请求。请缩小问题范围或减少附件。",
                     null,
                     AiProviderException.FailureKind.BUDGET);
         String key = original.containsKey("max_tokens") ? "max_tokens" : "max_output_tokens";

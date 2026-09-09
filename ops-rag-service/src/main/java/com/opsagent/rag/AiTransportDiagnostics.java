@@ -44,6 +44,7 @@ final class AiTransportDiagnostics {
                 cause = cause.getCause()) {
             if (cause instanceof HttpConnectTimeoutException) return "CONNECT_TIMEOUT";
             if (cause instanceof HttpTimeoutException) return "RESPONSE_TIMEOUT";
+            if (cause instanceof java.net.SocketTimeoutException) return "RESPONSE_TIMEOUT";
             if (cause instanceof UnknownHostException
                     || cause instanceof UnresolvedAddressException) return "DNS_FAILURE";
             if (cause instanceof SSLHandshakeException) return "TLS_HANDSHAKE";

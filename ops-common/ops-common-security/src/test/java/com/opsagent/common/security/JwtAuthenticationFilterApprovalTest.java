@@ -31,7 +31,7 @@ class JwtAuthenticationFilterApprovalTest {
         JwtProperties properties = new JwtProperties();
         properties.setSecret("approval-filter-test-secret-at-least-32-bytes");
         jwt = new JwtService(properties);
-        filter = new JwtAuthenticationFilter(jwt);
+        filter = new JwtAuthenticationFilter(jwt, principal -> {});
     }
 
     @AfterEach

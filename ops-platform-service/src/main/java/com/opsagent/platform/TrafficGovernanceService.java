@@ -83,7 +83,7 @@ class TrafficGovernanceService {
                 request == null ? null : request.avgRt(),
                 request == null ? null : request.activeThreads(),
                 snapshot.status().equals("AVAILABLE")
-                        ? "Sentinel 当前滑动窗口；RT/并发来自完整问答请求。无样本显示未知，独立AI预算不计入本指标。"
+                        ? "Sentinel 当前短滑动窗口，具体时长见各资源；RT/并发来自完整问答请求。空闲窗口会归零，暂无样本显示—；独立AI预算不计入。"
                         : "Sentinel 运行态暂不可读或未启用，指标未知。",
                 snapshot.observedAt());
     }

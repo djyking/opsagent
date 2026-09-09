@@ -176,10 +176,12 @@ class OperationsAnswerServiceTest {
                         operations);
         var result =
                 rag.stream(plan, delta -> {}, new LlmInvocationService.AuditContext(7, "trace"));
-        assertThat(result.provider()).isEqualTo("operations");
+        assertThat(result.provider()).isEqualTo("openai");
         assertThat(result.references()).hasSize(3);
         assertThat(result.answer()).contains("未切换其他模型", "未提供");
         assertThat(result.metadata().degradedReason()).isEqualTo("LLM_UNAVAILABLE");
+        assertThat(result.metadata().generationComplete()).isFalse();
+        assertThat(result.metadata().finishReason()).isEqualTo("provider_unavailable");
         verify(invocation, never()).stream(anyString(), any(), any(), any());
     }
 

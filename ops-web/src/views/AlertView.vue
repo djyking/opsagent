@@ -22,7 +22,7 @@ const route = useRoute(), router = useRouter();
 const allAlerts = ref<Record<string, unknown>[]>([]);
 const service = computed(() => typeof route.query.ciCode === 'string' ? route.query.ciCode : typeof route.query.service === 'string' ? route.query.service : '');
 const alerts = computed(() => service.value ? allAlerts.value.filter(alert => alert.affectedCiCode === service.value || alert.serviceCode === service.value) : allAlerts.value);
-const status = ref(['firing', 'resolved', ''].includes(String(route.query.status)) ? String(route.query.status) : 'firing');
+const status = ref(['firing', 'resolved', ''].includes(String(route.query.status)) ? String(route.query.status) : '');
 const serviceParent = computed(() => ({ path: '/observability/topology', query: { ciCode: service.value,
   ...(typeof route.query.environment === 'string' ? { environment: route.query.environment } : {}),
   ...(typeof route.query.timeRange === 'string' ? { timeRange: route.query.timeRange } : {}) } }));
@@ -55,7 +55,7 @@ async function load() {
   catch (cause) { if (version === requestVersion) error.value = cause instanceof Error ? cause.message : "告警加载失败"; }
   finally { if (version === requestVersion) loading.value = false; }
 }
-watch(() => route.query.status, value => { status.value = ['firing', 'resolved', ''].includes(String(value)) ? String(value) : 'firing'; void load(); }, { immediate: true });
+watch(() => route.query.status, value => { status.value = ['firing', 'resolved', ''].includes(String(value)) ? String(value) : ''; void load(); }, { immediate: true });
 watch([alerts, () => route.query.alertId], () => { selected.value = alerts.value.find(alert => String(alert.id) === route.query.alertId); }, { immediate: true });
 onBeforeUnmount(() => { requestVersion++; });
 </script>

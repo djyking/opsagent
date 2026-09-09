@@ -68,10 +68,21 @@ public class RagConversationController {
             @Min(1) Long documentId,
             @Min(1) Long ticketId,
             @Size(max = 20) String provider,
-            @Valid ObservabilityContext observabilityContext) {
+            @Valid ObservabilityContext observabilityContext,
+            AnswerStyle answerStyle) {
         QuestionRequest(
                 String question, Integer topK, Long documentId, Long ticketId, String provider) {
-            this(question, topK, documentId, ticketId, provider, null);
+            this(question, topK, documentId, ticketId, provider, null, null);
+        }
+
+        QuestionRequest(
+                String question,
+                Integer topK,
+                Long documentId,
+                Long ticketId,
+                String provider,
+                ObservabilityContext observabilityContext) {
+            this(question, topK, documentId, ticketId, provider, observabilityContext, null);
         }
     }
 
@@ -120,27 +131,23 @@ public class RagConversationController {
         try {
             long turnId = conversations.begin(id, userId, request.question().trim());
             startedTurn = turnId;
-            String context = conversations.context(id, userId);
-            var plan =
-                    request.observabilityContext() == null
-                            ? rag.prepareStream(
-                                    request.question().trim(),
-                                    request.topK(),
-                                    request.documentId(),
-                                    request.ticketId(),
-                                    context,
-                                    request.provider())
-                            : rag.prepareStream(
-                                    request.question().trim(),
-                                    request.topK(),
-                                    request.documentId(),
-                                    request.ticketId(),
-                                    context,
-                                    request.provider(),
-                                    request.observabilityContext());
-            return streaming.open(
-                    plan,
+            return streaming.openPrepared(
+                    progress -> {
+                        progress.accept("history");
+                        String context = conversations.context(id, userId);
+                        return rag.prepareStream(
+                                request.question().trim(),
+                                request.topK(),
+                                request.documentId(),
+                                request.ticketId(),
+                                context,
+                                request.provider(),
+                                request.observabilityContext(),
+                                request.answerStyle(),
+                                progress);
+                    },
                     rag.auditContext(),
+                    request.answerStyle(),
                     answer -> {
                         try {
                             conversations.complete(id, userId, turnId, answer);
