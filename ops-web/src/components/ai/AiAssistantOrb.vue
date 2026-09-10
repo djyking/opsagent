@@ -4,6 +4,7 @@ import { Bot, ChevronRight, Pause, Play, RotateCcw, X } from '@lucide/vue';
 import { useAiAssistantStore } from '@/stores/ai-assistant';
 import { useAuthStore } from '@/stores/auth';
 import { assistantPlacement } from '@/utils/assistant-placement';
+import { claimAssistantWelcome } from '@/utils/assistant-welcome';
 const assistant = useAiAssistantStore();
 const auth = useAuthStore();
 const motion = ref(true), jumping = ref(false), hovering = ref(false);
@@ -11,8 +12,6 @@ const position = ref<{ x: number; y: number }>();
 const viewport = ref({ width: 1366, height: 768 });
 const dragging = ref(false);
 const welcomeVisible = ref(false);
-const welcomedActors = new Set<number>();
-const welcomeKey = 'opsagent-assistant-welcome:v2';
 const safePosition = ref<{ left: number; top: number }>();
 let placementTimer: ReturnType<typeof setTimeout> | undefined;
 let mounted = false;
@@ -28,15 +27,8 @@ const preferredPosition = computed(() => {
 const orbStyle = computed(() => { const point = dragging.value ? preferredPosition.value : safePosition.value || preferredPosition.value; return { left: `${point.left}px`, top: `${point.top}px`, right: 'auto', bottom: 'auto' }; });
 const welcomeStyle = computed(() => ({ left: `${Math.max(12, Math.min(viewport.value.width - 312, Number.parseFloat(orbStyle.value.left) - 312))}px`, top: `${Math.max(76, Math.min(viewport.value.height - 210, Number.parseFloat(orbStyle.value.top) - 100))}px` }));
 function offerWelcome() {
-  const actor = auth.user?.userId;
-  if (!mounted || !actor || welcomedActors.has(actor) || assistant.minimized) return;
-  try {
-    const previous = JSON.parse(localStorage.getItem(welcomeKey) || '{}');
-    if (Number(previous[actor]) > Date.now()) return;
-    const active = Object.fromEntries(Object.entries(previous).filter(([, until]) => Number(until) > Date.now()));
-    localStorage.setItem(welcomeKey, JSON.stringify({ ...active, [actor]: Date.now() + 24 * 60 * 60 * 1000 }));
-  } catch { /* The in-memory identity guard also works when storage is unavailable. */ }
-  welcomedActors.add(actor); welcomeVisible.value = true;
+  if (!mounted || assistant.open || assistant.minimized) return;
+  if (claimAssistantWelcome(auth.user?.userId, auth.identity)) welcomeVisible.value = true;
 }
 function avoidContent() {
   if (dragging.value || pointer || assistant.open || document.hidden) return;
@@ -77,7 +69,7 @@ function loadPreference() {
 function savePreference() {
   try { localStorage.setItem(key(), JSON.stringify({ motion: motion.value, minimized: assistant.minimized, position: position.value })); } catch { /* Session preference still applies. */ }
 }
-function minimize(value: boolean) { assistant.minimized = value; jumping.value = false; welcomeVisible.value = false; savePreference(); }
+function minimize(value: boolean) { assistant.minimized = value; jumping.value = false; welcomeVisible.value = false; savePreference(); if (!value) offerWelcome(); }
 function toggleMotion() { motion.value = !motion.value; jumping.value = false; savePreference(); }
 function blocked() {
   return !motion.value || dragging.value || reduced?.matches || document.hidden || hovering.value || assistant.open || assistant.minimized || assistant.busy
@@ -86,9 +78,9 @@ function blocked() {
     || !!document.querySelector('[aria-modal="true"],dialog[open],.el-overlay-dialog');
 }
 function stopWhenBlocked() { if (blocked()) jumping.value = false; }
-watch(() => auth.user?.userId, loadPreference);
+watch(() => [auth.identity, auth.user?.userId], loadPreference);
 watch(preferredPosition, schedulePlacement);
-watch(() => assistant.open, () => { jumping.value = false; });
+watch(() => assistant.open, open => { jumping.value = false; if (!open) offerWelcome(); });
 function contentChanged(records: MutationRecord[]) {
   stopWhenBlocked();
   // G6 updates HTML node styles/classes throughout zooming, dragging and refreshes.

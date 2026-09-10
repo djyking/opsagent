@@ -7,6 +7,19 @@ const source = readFileSync(new URL('../src/utils/automation-presentation.ts', i
 const module = { exports: {} };
 new Function('module', 'exports', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(module, module.exports);
 const { runWriteSummary } = module.exports;
+const { automationNodeDone } = module.exports;
+{
+  const completed = { status: 'COMPLETED', nodeId: 'end', state: { outputs: { diagnose: {} } }, snapshot: { graph: { nodes: [
+    { id: 'diagnose', type: 'AGENT' }, { id: 'end', type: 'END' }, { id: 'alternate', type: 'END' },
+  ] } } };
+  assert.equal(automationNodeDone('end', completed, []), true, 'END has a completion receipt through run status without an output');
+  assert.equal(automationNodeDone('alternate', completed, []), false, 'unvisited END branches stay incomplete');
+  assert.equal(automationNodeDone('diagnose', completed, []), true);
+  for (const status of ['RUNNING', 'CANCELLED', 'REJECTED', 'EXPIRED', 'NEEDS_ATTENTION', 'BUDGET_EXCEEDED'])
+    assert.equal(automationNodeDone('end', { ...completed, status }, []), false, status);
+  assert.equal(automationNodeDone('diagnose', { ...completed, state: {} }, [{ nodeId: 'diagnose', type: 'NODE_COMPLETED' }]), true);
+  assert.equal(automationNodeDone('diagnose', { ...completed, state: {} }, [{ nodeId: 'diagnose', type: 'MODEL_INTENT' }]), false);
+}
 const run = { status: 'COMPLETED', approvals: [], state: {}, snapshot: { graph: { nodes: [] } } };
 const event = (id, type, call, result) => ({ id, type, nodeId: 'repair', payload: result ? { call, result } : call });
 const call = { id: 'write1', name: 'demo_config_restore' };

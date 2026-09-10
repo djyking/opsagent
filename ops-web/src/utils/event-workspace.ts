@@ -1,4 +1,13 @@
 import type { EventWorkspace } from '@/api/event-workspace';
+import type { Ticket } from '@/types/api';
+
+/** Presentation gate only; the knowledge service verifies the original ticket again. */
+export function canDraftVisitorKnowledge(ticket: Ticket | undefined, actor: number | undefined, visitor: boolean) {
+  return visitor && typeof actor === 'number' && actor < 0 && ticket?.ownerActorId === actor
+    && ticket.sourceType === 'ISOLATED_DRILL' && ticket.environment === 'ISOLATED'
+    && !!ticket.incidentId?.trim() && ['ops-demo-order-service', 'ops-demo-notification-service'].includes(ticket.affectedCiCode || '')
+    && ['RESOLVED', 'CLOSED'].includes(ticket.status);
+}
 
 export const eventRunLabels: Record<string, string> = { QUEUED: '准备执行', RUNNING: '执行中', WAITING_APPROVAL: '等待审批',
   WAITING_INPUT: '等待补充信息', PAUSED: '已暂停', COMPLETED: '流程结束', NEEDS_ATTENTION: '需要人工处理',

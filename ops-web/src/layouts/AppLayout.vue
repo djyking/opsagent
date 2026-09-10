@@ -20,6 +20,9 @@ const approvalInbox = useApprovalInboxStore();
 const assistant = useAiAssistantStore();
 const router = useRouter();
 const route = useRoute();
+const pageAvailable = computed(() => route.name !== 'ticket-detail' || !!auth.user);
+const pageKey = computed(() => route.name === 'ticket-detail'
+  ? JSON.stringify([route.path, auth.identity, auth.user?.userId]) : route.path);
 const mobileOpen = ref(false);
 const mobileQuery = window.matchMedia('(max-width: 900px)');
 function updateMobile() { if (!mobileQuery.matches) mobileOpen.value = false; }
@@ -81,7 +84,7 @@ async function confirmLeave() {
         <RouterLink v-if="parent" class="module-parent-link" :to="parent"><ArrowLeft :size="15" />返回{{ route.meta.parentTitle }}</RouterLink>
         <nav v-if="secondaryNavigation.length" class="module-secondary-navigation" aria-label="模块二级导航"><RouterLink v-for="item in secondaryNavigation" :key="item.to" :to="item.to" :aria-current="route.path === item.to ? 'page' : undefined"><component :is="item.icon" :size="16" />{{ item.label }}</RouterLink></nav>
         <p v-if="route.path === '/rag/chat'" class="assistant-scope-note"><strong>AI 助手</strong><span>用于通用问答与知识检索；具体事件的诊断、审批和执行记录保存在事件工作区。</span><RouterLink to="/tickets">进入事件处置</RouterLink></p>
-        <RouterView v-slot="{ Component }"><component :is="Component" :key="route.path" /></RouterView>
+        <RouterView v-slot="{ Component }"><component :is="Component" v-if="pageAvailable" :key="pageKey" /></RouterView>
       </div>
     </main>
     <GlobalApprovalInbox />

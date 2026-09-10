@@ -87,6 +87,7 @@ function fixture(path, props = {}) {
     '@/data/workspace-actions': workspaceActions,
     '@/stores/approval-inbox': { useApprovalInboxStore: () => inbox },
     '@/stores/ai-assistant': { useAiAssistantStore: () => assistant }, '@/utils/route-navigation': routeNavigation, '@/utils/ai-context': aiContext,
+    '@/utils/assistant-welcome': evaluate(read('utils/assistant-welcome.ts'), {}),
     '@/components/AppBreadcrumb.vue': { default: Stub }, '@/components/ai/AiAssistantOrb.vue': { default: Stub }, '@/components/ai/AiAssistantDock.vue': { default: Stub },
     '@/components/AppSidebar.vue': { default: Stub }, '@/components/GlobalTopbar.vue': { default: Stub },
     '@/components/automation/GlobalApprovalInbox.vue': { default: Stub },
@@ -94,9 +95,16 @@ function fixture(path, props = {}) {
     '@/api/modules': { authApi: { endExperience: async () => { throw new Error('Navigation test must not end an experience'); } } },
   }).default;
   const render = evaluate(template.code, { vue }).render;
+  const routerViewMarker = { name: 'RouterViewInspection' };
+  const inspectionRender = evaluate(template.code, { vue: { ...vue, resolveComponent: name => name === 'RouterView' ? routerViewMarker : name } }).render;
   const reactiveProps = vue.reactive(props); const scope = vue.effectScope(); const emitted = [];
   const state = scope.run(() => component.setup(reactiveProps, { expose() {}, emit: (...args) => emitted.push(args) }));
-  return { state, props: reactiveProps, emitted, stop: () => scope.stop(), async html() {
+  return { state, props: reactiveProps, emitted, stop: () => scope.stop(), routedContent(Component) {
+    const context = vue.proxyRefs({ ...state, ...reactiveProps });
+    const root = inspectionRender(context, [], reactiveProps, context, {}, {});
+    const find = node => node?.type === routerViewMarker ? node : Array.isArray(node?.children) ? node.children.map(find).find(Boolean) : undefined;
+    return find(root).children.default({ Component });
+  }, async html() {
     const context = vue.proxyRefs({ ...state, ...reactiveProps });
     const app = vue.createSSRApp({ render: () => render(context, [], reactiveProps, context, {}, {}) });
     app.component('RouterLink', { props: ['to'], setup: (p, { slots }) => () => vue.h('a', { href: typeof p.to === 'string' ? p.to : router.resolve(p.to).href }, slots.default?.()) });
@@ -172,6 +180,32 @@ try {
     route.path = '/rag/chat'; route.meta = router.resolve('/rag/chat').meta; assert.ok((await app.html()).includes('具体事件的诊断、审批和执行记录保存在事件工作区'));
     route.path = '/admin'; route.meta = router.resolve('/admin').meta; auth.isAdmin = true; assert.ok((await app.html()).includes('href="/notifications"'));
     auth.isDemo = true; assert.ok(!(await app.html()).includes('href="/notifications"'));
+    // Render the actual AppLayout RouterView slot through Vue's keyed patcher.
+    // The inert routed component makes mount/unmount observable without API calls.
+    let mounts = 0, unmounts = 0;
+    const page = { setup() { mounts++; vue.onBeforeUnmount(() => unmounts++); return () => vue.h('div', 'private event contents'); } };
+    const host = () => ({ children: [], parent: null });
+    const renderer = vue.createRenderer({
+      createElement: host, createText: text => ({ ...host(), text }), createComment: host,
+      insert(node, parent, anchor) { if (node.parent) this.remove(node); node.parent = parent; const at = parent.children.indexOf(anchor); parent.children.splice(at < 0 ? parent.children.length : at, 0, node); },
+      remove(node) { if (node.parent) { const rows = node.parent.children; rows.splice(rows.indexOf(node), 1); node.parent = null; } },
+      setText(node, text) { node.text = text; }, setElementText(node, text) { node.text = text; }, patchProp() {},
+      parentNode: node => node.parent, nextSibling: node => node.parent?.children[node.parent.children.indexOf(node) + 1] || null,
+    });
+    const container = host();
+    const renderPage = () => renderer.render(vue.h(vue.Fragment, app.routedContent(page)), container);
+    route.path = '/tickets/2057'; route.name = 'ticket-detail'; route.meta = router.resolve(route.path).meta;
+    auth.identity = 'session-a'; auth.user = { userId: -1 }; renderPage(); assert.equal(mounts, 1);
+    route.query = { knowledge: '1' }; renderPage(); assert.equal(mounts, 1, 'query changes retain the current event state');
+    auth.user = null; renderPage(); assert.equal(unmounts, 1, 'missing identity profile immediately removes private event content');
+    auth.identity = 'session-b'; auth.user = { userId: -1 }; renderPage(); assert.equal(mounts, 2);
+    auth.identity = 'session-c'; renderPage(); assert.equal(unmounts, 2); assert.equal(mounts, 3, 'same actor with a new login receives a fresh event component');
+    auth.user = { userId: -2 }; renderPage(); assert.equal(unmounts, 3); assert.equal(mounts, 4, 'another visitor cannot reuse the old private event component');
+    route.path = '/dashboard'; route.name = 'dashboard'; renderPage();
+    const ordinaryMounts = mounts; auth.identity = 'session-d'; auth.user = null; renderPage();
+    assert.equal(mounts, ordinaryMounts, 'other routes retain their original path-only lifecycle');
+    renderer.render(null, container);
+    auth.user = { userId: 7 }; auth.isDemo = false;
   } finally { app.stop(); }
 } finally { globalThis.window = previousWindow; globalThis.localStorage = previousStorage; }
 console.log('PASS actual AppLayout: reachable secondary pages, no duplicate event-list tabs and clear assistant scope');

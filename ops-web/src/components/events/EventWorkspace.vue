@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Activity, ArrowRight, Bot, Check, FileText, GitBranch, History, Layers3, Play, RefreshCw, ShieldCheck, TriangleAlert } from '@lucide/vue';
 import { automationApi, type Model, type Definition, type PendingApproval } from '@/api/automation';
 import { useEventWorkspace } from '@/composables/useEventWorkspace';
-import { eventRetrospective, eventRunLabels, eventRecordAuthor, currentlyVerified, recoveryLabel, observationFresh, definitelyRejected } from '@/utils/event-workspace';
+import { eventRetrospective, eventRunLabels, eventRecordAuthor, currentlyVerified, recoveryLabel, observationFresh, definitelyRejected, canDraftVisitorKnowledge } from '@/utils/event-workspace';
 import { automationMessage, automationRunPresentation } from '@/utils/automation-presentation';
 import { useAuthStore } from '@/stores/auth';
 import { useApprovalInboxStore } from '@/stores/approval-inbox';
@@ -21,8 +21,8 @@ import type { Ticket, TicketLog, TicketWorkRecord } from '@/types/api';
 import type { EventLifecycle, EventAction } from '@/api/event-lifecycle';
 import '@/styles/pages/event-workspace.css';
 
-const props = defineProps<{ ticket: Ticket; lifecycle?: EventLifecycle; lifecycleError?: string; records?: TicketWorkRecord[]; logs?: TicketLog[]; sla?: Record<string, unknown>; canResolve?: boolean }>();
-const emit = defineEmits<{ refresh: []; question: []; records: []; documents: []; lifecycle: [action: EventAction]; resolve: [] }>();
+const props = defineProps<{ ticket: Ticket; lifecycle?: EventLifecycle; lifecycleError?: string; records?: TicketWorkRecord[]; logs?: TicketLog[]; sla?: Record<string, unknown>; canResolve?: boolean; openKnowledge?: boolean }>();
+const emit = defineEmits<{ refresh: []; question: []; records: []; documents: []; lifecycle: [action: EventAction]; resolve: []; knowledgeOpened: [] }>();
 const auth = useAuthStore();
 const inbox = useApprovalInboxStore();
 const identity = () => auth.user ? `${auth.user.userId}:${auth.user.roles.join(',')}` : '';
@@ -74,7 +74,10 @@ const createOpen = ref(false);
 let createAttempt: { ticketId: number; provider: string; definitionId: string; requestId: string } | undefined;
 const createUnconfirmed = ref(false);
 const draftOpen = ref(false);
-const canSaveKnowledge = computed(() => !auth.isDemo && (auth.isAdmin || props.ticket.creatorId === auth.user?.userId || props.ticket.assigneeId === auth.user?.userId));
+const visitorDraft = computed(() => canDraftVisitorKnowledge(props.ticket, auth.user?.userId, auth.isDemo));
+const canSaveKnowledge = computed(() => visitorDraft.value || !auth.isDemo && (auth.isAdmin || props.ticket.creatorId === auth.user?.userId || props.ticket.assigneeId === auth.user?.userId));
+const showKnowledgeDraft = computed(() => visitorDraft.value || closed.value && canSaveKnowledge.value);
+let knowledgeRequestHandled = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 let epoch = 0;
 let disposed = false;
@@ -141,9 +144,13 @@ watch(() => data.value?.runs.map(run => `${run.id}:${run.status}`).join('|'), (v
 });
 watch([() => props.ticket.id, identity], () => {
   epoch++; busy.value = ''; actionError.value = ''; notice.value = ''; createOpen.value = false; draftOpen.value = false;
+  knowledgeRequestHandled = false;
   createAttempt = undefined; createUnconfirmed.value = false; models.value = []; definitions.value = [];
   contextOpen.value = evidenceOpen.value = processOpen.value = activityOpen.value = false;
 }, { flush: 'sync' });
+watch([() => props.openKnowledge, showKnowledgeDraft, () => !!data.value], ([requested, allowed, ready]) => {
+  if (requested && allowed && ready && !knowledgeRequestHandled) { knowledgeRequestHandled = true; draftOpen.value = true; emit('knowledgeOpened'); }
+}, { immediate: true });
 watch(() => inbox.decisionVersion, () => void workspace.load());
 watch(() => props.ticket.version, () => void workspace.load());
 function visibilityChanged() { now.value = Date.now(); if (!document.hidden) void refresh(); }
@@ -175,7 +182,7 @@ onBeforeUnmount(() => { disposed = true; epoch++; if (timer) clearInterval(timer
           <div><dt><FileText :size="21" />当前主工单</dt><dd><strong>{{ ticket.ticketNo }}</strong><small>{{ ['RESOLVED', 'CLOSED'].includes(ticket.status) ? '处理结果已解决；事件关闭单独记录' : '完成处置后需标记工单已解决' }}</small></dd></div>
         </dl>
         <details class="event-verification-detail"><summary>查看验证明细与关闭条件</summary><p v-if="data">{{ verificationTitle }} · {{ data.verification.scope === 'HISTORICAL' ? '历史结论，不代表目标当前健康' : recoveryLabel(data.verification.source) }}</p><p v-if="data" class="event-context-note">{{ scopeLabel(data.verification.scope) }} · {{ date(data.verification.observedAt) }} · 连续成功 {{ data.verification.consecutiveSuccesses }} 次</p><article v-for="item in [lifecycle?.technical, lifecycle?.business, lifecycle?.closed].filter(Boolean)" :key="item!.id"><strong>{{ recordLabels[item!.recordType] }}</strong><p>{{ item!.content }}</p><small>{{ item!.evidence }}</small></article><ul v-if="lifecycle?.blockers.length"><li v-for="item in lifecycle.blockers" :key="item">{{ item }}</li></ul></details>
-        <footer class="event-current-actions"><EventManualRecovery v-if="!closed" :ticket-id="ticket.id" :target-code="ticket.affectedCiCode" :incident-id="ticket.incidentId" @restored="emit('refresh'); refresh()" /><button v-if="allowed('TECH_FAIL')" class="button secondary" @click="emit('lifecycle', 'TECH_FAIL')">验证未通过</button><button v-if="allowed('TECH_PASS') && !lifecycle?.technical" class="button primary" :disabled="recoveryBlockers.length > 0" :title="recoveryBlockers.join('；')" @click="emit('lifecycle', 'TECH_PASS')">确认技术恢复</button><button v-else-if="allowed('BUSINESS_CONFIRM') && !lifecycle?.business" class="button primary" @click="emit('lifecycle', 'BUSINESS_CONFIRM')">确认业务恢复</button><button v-else-if="canResolve && !['RESOLVED', 'CLOSED'].includes(ticket.status)" class="button primary" @click="emit('resolve')">标记工单已解决</button><button v-else-if="allowed('CLOSE')" class="button primary" @click="emit('lifecycle', 'CLOSE')">关闭事件</button><button v-if="allowed('REOPEN')" class="button secondary" @click="emit('lifecycle', 'REOPEN')">重新处置</button><button v-if="closed && canSaveKnowledge" class="button primary" :disabled="!data || !!busy" @click="draftOpen = true">整理知识草稿</button></footer>
+        <footer class="event-current-actions"><EventManualRecovery v-if="!closed" :ticket-id="ticket.id" :target-code="ticket.affectedCiCode" :incident-id="ticket.incidentId" @restored="emit('refresh'); refresh()" /><button v-if="allowed('TECH_FAIL')" class="button secondary" @click="emit('lifecycle', 'TECH_FAIL')">验证未通过</button><button v-if="allowed('TECH_PASS') && !lifecycle?.technical" class="button primary" :disabled="recoveryBlockers.length > 0" :title="recoveryBlockers.join('；')" @click="emit('lifecycle', 'TECH_PASS')">确认技术恢复</button><button v-else-if="allowed('BUSINESS_CONFIRM') && !lifecycle?.business" class="button primary" @click="emit('lifecycle', 'BUSINESS_CONFIRM')">确认业务恢复</button><button v-else-if="canResolve && !['RESOLVED', 'CLOSED'].includes(ticket.status)" class="button primary" @click="emit('resolve')">标记工单已解决</button><button v-else-if="allowed('CLOSE')" class="button primary" @click="emit('lifecycle', 'CLOSE')">关闭事件</button><button v-if="allowed('REOPEN')" class="button secondary" @click="emit('lifecycle', 'REOPEN')">重新处置</button></footer>
       </template>
       <template v-else>
         <p class="event-main-message" role="status">{{ latestRun ? runPresentation.description : ticket.assigneeId ? `当前由用户 #${ticket.assigneeId} 继续处理` : '等待负责人接单处理' }}</p>
@@ -212,6 +219,7 @@ onBeforeUnmount(() => { disposed = true; epoch++; if (timer) clearInterval(timer
     <details class="event-fold" :open="activityOpen" @toggle="activityOpen = ($event.target as HTMLDetailsElement).open"><summary><strong>事件活动流</strong><span>最近更新 {{ date(ticket.updateTime) }}</span></summary><div class="event-fold-body"><article v-for="record in lifecycle?.history || []" :key="`event-${record.id}`" class="event-record"><strong>{{ recordLabels[record.recordType] || record.recordType }}</strong><p>{{ record.content }}</p><small>{{ eventRecordAuthor(record) }} · {{ date(record.createTime) }}</small></article><details><summary>工单状态历史 · {{ logs?.length || 0 }} 条</summary><article v-for="log in logs || []" :key="log.id" class="event-record"><strong>{{ log.fromStatus || '创建' }} → {{ log.toStatus }}</strong><p>{{ log.remark }}</p><small>用户 #{{ log.operatorId }} · {{ date(log.createTime) }}</small></article></details><button class="button secondary" @click="emit('documents')">查看关联文档与问答</button></div></details>
     <DetailPanel v-if="contextOpen" title="事件上下文" :subtitle="ticket.ticketNo" @close="contextOpen = false"><dl class="event-fact-list"><div><dt>负责人</dt><dd>{{ ticket.assigneeId ? `用户 #${ticket.assigneeId}` : '待分配' }}</dd></div><div><dt>关联服务</dt><dd>{{ ticket.affectedCiCode || '未关联' }}</dd></div><div><dt>当前主工单</dt><dd>{{ ticket.ticketNo }} · {{ ticket.status }}</dd></div><div v-if="sla"><dt>解决截止</dt><dd>{{ date(String(sla.resolutionDeadline || '')) }}</dd></div><div v-if="sla"><dt>响应截止</dt><dd>{{ date(String(sla.responseDeadline || '')) }}</dd></div></dl><div class="event-context-links"><RouterLink :to="{ path: '/itsm/alerts', query: { ciCode: ticket.affectedCiCode } }">关联服务告警</RouterLink><RouterLink to="/itsm/oncall">值班协作</RouterLink><RouterLink :to="{ path: '/automation', query: { ticketId: ticket.id } }">自动化运行</RouterLink></div><p v-if="data?.access.notice" class="event-context-note">{{ data.access.notice }}</p></DetailPanel>
     <BaseModal v-if="createOpen" title="为本事件发起 AI 诊断" @close="createOpen = false"><div class="event-dialog-body"><p>读取当前事件证据并执行选定流程；需要授权的修改动作会另行发起审批。</p><InlineError v-if="actionError" :message="actionError" /><FormField label="工作流"><select v-model="definition" :disabled="!!busy || createUnconfirmed"><option v-for="item in definitions" :key="item.id" :value="item.id">{{ item.name }} · v{{ item.published_version }}</option></select></FormField><FormField label="已验证的模型"><select v-model="model" :disabled="!!busy || createUnconfirmed"><option v-for="item in models" :key="item.provider" :value="item.provider">{{ item.model }}</option></select></FormField><p v-if="!models.length && !busy" class="event-context-note">尚无已验证的可用模型，请在自动化中心核对模型连接。</p><button class="button primary" :disabled="!!busy || !model || !definition" @click="createRun"><Play :size="16" />{{ busy ? '正在处理…' : createUnconfirmed ? '使用同一请求重试' : '启动诊断' }}</button></div></BaseModal>
+    <section v-if="showKnowledgeDraft" class="event-current-card"><header><h2>{{ visitorDraft ? '演练知识沉淀' : '事件知识沉淀' }}</h2></header><p class="event-main-support">{{ visitorDraft ? '核对本次复盘，保存到仅本人可见的体验库。草稿不替代事件确认，体验过期后清理。' : '核对复盘内容，保存为私有知识草稿。' }}</p><div class="event-current-actions"><button class="button primary" :disabled="!data || !!busy" @click="draftOpen = true">{{ visitorDraft ? '沉淀为体验知识' : '整理知识草稿' }}</button><button class="button secondary" @click="emit('documents')">查看关联文档</button></div></section>
     <EventKnowledgeDraft :key="`${ticket.id}:${auth.user?.userId}`" :open="draftOpen" :ticket-id="ticket.id" :ticket-title="ticket.title" :initial-content="data ? eventRetrospective(data, ticket.title) : ''" :can-save="canSaveKnowledge" @close="draftOpen = false" @saved="emit('refresh')" />
   </div>
 </template>

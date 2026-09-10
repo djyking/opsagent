@@ -1,5 +1,14 @@
 import type { Approval, Graph, ModelFailure, PendingApproval, RunDetail, RunEvent } from '@/api/automation';
 
+export function automationNodeDone(id: string, run: RunDetail | undefined, events: RunEvent[]) {
+  if (!run) return false;
+  // END finishes the run directly and deliberately has no state.outputs entry.
+  if (run.snapshot.graph.nodes.find(node => node.id === id)?.type === 'END')
+    return run.status === 'COMPLETED' && run.nodeId === id;
+  return Object.prototype.hasOwnProperty.call(run.state.outputs || {}, id)
+    || events.some(event => event.nodeId === id && event.type === 'NODE_COMPLETED');
+}
+
 export const automationToolLabels: Record<string, string> = {
   ticket_get: '读取工单', ticket_history: '读取处理历史', demo_target_inspect: '观测业务目标',
   demo_config_restore: '恢复订单连接配置', demo_flow_restore: '恢复订单限流规则',

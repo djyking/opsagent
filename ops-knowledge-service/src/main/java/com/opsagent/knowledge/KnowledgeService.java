@@ -143,8 +143,9 @@ public class KnowledgeService {
         List<Map<String, Object>> documents =
                 repo.ticketDocuments(
                         ticketId, principal.userId(), administrator(principal.roles()));
-        return demoUser()
-                ? demoDocumentMetadata(
+        if (!demoUser()) return documents;
+        var visible =
+                new ArrayList<>(
                         documents.stream()
                                 .filter(
                                         document ->
@@ -154,8 +155,9 @@ public class KnowledgeService {
                                                                         text(
                                                                                 document,
                                                                                 "review_status")))
-                                .toList())
-                : documents;
+                                .toList());
+        visible.addAll(visitorKnowledge.ticketDocuments(ticketId));
+        return demoDocumentMetadata(visible);
     }
 
     private boolean demoUser() {

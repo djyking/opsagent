@@ -163,3 +163,26 @@ console.log('PASS actual event start action duplicate exclusion, exact retry ide
   } finally { app.stop(); }
 }
 console.log('PASS reviewed hierarchy: three closed sections and independent verified, closed and historical states');
+
+{
+  const app = fixture();
+  try {
+    app.auth.isAdmin = false; app.auth.isDemo = true; app.auth.user = { userId: -71, roles: ['DEMO'] };
+    app.props.ticket = { ...app.props.ticket, ownerActorId: -71, sourceType: 'ISOLATED_DRILL', environment: 'ISOLATED', status: 'RESOLVED', incidentId: 'own-incident', affectedCiCode: 'ops-demo-order-service' };
+    app.props.openKnowledge = true; await flush();
+    assert.equal(app.state.visitorDraft.value, true);
+    assert.equal(app.state.draftOpen.value, true, 'an eligible deep link opens the editable draft');
+    const html = await app.html(); assert.match(html, /沉淀为体验知识/); assert.match(html, /草稿不替代事件确认/);
+    app.state.draftOpen.value = false; app.stateManager.data.value = snapshot(); await flush();
+    assert.equal(app.state.draftOpen.value, false, 'polling does not repeatedly reopen the editor');
+    for (const override of [{ status: 'PROCESSING' }, { ownerActorId: -72 }, { sourceType: 'MANUAL' }, { environment: 'PRODUCTION' }, { incidentId: '' }, { affectedCiCode: 'ops-gateway' }]) {
+      const candidate = { ...app.props.ticket, ...override };
+      assert.equal(presentation.canDraftVisitorKnowledge(candidate, -71, true), false);
+    }
+    assert.equal(presentation.canDraftVisitorKnowledge(app.props.ticket, undefined, true), false);
+    assert.equal(presentation.canDraftVisitorKnowledge(app.props.ticket, -71, false), false);
+    app.auth.user.userId = -72; await flush();
+    assert.equal(app.state.showKnowledgeDraft.value, false); assert.equal(app.state.draftOpen.value, false);
+  } finally { app.stop(); }
+}
+console.log('PASS visitor retrospective eligibility, independent closure, single-open deep link and actor isolation');

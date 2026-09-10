@@ -210,25 +210,69 @@ class KnowledgeIndexAdministrationTest {
     void shouldRestrictDemoDocumentMetadataToPublishedPublicKnowledge() {
         var repo = mock(KnowledgeRepository.class);
         var access = mock(TicketAccessClient.class);
+        var experience = mock(VisitorKnowledgeService.class);
         var principal = new OpsPrincipal(-99L, "demo-session", "token", List.of("DEMO"));
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(principal, null, List.of()));
-        var publicDocument = Map.<String, Object>of("id", 1L, "visibility", "PUBLIC", "review_status", "PUBLISHED",
-                "parse_error", "internal-error", "content_hash", "hash");
+        SecurityContextHolder.getContext()
+                .setAuthentication(
+                        new UsernamePasswordAuthenticationToken(principal, null, List.of()));
+        var publicDocument =
+                Map.<String, Object>of(
+                        "id",
+                        1L,
+                        "visibility",
+                        "PUBLIC",
+                        "review_status",
+                        "PUBLISHED",
+                        "parse_error",
+                        "internal-error",
+                        "content_hash",
+                        "hash");
         when(repo.documents(1L, true)).thenReturn(List.of(publicDocument));
-        when(repo.ticketDocuments(5L, -99L, false)).thenReturn(List.of(publicDocument,
-                Map.of("id", 2L, "visibility", "PUBLIC", "review_status", "DRAFT")));
-        var service = new KnowledgeService(repo, mock(FileStorageService.class), mock(DocumentParserService.class),
-                mock(DocumentParsePublisher.class), mock(KnowledgeIndexService.class),
-                mock(KnowledgeIndexCompensationService.class),
-                new SimpleMeterRegistry(), new KnowledgeProperties(), access);
+        when(repo.ticketDocuments(5L, -99L, false))
+                .thenReturn(
+                        List.of(
+                                publicDocument,
+                                Map.of(
+                                        "id",
+                                        2L,
+                                        "visibility",
+                                        "PUBLIC",
+                                        "review_status",
+                                        "DRAFT")));
+        var service =
+                new KnowledgeService(
+                        repo,
+                        mock(FileStorageService.class),
+                        mock(DocumentParserService.class),
+                        mock(DocumentParsePublisher.class),
+                        mock(KnowledgeIndexService.class),
+                        mock(KnowledgeIndexCompensationService.class),
+                        new SimpleMeterRegistry(),
+                        new KnowledgeProperties(),
+                        access);
+        service.visitorKnowledge(experience);
         service.bases();
         verify(repo).publicBases();
-        assertThat(service.documents(1L)).hasSize(1)
-                .allSatisfy(row -> assertThat(row).doesNotContainKeys("parse_error", "content_hash"));
-        assertThat(service.ticketDocuments(5L)).hasSize(1).allSatisfy(row -> assertThat(row.get("id")).isEqualTo(1L));
+        assertThat(service.documents(1L))
+                .hasSize(1)
+                .allSatisfy(
+                        row -> assertThat(row).doesNotContainKeys("parse_error", "content_hash"));
+        assertThat(service.ticketDocuments(5L))
+                .hasSize(1)
+                .allSatisfy(row -> assertThat(row.get("id")).isEqualTo(1L));
         verify(access).requireVisible(5L);
         verify(repo, never()).documents(1L);
+        when(experience.ticketDocuments(5L))
+                .thenReturn(List.of(Map.of("id", 3L, "review_status", "EXPERIENCE")));
+        assertThat(service.ticketDocuments(5L))
+                .extracting(row -> row.get("id"))
+                .containsExactly(1L, 3L);
+        clearInvocations(repo, experience, access);
+        doThrow(new BusinessException(com.opsagent.common.core.ErrorCode.FORBIDDEN, "工单不可访问"))
+                .when(access)
+                .requireVisible(6L);
+        assertThatThrownBy(() -> service.ticketDocuments(6L)).hasMessageContaining("不可访问");
+        verifyNoInteractions(repo, experience);
     }
 
     private void document(long id, int version, int deleted, String review, String index) {

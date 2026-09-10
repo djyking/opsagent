@@ -121,8 +121,9 @@ public class KnowledgeRepository {
                     + "d.status,d.review_status,d.index_status,d.visibility,d.version,"
                     + "d.content_hash,d.parse_error,d.review_comment,d.create_by,d.create_time,"
                     + "d.update_time,COUNT(c.id) chunk_count,MAX(c.embedding_model) embedding_model"
-                    + " FROM knowledge_document d LEFT JOIN knowledge_chunk c ON c.document_id=d.id"
-                    + " WHERE d.knowledge_base_id=? AND d.deleted=0"
+                    + " FROM knowledge_document"
+                    + " d LEFT JOIN knowledge_chunk c ON c.document_id=d.id WHERE"
+                    + " d.knowledge_base_id=? AND d.deleted=0"
                         + (publicPublishedOnly
                                 ? " AND d.visibility='PUBLIC' AND d.review_status='PUBLISHED'"
                                 : "")
@@ -134,8 +135,9 @@ public class KnowledgeRepository {
         return jdbc.queryForList(
                 "SELECT id,knowledge_base_id,ticket_id,original_name,file_type,file_size,status,"
                     + "review_status,visibility,content_hash,parse_error,create_by,create_time,update_time"
-                    + " FROM knowledge_document WHERE ticket_id=? AND deleted=0 AND (?=1 OR"
-                    + " visibility='PUBLIC' OR create_by=?) ORDER BY id DESC",
+                    + " FROM knowledge_document WHERE ticket_id=? AND deleted=0 AND"
+                    + " review_status<>'EXPERIENCE' AND (?=1 OR visibility='PUBLIC' OR create_by=?)"
+                    + " ORDER BY id DESC",
                 ticketId,
                 administrator ? 1 : 0,
                 userId);

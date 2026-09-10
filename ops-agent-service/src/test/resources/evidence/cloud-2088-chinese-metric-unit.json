@@ -1,0 +1,43 @@
+{
+  "source": "cloud ticket 2088 events 1004,1005,1012",
+  "metrics": {
+    "errorRate": {
+      "value": 4.324973452508422,
+      "unit": "%"
+    },
+    "rps": {
+      "value": 1.378274997557446,
+      "unit": "requests/s"
+    }
+  },
+  "correctedArgs": {
+    "candidateCauses": "1.（支持）Redis连接配置被漂移到无监听端口6380导致REDIS_CONNECT_FAILED：recent_changes @05:13:44 redisPort 6379→6380，当前探针redisPort=6380且报连接失败，符合knowledge库6380无监听→503/REDIS_CONNECT_FAILED特征。\n2.（排除/未参与）Sentinel流控：Sentinel无blocked、passedTotal正常、qps未触达上限，不作为本故障原因。",
+    "conclusionLevel": "SUPPORTED",
+    "evidence": "引用本次映射中的实时观测与变更条目：\n- ev-2c63a092e37f9f1155d2531d @05:14:46：redisPort=6380、configuration.redisPort=6380、business.httpStatus=503、business.reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0、sentinel.passedTotal=159.0、sentinel.blockedTotal=0.0、sentinel.qps=5。\n- ev-40c70cf171219492e2ba29b1 @05:13:44：before.redisPort=6379 → after.redisPort=6380。\n- ev-4501b555ddd8180d5504d773 @05:14:47：businessProbe=0.0，metrics.errorRate.value=4.324973452508422（单位%），metrics.rps.value=1.378274997557446（单位requests/s）。以上均为观测原始值，未做换算。",
+    "evidenceIds": [
+      "ev-2c63a092e37f9f1155d2531d",
+      "ev-40c70cf171219492e2ba29b1",
+      "ev-dd46c9a4d1148984ec720333",
+      "ev-4501b555ddd8180d5504d773"
+    ],
+    "evidenceGaps": "- CONFIGURATION_AUDIT_NOT_AUTHORIZED：无法直接读取配置审计，端口漂移触发来源未直接审计确认，仅据配置变更记录与知识基线推断。\n- redisPort 6380实际监听状态未独立验证，仅据业务REDIS_CONNECT_FAILED与knowledge无监听端口描述推断。",
+    "knownFacts": "- appliedRevision=d912258e46bc4d1c82c2af65b6cc2ffefeb92832c8cf38fcca866da657ef0d55，configurationStatus=APPLIED。\n- 当前 redisPort=6380（@05:14:46），recent_changes @05:13:44 由6379改为6380。\n- 业务 HTTP=503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0、businessProbe=0.0。\n- Sentinel passedTotal=159.0、blockedTotal=0.0、qps=5，无流控阻塞证据。\n- knowledge确认订单服务正常Redis端口为6379，6380为无监听端口导致503/REDIS_CONNECT_FAILED。",
+    "recommendation": "使用demo_config_restore将Redis连接基线恢复至端口6379，恢复后重新运行demo_target_inspect，确认business.httpStatus恢复非503、reasonCode不再为REDIS_CONNECT_FAILED且consecutiveSuccesses>0，再决定是否解决工单。",
+    "summary": "隔离事件00dca162-ef65-4d58-943d-2253f4e9258c（工单2088，ops-demo-order-service）：服务当前返回HTTP 503、reasonCode=REDIS_CONNECT_FAILED。诊断定位于Redis连接配置被漂移为无监听端口6380导致连接失败。\n\n依据：当前probe redisPort=6380且报REDIS_CONNECT_FAILED；recent_changes@05:13:44将redisPort由6379改为6380、当前APPLIED；knowledge确认正常Redis端口为6379、6380无监听会返回503/REDIS_CONNECT_FAILED。Sentinel无阻塞，排除流控。建议将redisPort恢复为6379后复测。"
+  },
+  "firstArgs": {
+    "summary": "隔离事件00dca162-ef65-4d58-943d-2253f4e9258c（工单2088，ops-demo-order-service）：服务当前返回HTTP 503、reasonCode=REDIS_CONNECT_FAILED。诊断定位于Redis连接配置被漂移为无监听端口6380导致连接失败。\n\n证据链：recent_changes确认@2026-09-08T05:13:44将redisPort从6379改为6380（revision变更为d912258e...当前已APPLIED）；探针@05:14:46显示redisPort=6380并对应当前REDIS_CONNECT_FAILED。知识库确认订单服务正常Redis端口为6379，6380为无监听端口会返回503/REDIS_CONNECT_FAILED。\n\n建议将redisPort恢复为基线6379（demo_config_restore），恢复后重新探测确认连接恢复。",
+    "evidence": "引用本次实时观测与变更记录（evidenceIds所列为映射ev-条目）：\n- ev-2c63a092e37f9f1155d2531d @05:14:46：redisPort=6380、business.httpStatus=503、business.reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0 —— 当前连接故障实况。\n- ev-40c70cf171219492e2ba29b1 @05:13:44：变更 before.redisPort=6379 → after.redisPort=6380（revision=d912258e...）—— 故障前最近的端口漂移。\n- ev-dd46c9a4d1148984ec720333 @05:03:24：变更 before.redisPort=6380 → after.redisPort=6379（此前曾短暂回到6379）。\n- ev-4501b555ddd8180d5504d773 @05:14:47：businessProbe=0.0、metrics.errorRate=4.3249% —— 业务观测佐证故障。\nSentinel指标（ev-2c63...）：passedTotal=159、blockedTotal=0.0，qps=5，说明Sentinel未参与阻塞，故障指向Redis连接而非流控。",
+    "evidenceIds": [
+      "ev-2c63a092e37f9f1155d2531d",
+      "ev-40c70cf171219492e2ba29b1",
+      "ev-dd46c9a4d1148984ec720333",
+      "ev-4501b555ddd8180d5504d773"
+    ],
+    "recommendation": "使用demo_config_restore将Redis连接基线恢复至端口6379，恢复后重新运行demo_target_inspect确认business.httpStatus恢复为非503、reasonCode不再是REDIS_CONNECT_FAILED、consecutiveSuccesses>0后再核对是否解决。",
+    "knownFacts": "- appliedRevision=d912258e46bc4d1c82c2af65b6cc2ffefeb92832c8cf38fcca866da657ef0d55 且 configurationStatus=APPLIED。\n- 当前 redisPort=6380（demo_target_inspect @05:14:46），recent_changes确认@05:13:44由6379改为6380。\n- 业务当前 HTTP=503、reasonCode=REDIS_CONNECT_FAILED、businessProbe=0.0、consecutiveSuccesses=0。\n- Sentinel passedTotal=159、blockedTotal=0.0、qps=5，无流控阻塞证据。",
+    "candidateCauses": "1.（支持）Redis连接配置被漂移到无监听端口6380导致REDIS_CONNECT_FAILED：recent_changes @05:13:44 redisPort 6379→6380，当前探针redisPort=6380且报连接失败；知识库确认订单服务正常Redis端口为6379。候选根因成立。\n2.（排除/未参与）Sentinel流控：Sentinel指标无block，passedTotal正常，未作为本故障原因。",
+    "evidenceGaps": "- CONFIGURATION_AUDIT_NOT_AUTHORIZED：无法读取配置审计，端口漂移的触发方（演练变更方）细节未能直接审计确认，仅能据配置变更记录与基线知识推断。\n- Redis 6380实况端口监听状态未独立验证，仅据业务REDIS_CONNECT_FAILED与知识库无监听端口描述推断。",
+    "conclusionLevel": "SUPPORTED"
+  }
+}

@@ -76,6 +76,10 @@ const sla = ref<Record<string, unknown>>();
 const traceOpen = ref(false);
 const activeTab = ref<"workspace" | "overview" | "documents" | "records" | "activity">("workspace");
 const documents = ref<DocumentRecord[]>([]);
+function consumeKnowledgeRequest() {
+  const { knowledge, ...query } = route.query;
+  if (knowledge === '1') void router.replace({ query, hash: route.hash });
+}
 const questions = ref<AiQuestion[]>([]);
 const loading = ref(true);
 const error = ref("");
@@ -138,7 +142,7 @@ const isAssignee = computed(
   () => ticket.value?.assigneeId === auth.user?.userId,
 );
 const canUpload = computed(
-  () => auth.isAdmin || isOwner.value || isAssignee.value,
+  () => !auth.isDemo && (auth.isAdmin || isOwner.value || isAssignee.value),
 );
 const descriptionParts = computed(() => parseTicketDescription(ticket.value?.description));
 const technicalMetadata = computed<Record<string, string | number | boolean>>(() => descriptionParts.value.metadata);
@@ -430,7 +434,7 @@ onMounted(async () => {
       <template #tabs><nav class="ticket-detail-tabs" aria-label="事件详情视图"><button :aria-pressed="false" @click="activeTab = 'workspace'">处置工作区</button><button :class="{ active: activeTab === 'overview' }" :aria-pressed="activeTab === 'overview'" @click="activeTab = 'overview'">事件资料</button><button :class="{ active: activeTab === 'documents' }" :aria-pressed="activeTab === 'documents'" @click="openDocuments">文档与问答</button><button :class="{ active: activeTab === 'records' }" :aria-pressed="activeTab === 'records'" @click="activeTab = 'records'">人工记录与回复</button><button :class="{ active: activeTab === 'activity' }" :aria-pressed="activeTab === 'activity'" @click="activeTab = 'activity'">活动时间线</button></nav></template>
     </DetailHeader>
     <InlineError v-if="error" :message="error" dismissible @dismiss="error = ''" />
-    <EventWorkspace v-if="activeTab === 'workspace'" :ticket="ticket" :lifecycle="lifecycle" :lifecycle-error="lifecycleError" :records="workRecords" :logs="logs" :sla="sla" :can-resolve="availableActions.includes('resolve')" @refresh="load" @question="openDocuments" @documents="openDocuments" @records="recordOpen = true; workRecordType = 'ACTION'" @lifecycle="openEventAction" @resolve="action = 'resolve'" />
+    <EventWorkspace v-if="activeTab === 'workspace'" :ticket="ticket" :lifecycle="lifecycle" :lifecycle-error="lifecycleError" :records="workRecords" :logs="logs" :sla="sla" :open-knowledge="route.query.knowledge === '1'" @knowledge-opened="consumeKnowledgeRequest" :can-resolve="availableActions.includes('resolve')" @refresh="load" @question="openDocuments" @documents="openDocuments" @records="recordOpen = true; workRecordType = 'ACTION'" @lifecycle="openEventAction" @resolve="action = 'resolve'" />
     <div v-show="activeTab !== 'workspace'" class="detail-grid" :class="{ 'detail-grid-full': activeTab === 'documents' || activeTab === 'records', 'detail-grid-activity': activeTab === 'activity' }">
       <div class="detail-main">
         <section v-show="activeTab === 'overview'" class="panel ticket-overview-panel">
@@ -499,8 +503,9 @@ onMounted(async () => {
                 </p>
               </div>
               <StatusBadge :value="doc.parseStatus" />
-              <span v-if="doc.reviewStatus" class="muted">{{ ({ DRAFT: '待审核草稿', IN_REVIEW: '审核中', PUBLISHED: '已发布', REJECTED: '需修订', ARCHIVED: '已归档' } as Record<string, string>)[doc.reviewStatus] || doc.reviewStatus }}</span>
+              <span v-if="doc.reviewStatus === 'EXPERIENCE'" class="muted">本人体验知识</span><span v-else-if="doc.reviewStatus" class="muted">{{ ({ DRAFT: '待审核草稿', IN_REVIEW: '审核中', PUBLISHED: '已发布', REJECTED: '需修订', ARCHIVED: '已归档' } as Record<string, string>)[doc.reviewStatus] || doc.reviewStatus }}</span>
               <div class="row-actions">
+                <RouterLink v-if="doc.reviewStatus === 'EXPERIENCE'" class="button secondary" :to="{ path: '/knowledge', query: { documentId: doc.id } }">查看正文与解析</RouterLink>
                 <button v-if="!auth.isDemo && doc.createBy === auth.user?.userId && doc.parseStatus === 'SUCCESS' && ['DRAFT', 'REJECTED'].includes(doc.reviewStatus || '')" class="button secondary" :disabled="!!busy" @click="submitReview(doc)">提交知识审核</button>
                 <button
                   v-if="!auth.isDemo && doc.parseStatus !== 'PARSING'"
@@ -518,7 +523,7 @@ onMounted(async () => {
                 >
                   <Layers3 :size="16" /></button
                 ><button
-                  v-if="auth.isAdmin || doc.createBy === auth.user?.userId"
+                  v-if="doc.reviewStatus !== 'EXPERIENCE' && (auth.isAdmin || doc.createBy === auth.user?.userId)"
                   class="icon-button danger"
                   title="删除文档"
                   @click="removeDoc(doc)"
@@ -543,7 +548,7 @@ onMounted(async () => {
               <option :value="undefined">本工单附件 · 服务目录自动识别</option>
               <option
                 v-for="doc in documents.filter(
-                  (d) => d.parseStatus === 'SUCCESS',
+                  (d) => d.parseStatus === 'SUCCESS' && d.reviewStatus !== 'EXPERIENCE',
                 )"
                 :key="doc.id"
                 :value="doc.id"

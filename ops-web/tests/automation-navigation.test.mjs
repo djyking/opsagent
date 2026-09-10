@@ -35,7 +35,7 @@ function deferred() { let resolve, reject; const promise = new Promise((yes, no)
 async function settle() { await vue.nextTick(); await new Promise(setImmediate); await vue.nextTick(); }
 function run(id) { return { id, ownerId: 7, status: 'COMPLETED', nodeId: 'end', approvals: [],
   state: { ticketId: 2057, ticketResolved: false }, snapshot: { graph: { nodes: [], edges: [] } } }; }
-async function fixture(url, overrides = {}, visitor = false) {
+async function fixture(url, overrides = {}, visitor = false, actorId = 7) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/automation', component: { render: () => null } }] });
   await router.push(url); await router.isReady();
   const route = vue.reactive({ ...router.currentRoute.value });
@@ -64,10 +64,11 @@ async function fixture(url, overrides = {}, visitor = false) {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {} },
     'vue-router': { useRoute: () => route, useRouter: () => router },
     '@lucide/vue': new Proxy({}, { get: () => ({ render: () => null }) }),
-    '@/stores/auth': { useAuthStore: () => ({ user: { userId: 7, roles: [visitor ? 'DEMO' : 'ADMIN'] }, isAdmin: !visitor, isOps: !visitor, isDemo: visitor }) },
+    '@/stores/auth': { useAuthStore: () => ({ user: { userId: actorId, roles: [visitor ? 'DEMO' : 'ADMIN'] }, isAdmin: !visitor, isOps: !visitor, isDemo: visitor }) },
     '@/stores/approval-inbox': { useApprovalInboxStore: () => ({ decisionVersion: 0, isCurrent: () => true }) },
     '@/api/automation': { automationApi: api }, '@/utils/automation-presentation': presentation,
-    '@/api/modules': { ticketApi: { detail: async id => ({ id }) } },
+    '@/utils/event-workspace': evaluate(read('utils/event-workspace.ts')),
+    '@/api/modules': { ticketApi: { detail: overrides.ticket || (async id => ({ id })) } },
   }).default;
   const scope = vue.effectScope();
   const state = scope.run(() => component.setup({}, { expose() {} }));
@@ -163,6 +164,21 @@ console.log('PASS route-driven tab changes cancel old selection; deliberate late
   } finally { app.stop(); }
 }
 console.log('PASS paginated terminal histories and explicit late-receipt refresh');
+
+{
+  let finished = false;
+  const app = await fixture('/automation?tab=runs', {
+    run: async id => ({ ...run(id), ownerId: -71, authorization: { canOperate: !finished }, status: finished ? 'COMPLETED' : 'RUNNING', state: { ticketId: 2094, incidentId: 'own-incident' } }),
+    ticket: async id => ({ id, status: finished ? 'RESOLVED' : 'PROCESSING', ownerActorId: -71, sourceType: 'ISOLATED_DRILL', environment: 'ISOLATED', incidentId: 'own-incident', affectedCiCode: 'ops-demo-order-service' }),
+  }, true, -71);
+  try {
+    await app.state.selectRun('own-run'); await settle();
+    assert.equal(app.state.canDraftKnowledge.value, false);
+    finished = true; await app.state.refreshSelectedRun();
+    assert.equal(app.state.canDraftKnowledge.value, true, 'watching a run finish refreshes its ticket and reveals the draft entry');
+  } finally { app.stop(); }
+}
+console.log('PASS completed-run polling reveals owned visitor knowledge without reselecting the run');
 
 // Optional demo services must not make the run/approval workspace look broken.
 {

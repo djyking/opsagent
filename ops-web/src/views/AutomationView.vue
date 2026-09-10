@@ -15,10 +15,11 @@ import BaseModal from '@/components/BaseModal.vue';
 import EventManualRecovery from '@/components/events/EventManualRecovery.vue';
 import { ticketApi } from '@/api/modules';
 import type { Ticket } from '@/types/api';
+import { canDraftVisitorKnowledge } from '@/utils/event-workspace';
 import { useAuthStore } from '@/stores/auth';
 import { useApprovalInboxStore } from '@/stores/approval-inbox';
 import { approvalActionable, approvalForRun, approvalKey, groupAutomationEvents, runBudgetSummary, runHasUnlimitedTokenBudget, runModelFailure, runWriteSummary,
-  automationEventLabel, automationMessage, automationRunPresentation, automationToolLabels as toolLabels } from '@/utils/automation-presentation';
+  automationEventLabel, automationMessage, automationRunPresentation, automationNodeDone, automationToolLabels as toolLabels } from '@/utils/automation-presentation';
 import { automationApi as api, type PendingApproval, type Definition, type Graph, type Incident, type Model,
   type RunDetail, type RunEvent, type RunRow, type Target } from '@/api/automation';
 import '@/styles/pages/automation.css';
@@ -206,7 +207,9 @@ function runTicket(run: RunRow) { return run.ticketId ?? run.ticket_id; }
 function outgoing(id: string) { return graph.value?.edges.filter(edge => edge.from === id) || []; }
 function nodeName(id: string) { return graph.value?.nodes.find(node => node.id === id)?.label || id; }
 function branchName(when?: string) { return when === 'true' ? '条件成立' : when === 'false' ? '条件不成立' : when || '继续'; }
-function nodeDone(id: string) { return Object.prototype.hasOwnProperty.call(detail.value?.state.outputs || {}, id); }
+function nodeDone(id: string) { return automationNodeDone(id, detail.value, events.value); }
+const canDraftKnowledge = computed(() => detail.value?.status === 'COMPLETED' && detail.value.ownerId === auth.user?.userId
+  && canDraftVisitorKnowledge(runTicketContext.value, auth.user?.userId, auth.isDemo));
 function approvalAvailable(approval: PendingApproval) {
   return ownRun.value && approvalActionable(approval, auth.user?.userId, auth.isAdmin, now.value) && approvalInbox.isCurrent(approval);
 }
@@ -269,6 +272,17 @@ async function refreshTrackedRuns() {
     if (!disposed && epoch === trackedEpoch && trackedIncidentId.value === id) { trackedError.value = message(cause); throw cause; }
   }
 }
+let ticketContextRead = 0;
+async function refreshRunTicket(run: RunDetail, epoch: number) {
+  const read = ++ticketContextRead;
+  try {
+    const ticket = await ticketApi.detail(run.state.ticketId);
+    if (!disposed && epoch === selectedEpoch && read === ticketContextRead && detail.value?.id === run.id)
+      runTicketContext.value = ticket.id === run.state.ticketId && ticket.incidentId === run.state.incidentId ? ticket : undefined;
+  } catch {
+    if (!disposed && epoch === selectedEpoch && read === ticketContextRead) runTicketContext.value = undefined;
+  }
+}
 async function selectRun(id: string) {
   const epoch = ++selectedEpoch;
   try {
@@ -276,10 +290,7 @@ async function selectRun(id: string) {
     if (disposed || epoch !== selectedEpoch) return;
     detail.value = run; events.value = history.items; eventsComplete.value = history.complete; tab.value = 'runs';
     runTicketContext.value = undefined;
-    void ticketApi.detail(run.state.ticketId).then(ticket => {
-      if (!disposed && epoch === selectedEpoch && ticket.id === run.state.ticketId
-        && ticket.incidentId === run.state.incidentId) runTicketContext.value = ticket;
-    }).catch(() => { /* The event link remains available when its current context cannot be read. */ });
+    void refreshRunTicket(run, epoch);
     runListOpen.value = false;
     now.value = Date.now();
     void router.replace({ query: { ...route.query, tab: 'runs', run: id } });
@@ -334,10 +345,13 @@ async function refreshSelectedRun(force = false) {
   }
   const [run, more] = await Promise.all([api.run(id), readRunEvents(id, events.value.at(-1)?.id || 0, epoch)]);
   if (!disposed && detail.value?.id === id && epoch === selectedEpoch) {
+    const statusChanged = detail.value.status !== run.status;
     detail.value = run;
     const known = new Set(events.value.map(event => event.id));
     events.value.push(...more.items.filter(event => !known.has(event.id)));
     eventsComplete.value = more.complete;
+    if (force || statusChanged || !runTicketContext.value || auth.isDemo && run.status === 'COMPLETED' && !canDraftKnowledge.value)
+      await refreshRunTicket(run, epoch);
   }
 }
 async function refreshAll() {
@@ -646,7 +660,7 @@ onBeforeUnmount(() => {
         <section v-if="detail" :key="detail.id" class="automation-run-detail">
           <section class="panel"><header class="panel-header"><div><h3>运行 {{ detail.id.slice(0, 8) }}</h3><p><router-link :to="`/tickets/${detail.state.ticketId}`">工单 #{{ detail.state.ticketId }}</router-link> · {{ detail.snapshot.model.model }}</p></div><div class="row-actions"><button v-if="canPause" class="button secondary" :disabled="!!busy" @click="action('pause', async () => { await api.pause(detail!.id); await selectRun(detail!.id); notice = '已请求在步骤边界暂停；已发出的远程动作仍会返回执行结果。'; })"><Pause :size="14" />暂停</button><button v-if="canResume" class="button secondary" :disabled="!!busy" @click="action('resume', async () => { await api.resume(detail!.id); await selectRun(detail!.id); notice = '已请求继续同一运行，原有预算、审批要求和期限继续生效。'; })"><Play :size="14" />继续运行</button><button v-if="ownRun && !terminal.has(detail.status)" class="button secondary" :disabled="!!busy" @click="action('cancel', async () => { await api.cancel(detail!.id); await selectRun(detail!.id); notice = '已请求取消运行，已发出的远程动作仍需查看最终结果。'; })"><Square :size="14" />取消</button></div></header>
             <section v-if="detail.takeoverRecovery" class="automation-notice" role="status"><div><strong>管理员接管恢复 · {{ label(detail.takeoverRecovery.status) }}</strong><p>{{ detail.takeoverRecovery.message }}</p><small>更新于 {{ date(detail.takeoverRecovery.updatedAt) }}</small><RouterLink :to="`/tickets/${detail.state.ticketId}`">查看原事件的恢复记录与确认 →</RouterLink></div></section><p v-if="detail.authorization?.hint" class="automation-help" role="status">{{ detail.authorization.hint }}</p><button v-if="detail.authorization?.canTakeover || takeoverAttempt?.runId === detail.id" class="button primary" :disabled="!!busy" @click="prepareTakeover">管理员接管恢复</button><div class="automation-result-main" role="status"><span class="automation-kicker">{{ terminal.has(detail.status) ? '运行结果' : '当前任务' }}</span><h2>{{ verifiedCompletion ? '恢复验证已通过' : runPresentation.title }}</h2><p>{{ needsHandoff && runMessage ? runMessage : runPresentation.description }}</p><small class="automation-current-step">当前步骤 · {{ nodeName(detail.nodeId) }}</small></div>
-            <div class="automation-result-next"><span>{{ needsHandoff ? '执行恢复 → 记录结果 → 观察与确认' : awaitingDecision ? '核对本次动作后决定是否继续' : '依据实际执行结果继续下一步' }}</span><div class="automation-handoff-actions"><button v-if="awaitingDecision" class="button primary" :disabled="!!busy" @click="showCurrentApproval">{{ runPresentation.action }}</button><button v-else-if="!terminal.has(detail.status) && runPresentation.code !== 'VERIFYING'" class="button primary" @click="showTrace">查看执行进度</button><RouterLink :class="['button', !terminal.has(detail.status) && runPresentation.code !== 'VERIFYING' ? 'secondary' : 'primary']" :to="{ path: `/tickets/${detail.state.ticketId}`, query: needsHandoff ? { handoff: '1' } : {} }">{{ needsHandoff ? '人工接管并继续处置' : runPresentation.code === 'VERIFYING' || terminal.has(detail.status) ? '核对恢复结果' : '查看关联事件' }} <ArrowRight :size="16" /></RouterLink></div></div>
+            <div class="automation-result-next"><span>{{ needsHandoff ? '执行恢复 → 记录结果 → 观察与确认' : awaitingDecision ? '核对本次动作后决定是否继续' : '依据实际执行结果继续下一步' }}</span><div class="automation-handoff-actions"><button v-if="awaitingDecision" class="button primary" :disabled="!!busy" @click="showCurrentApproval">{{ runPresentation.action }}</button><button v-else-if="!terminal.has(detail.status) && runPresentation.code !== 'VERIFYING'" class="button primary" @click="showTrace">查看执行进度</button><RouterLink :class="['button', !terminal.has(detail.status) && runPresentation.code !== 'VERIFYING' ? 'secondary' : 'primary']" :to="{ path: `/tickets/${detail.state.ticketId}`, query: needsHandoff ? { handoff: '1' } : {} }">{{ needsHandoff ? '人工接管并继续处置' : runPresentation.code === 'VERIFYING' || terminal.has(detail.status) ? '核对恢复结果' : '查看关联事件' }} <ArrowRight :size="16" /></RouterLink><RouterLink v-if="canDraftKnowledge" class="button secondary" :to="{ path: `/tickets/${detail.state.ticketId}`, query: { knowledge: '1' } }">沉淀为体验知识</RouterLink></div></div>
             <details class="automation-result-disclosure"><summary>步骤、变更与恢复证据</summary><dl class="automation-result-facts"><div><dt>当前步骤</dt><dd>{{ nodeName(detail.nodeId) }}</dd></div><div><dt>实际变更</dt><dd>{{ eventsComplete ? writeSummary.text : `证据尚未读完 · ${writeSummary.text}` }}<small>只统计本次运行的写入回执。</small></dd></div><div><dt>恢复验证</dt><dd>{{ verificationStatus }}</dd></div><div><dt>流程 Token 记录</dt><dd>{{ runBudgetSummary(detail) }}<small>流程记账可能含预留，不代表 DeepSeek 实际计费用量。</small></dd></div></dl><p v-if="recoveryProgress">{{ recoveryProgress }}</p><p v-if="recoveryOutcome">{{ recoveryOutcome }}</p><p v-if="detail.status === 'BUDGET_EXCEEDED' && !runHasUnlimitedTokenBudget(detail)">下一次调用的输入与回复预留也需在剩余额度内，预算限制不等于实际用量已达到上限。</p><template v-if="needsHandoff"><p>执行恢复会改变当前演练配置；记录处理只保存说明。技术确认、业务确认和关闭仍需在事件中分别完成。</p><div class="automation-handoff-actions"><EventManualRecovery v-if="runTicketContext" :key="detail.id" :ticket-id="detail.state.ticketId" :target-code="runTicketContext.affectedCiCode" :incident-id="runTicketContext.incidentId" @restored="action('refresh-recovery', refresh)" /><RouterLink v-if="!auth.isDemo" class="button secondary" :to="{ path: `/tickets/${detail.state.ticketId}`, query: { record: '1' } }">记录人工处理</RouterLink></div></template></details>
             <details v-if="rawRunMessage || modelFailure || modelApprovalHint" class="automation-failure-detail"><summary>技术详情与审批说明</summary><p v-if="modelApprovalHint">{{ modelApprovalHint }}</p><pre v-if="rawRunMessage">{{ rawRunMessage }}</pre><code v-if="modelFailure">{{ modelFailure.code }}</code></details>
           </section>
