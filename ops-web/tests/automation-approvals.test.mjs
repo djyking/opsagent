@@ -165,6 +165,7 @@ function componentFixture(path, props = {}, extra = {}) {
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace: async () => {}, push: async () => {} }) },
     '@lucide/vue': icons, '@/api/automation': { automationApi: api },
     '@/utils/automation-presentation': presentation, '@/stores/auth': { useAuthStore: () => ({ user: { userId: 7 }, isAdmin: true }) },
+    '@/utils/event-workspace': load('utils/event-workspace.ts'),
     '@/stores/approval-inbox': { useApprovalInboxStore: () => ({ isCurrent: () => true, decisionVersion: 0 }) },
     '@/components/PageHeader.vue': Stub, '@/components/InlineError.vue': Stub, '@/components/EmptyState.vue': Stub,
     '@/components/automation/ApprovalCard.vue': Stub, '@/components/automation/InspectionRuns.vue': Stub,
