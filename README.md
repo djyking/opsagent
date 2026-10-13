@@ -1,74 +1,282 @@
 # opsagent
 
-Java backend interview practice project for an enterprise intelligent operations platform.
+本轮服务与观测改造见 [服务拓扑与可观测工作台实施记录](docs/observability-workspace-implementation.md)。
 
-The project has been reset to a modular monolith package skeleton. Business classes will be rebuilt under `com.example.opsagent`.
+`opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。
 
-## Environment
+当前已形成“Prometheus / Alertmanager → CMDB Lite → 自动建单 → 值班 → SLA → Outbox / RabbitMQ → 人工处置 → 知识审核 → RAG”的企业 ITSM 闭环，并保留文档软删除及 Elasticsearch、Qdrant 双索引持久化补偿。MySQL、Redis、Nacos、Sentinel、RabbitMQ、Elasticsearch、Qdrant、Prometheus、Alertmanager、Grafana、六个 Java 服务和 Nginx 前端均可由 Docker Compose 统一运行。LLM 已接入 OpenAI、DeepSeek 和 Kimi，可通过配置切换，API Key 只在仓库外保存并于容器启动时注入。
 
-- Java 17
-- Spring Boot 3.5.16
-- Maven
-- MySQL
-- IntelliJ IDEA 2026.1
-- Windows
-
-Docker Compose auto-start is disabled by `spring.docker.compose.enabled=false`.
-
-## Package Layout
+## 项目结构
 
 ```text
-com.example.opsagent
-├── common
-│   ├── api
-│   ├── exception
-│   ├── config
-│   └── util
-├── auth
-├── ticket
-├── document
-├── ai
-├── audit
-├── notification
-└── task
+opsagent
+├─ ops-common                 公共响应、Web、安全、MyBatis、Redis/MQ 与可观测模块
+├─ ops-gateway                统一入口（18080）
+├─ ops-auth-service           认证服务（8101）
+├─ ops-ticket-service         工单服务（8102）
+├─ ops-knowledge-service      知识服务（8103）
+├─ ops-rag-service            RAG 服务（8104）
+├─ ops-platform-service       平台服务（8105）
+├─ ops-web                    Vue 3 前端项目
+├─ demo-data                  企业 Runbook、附件和一键初始化脚本
+├─ sql                        分库初始化脚本
+├─ compose.yaml               中间件与 apps profile 全栈容器
+├─ Dockerfile                 六个 Java 服务的统一多阶段镜像
+├─ opsAgent使用文档.md          完整功能使用说明
+└─ pom.xml                     后端 Maven 配置
 ```
 
-Each business module keeps its own `controller`, `service`, `entity`, `mapper`, `dto`, and other module-specific packages.
+## 快速操作
 
-## Configuration
+首次运行或代码修改后，先停止旧 Java 进程，再完成构建和启动：
 
-- Common configuration: `src/main/resources/application.yml`
-- Local database configuration: `src/main/resources/application-local.yml`
-- MySQL initialization entry: `src/main/resources/db/schema.sql`
-
-Local database settings can be overridden with environment variables:
-
-- `OPSAGENT_DB_URL`
-- `OPSAGENT_DB_USERNAME`
-- `OPSAGENT_DB_PASSWORD`
-
-## Build
-
-```bash
-mvn clean package -DskipTests
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\start-opsagent.ps1 -Build
 ```
 
-If Maven is not installed globally on Windows:
+代码没有变化时直接执行 `D:\middleware\scripts\start-opsagent.ps1`。查看状态和停止：
 
-```bash
-.\mvnw.cmd clean package -DskipTests
+```powershell
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\status-opsagent.ps1
+powershell -ExecutionPolicy Bypass -File D:\middleware\scripts\stop-opsagent.ps1
 ```
 
-## Run
+主要入口：
 
-```bash
-mvn spring-boot:run
-```
+| 功能 | 地址 | 当前用途 |
+|---|---|---|
+| OpsAgent 前端 | `http://127.0.0.1:5173/` | 用户操作入口 |
+| Gateway | `http://127.0.0.1:18080/` | 统一 API 入口；本机 8080 被其他项目占用 |
+| Nacos | `http://127.0.0.1:8849/` | 服务发现和六个 Data ID |
+| Sentinel | `http://127.0.0.1:8858/` | 六个服务的实时监控和簇点链路 |
+| RabbitMQ | `http://127.0.0.1:15672/` | 队列、消费者和 DLQ |
+| Prometheus | `http://127.0.0.1:9090/targets` | 六个 Java 服务抓取状态 |
+| Alertmanager | `http://127.0.0.1:9093/` | 告警路由和恢复状态 |
+| Grafana | `http://127.0.0.1:3000/` | `OpsAgent Overview` 与 `OpsAgent ITSM Overview` |
+| Elasticsearch | `http://127.0.0.1:9200/_cluster/health` | SmartCN 与 BM25 文本检索 |
+| Qdrant | `http://127.0.0.1:6333/dashboard` | 向量、权限 Payload 与 kNN |
 
-Or run `OpsagentApplication` directly from IntelliJ IDEA.
+账号和密码不写入 Git 文档，统一查看本机仓库外文件 `D:\middleware\docs\OpsAgent本地地址与密码.md`。
 
-Swagger UI will be available after controllers are added:
+## 角色与权限
+
+- `USER`：创建并查看自己的工单、上传文档、提问、关闭已解决工单。
+- `OPS`：查看待处理工单和自己负责的工单，接单、填写结构化处置记录、上传文档、提问和解决工单。
+- `ADMIN`：访问全部工单和真实后台链路，执行所有状态操作，并管理通知和审计记录。
+
+认证沿用现有 Spring Security 与 JWT。登录、注册、健康检查和 Swagger 之外的接口默认要求 `Authorization: Bearer <token>`。JWT 默认有效期为 120 分钟；服务端每次请求仍会校验签名、有效期并恢复 `SecurityContext`。
+
+## 主要接口
 
 ```text
-http://localhost:8080/swagger-ui.html
+POST /api/auth/login
+POST /api/auth/refresh
+GET  /api/auth/me
+
+POST /api/tickets
+GET  /api/tickets
+GET  /api/tickets/{id}
+PUT  /api/tickets/{id}
+POST /api/tickets/{id}/claim
+POST /api/tickets/{id}/transition
+GET  /api/tickets/{id}/trace                ticket/assignment/operation/outbox 链路
+GET  /api/tickets/{id}/work-records
+POST /api/tickets/{id}/work-records         诊断、动作、根因、验证、业务回复
+
+POST /api/knowledge/bases
+GET  /api/knowledge/bases
+POST /api/knowledge/bases/{id}/documents
+GET  /api/knowledge/tickets/{ticketId}/documents
+POST /api/knowledge/documents/{id}/parse
+GET  /api/knowledge/parse-tasks/{id}
+GET  /api/knowledge/documents/{id}/chunks
+DELETE /api/knowledge/documents/{id}       创建人或 ADMIN，软删除并清理 ES
+GET  /api/knowledge/internal/index-tasks/{id} ADMIN，查看 ES 补偿任务
+POST /api/rag/ask
+POST /api/rag/stream                       POST SSE，真实 Token 流
+POST /api/rag/chat                         兼容旧客户端
+GET  /api/rag/admin/providers              ADMIN，脱敏配置状态
+POST /api/rag/admin/providers/{name}/probe ADMIN，真实连通性诊断
+POST /api/knowledge/internal/reindex       ADMIN，全量重新向量化
+GET  /api/platform/admin/audits
+GET  /api/platform/admin/notifications
+PUT  /api/platform/admin/notifications/read-all
+GET  /api/platform/monitor/summary
+
+GET  /api/platform/cmdb/cis
+POST /api/platform/cmdb/cis                   ADMIN
+PUT  /api/platform/cmdb/cis/{id}              ADMIN
+GET  /api/platform/cmdb/cis/{ciCode}/topology
+POST /api/platform/cmdb/relations              ADMIN
+DELETE /api/platform/cmdb/relations/{id}       ADMIN
+GET  /api/platform/oncall/current
+GET  /api/platform/oncall/shifts
+POST /api/platform/oncall/shifts               ADMIN
+PUT  /api/platform/oncall/shifts/{id}          ADMIN
+DELETE /api/platform/oncall/shifts/{id}        ADMIN
+
+GET  /api/tickets/{id}/sla
+GET  /api/tickets/sla/overview
+GET  /api/tickets/alerts
+POST /api/integrations/alertmanager/webhook    独立 Bearer Token
+
+GET  /api/knowledge/review/documents
+POST /api/knowledge/documents/{id}/submit-review
+POST /api/knowledge/documents/{id}/approve     OPS / ADMIN
+POST /api/knowledge/documents/{id}/reject      OPS / ADMIN
+POST /api/knowledge/documents/{id}/archive     ADMIN
+GET  /api/knowledge/documents/{id}/review-history
 ```
+
+各 MVC 服务启用 SpringDoc；经 Gateway 暴露 Swagger 聚合仍是后续项。
+
+## 文档和问答
+
+支持文本型 PDF、DOCX、TXT、MD/Markdown，前后端统一限制单文件最大 10 MB。文件使用 UUID 服务端名称和相对路径保存，并校验扩展名、声明类型及 Tika 检测类型，同时记录 SHA-256。扫描版 PDF 不支持 OCR。工单上传会把 `ticket_id` 写入知识文档，知识库工作台则管理对应业务库下的全部文档。
+
+解析 API 创建 `QUEUED` 任务并发布到 RabbitMQ；消费者最多尝试三次，成功后文档为 `PARSED`、任务为 `SUCCESS`，最终失败时任务为 `FAILED` 且消息进入 DLQ。Tika 文件读取在数据库事务外执行，切片与幂等记录使用短事务保存。
+
+问答默认经过以下链路：
+
+```text
+Document → Parse/Chunk → text-embedding-3-small → Qdrant Vector
+                                  └────────────→ Elasticsearch BM25
+Question → 同模型 Embedding → Qdrant 权限过滤与 TopK/最低相似度
+         → Elasticsearch SmartCN/BM25 → RRF 融合
+→ 版本化 YAML Prompt → OpenAI / DeepSeek / Kimi → Citation 校验 → Answer + Sources
+```
+
+OpenAI 使用 Responses API，DeepSeek 和 Kimi 使用兼容 Chat Completions。DeepSeek V4 与 Kimi 都显式关闭 thinking，避免推理内容耗尽输出预算造成流式正文为空。`POST /api/rag/stream` 返回 `status`、`token`、`sources`、`done` 或 `error` 事件，前端用 Fetch `ReadableStream` 逐 Token 渲染；最终 `done.answer` 是 Citation 校验后的权威文本。Prompt 位于 `ops-rag-service/src/main/resources/prompts/rag-answer.yml`。返回来源完全由真实检索结果生成；模型声明但检索结果中不存在的 `[chunk:id]` 会被剔除。问题最大 2000 字符，默认 TopK 5、最大 20、上下文 16000 字符。RAG 入口使用 Sentinel `ops-rag-ask` 资源，当前 Nacos 规则为每实例 5 QPS。
+
+`POST /api/rag/ask` 可选传 `documentId`，用于把问答严格限定在用户有权访问的单个文档。文档访问规则为：`PUBLIC` 对已认证用户可见，`PRIVATE` 仅创建者和 ADMIN 可见；权限过滤在内容进入 Prompt 之前完成。
+
+删除文档时数据库立即写入 `deleted=1/status=DELETED`，并创建 `knowledge_index_task`。Elasticsearch 文本和 Qdrant 向量任一侧删除失败时，任务都会按指数退避重试，最多 10 次；本地原文件暂时保留，供恢复或后续保留期清理任务使用。
+
+## 配置
+
+配置位于各服务的 `src/main/resources/application.yml`。常用环境变量：
+
+```text
+OPS_AUTH_DB_URL / OPS_AUTH_DB_USERNAME / OPS_AUTH_DB_PASSWORD
+OPS_TICKET_DB_URL / OPS_TICKET_DB_USERNAME / OPS_TICKET_DB_PASSWORD
+OPS_KNOWLEDGE_DB_URL / OPS_KNOWLEDGE_DB_USERNAME / OPS_KNOWLEDGE_DB_PASSWORD
+OPS_RAG_DB_URL / OPS_RAG_DB_USERNAME / OPS_RAG_DB_PASSWORD
+OPS_PLATFORM_DB_URL / OPS_PLATFORM_DB_USERNAME / OPS_PLATFORM_DB_PASSWORD
+OPS_JWT_SECRET                 至少 32 个 UTF-8 字节
+OPS_UPLOAD_DIR                 默认 ./data/uploads
+OPS_RABBITMQ_HOST / OPS_RABBITMQ_PORT / OPS_RABBITMQ_USERNAME / OPS_RABBITMQ_PASSWORD
+NACOS_ENABLED                  默认 false
+NACOS_CONFIG_ENABLED           默认 false
+NACOS_SERVER_ADDR              默认 localhost:8848
+SENTINEL_ENABLED               默认 false
+SENTINEL_EAGER                 默认 false
+SENTINEL_DASHBOARD             默认 localhost:8858
+SENTINEL_RULE_DATA_ID          默认 ops-rag-sentinel-flow-rules
+OPS_VECTOR_ENABLED             是否启用 Embedding/向量检索
+OPS_ES_URL / OPS_ES_KNOWLEDGE_INDEX
+OPS_QDRANT_URL / OPS_QDRANT_COLLECTION / OPS_QDRANT_ALIAS / OPS_QDRANT_API_KEY
+OPS_VECTOR_MINIMUM_SCORE
+OPS_AI_ENABLED / OPS_AI_PROVIDER
+OPENAI_API_KEY / OPENAI_MODEL / OPENAI_EMBEDDING_MODEL
+DEEPSEEK_API_KEY / DEEPSEEK_MODEL
+MOONSHOT_API_KEY / MOONSHOT_MODEL
+OPS_AI_TIMEOUT_SECONDS / OPS_AI_MAX_ATTEMPTS / OPS_AI_MAX_OUTPUT_TOKENS
+```
+
+密钥和生产数据库密码不要写入仓库。PowerShell 本地示例：
+
+```powershell
+$env:OPS_JWT_SECRET = '请替换为至少32字节的随机开发密钥'
+$env:OPS_AI_PROVIDER = 'openai' # openai、deepseek 或 kimi，修改后重启 RAG 服务
+```
+
+本机启动脚本从 `C:\Users\77190\Desktop\api-key.txt` 解析三个 Key，只写入子进程环境且不打印值；还会读取当前 Windows HTTPS 代理供 Java 访问外部 API。仓库、Nacos、数据库、前端和日志均不保存真实 Key。生产环境应改用 Vault、Kubernetes Secret 或云密钥管理服务。
+
+## 数据库与容器
+
+- 全新开发库：Compose 首次创建 MySQL 卷时按文件名自动执行 `sql/01` 至 `sql/09` 和 `sql/init_data.sql`。
+- Compose 只会在 MySQL 数据卷首次创建时自动执行上述脚本，不会清空已有库。
+- 本地演示账号由 SQL 初始化，账号列表及本地密码只记录在仓库外密码文档中。
+
+`compose.yaml` 默认启动中间件；`apps` profile 额外启动六个 Java 服务和 Nginx 前端，`rerank` profile 启动 BGE Reranker。MySQL 继续保存业务事实，Elasticsearch 只做 SmartCN/BM25，Qdrant 专门保存 1536 维向量和权限 Payload。
+
+`ops_rag.ai_usage_log` 仅记录用户 ID、Provider、模型、问题 SHA-256、Token、耗时、成功状态和脱敏错误码，不保存问题正文、Prompt、回答或 Key。
+
+解析新文档时，启用向量功能会自动生成 Embedding 并索引。2026-09-03 曾在明确授权范围内完成一批 `text-embedding-3-small` 向量化；2026-09-04 实时库已有 26 篇已发布文档，其中新增 5 篇不在原 21 篇外发授权内，因此新版本 Alias 的全量 Reindex 暂未执行。今后再次导入内部文档时仍需单独确认数据分级和第三方处理范围；生成阶段会把检索上下文发送给当前 `OPS_AI_PROVIDER`，不要把 Embedding 授权等同于任意生成 Provider 授权。
+
+```powershell
+# 只启动中间件
+docker compose up -d
+
+# 首次构建并启动完整系统
+.\scripts\start-containers.ps1 -Build -WithReranker
+
+# 后续直接启动；停止不会删除 named volumes
+.\scripts\start-containers.ps1 -WithReranker
+.\scripts\stop-containers.ps1
+```
+
+容器运行时，Spring `${NAME:default}` 读取的是容器环境变量，不会自动继承宿主机全部变量。Compose 已把 `OPS_RAG_NEIGHBOR_WINDOW: ${OPS_RAG_NEIGHBOR_WINDOW:-1}` 等参数显式传入；迁移时复制代码和 Compose，在新主机创建不提交 Git 的 `.env` 即可继续生效。真实密码和 API Key 不进入 Dockerfile、镜像或仓库。
+
+监控服务使用 `OPS_PROMETHEUS_URL` / `OPS_GRAFANA_URL` 访问 Docker 内部服务，页面跳转使用 `OPS_PROMETHEUS_PUBLIC_URL` / `OPS_GRAFANA_PUBLIC_URL`。迁移到其他机器时，在 `.env` 将两个 Public URL 改为新机器的 IP 或域名。
+
+推荐使用 `D:\middleware\scripts\start-opsagent.ps1` 启动全部中间件和本机应用；只启动中间件时添加 `-MiddlewareOnly`。停止脚本不会删除 Docker named volumes。
+
+BGE Reranker 镜像存在时，启动脚本会自动启动 `reranker` profile，并给 RAG 服务注入 `OPS_RERANK_ENABLED=true` 与 `OPS_RERANK_BASE_URL=http://localhost:8010`。首次运行需要下载模型；模型就绪前查询自动按 RRF 排序降级。代码默认按 Top30/3 秒保护生产延迟；当前本机是 CPU 推理，启动脚本覆盖为 5 个候选/20 秒，以保证能在页面 30 秒首段上限内完成真实重排。
+
+启动脚本会启用 Nacos 服务发现和配置订阅，并把六个服务配置及 `ops-rag-sentinel-flow-rules` 发布到 `DEFAULT_GROUP`。Gateway 的 `lb://` 路由依赖 Nacos 实例列表，因此 Nacos 已被实际使用。RAG 服务订阅 Sentinel FlowRule，`ops-rag-ask` 当前限制为每实例 5 QPS。Nacos 实现规则统一下发，但普通 Sentinel 客户端仍是每实例计数；多实例严格共享总额度需要部署 Sentinel Cluster Token Server。
+
+## 构建和运行
+
+完整构建与启动：
+
+```powershell
+.\mvnw.cmd clean verify
+D:\middleware\scripts\start-opsagent.ps1
+```
+
+推荐部署方式是六个独立 Java 容器和一个 Nginx 前端容器，统一 API 入口为 `http://localhost:18080`，页面入口为 `http://localhost:5173`。宿主机 JAR/Vite 启动方式继续保留用于开发调试，不要与 `apps` profile 同时运行，以免端口冲突。
+
+只有修改前端源码并需要热更新时，才单独启动 Vite：
+
+```powershell
+cd ops-web
+pnpm install
+pnpm dev
+```
+
+Vite 开发模式访问 `http://localhost:5173`，并把 `/api` 和 `/actuator` 请求代理到 `http://localhost:18080`。Axios 等 API 请求未认证时返回标准 401 JSON。
+
+前端生产构建：
+
+```powershell
+cd ops-web
+pnpm build
+```
+
+构建结果位于 `ops-web/dist`；生产镜像使用 Nginx 提供静态资源，并把 `/api` 反向代理到 Gateway，SSE 路径关闭代理缓冲。
+
+项目默认启用 `local` Profile，也可以用 `SPRING_PROFILES_ACTIVE` 覆盖。接口访问日志只记录请求方法、路径、响应状态、耗时和 Trace ID，不记录请求体、密码或完整 JWT。
+
+从数据库初始化到完整工单闭环、Nacos/Sentinel 控制台操作和故障排查步骤见 [opsAgent使用文档.md](opsAgent使用文档.md)。监控告警、CMDB、值班、SLA 与知识审核的 6—8 分钟演示路线见 [OpsAgent_ITSM演示与验收手册.md](docs/OpsAgent_ITSM演示与验收手册.md)。
+
+RAG 技术资料：
+
+- [现状审计](docs/rag/current-rag-audit.md)
+- [架构与运行机制](docs/rag/architecture.md)
+- [真实验收与评测报告](docs/rag/evaluation-report.md)
+
+管理员登录后可从“索引管理”查看 MySQL/ES 一致性、提交全量 Reindex、查看失败任务并按文档 ID 修复。问答引用展示 `[S1]`、文档、章节、页码和检索通道；RRF/Rerank 分数只对管理员显示。
+
+## 前端工作台
+
+前端采用 Vue 3、Pinia、Vue Router、Element Plus、Lucide 和 ECharts。2026-09-04 起使用企业 SaaS 工作台布局：桌面端为 `64px App Rail + 224px Context Navigation + Workspace`，上下文导航可折叠；窄屏通过抽屉同时提供产品域和当前业务域入口。
+
+- 总览：真实 API 驱动的 P1/P2、SLA 风险、活动告警、处理中、当前值班、服务健康和工单分布。
+- 运维：工单、告警、SLA、值班和 CMDB；工单列表点击行先打开快速详情侧栏，Esc 可关闭，再按需进入完整页。
+- 可观测：OpsAgent 服务健康聚合，并跳转已配置的 Prometheus 与 Grafana。
+- AI：三栏 RAG 工作区、知识库、知识审核和索引管理；窄屏自动收为单栏。
+- 系统：分组通知和高密度审计表；只有工单类审计记录才显示工单跳转。
+
+导航和统计只展示已有路由、权限及真实 API 数据。Agent、Workflow、用户/角色配置等尚无完整后端能力的页面没有伪造入口。全局搜索当前明确为工单搜索，回车后进入工单中心并带入关键词。

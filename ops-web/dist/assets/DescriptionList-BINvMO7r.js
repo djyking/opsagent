@@ -1,0 +1,1 @@
+import{_ as e,b as t,c as o,Z as c}from"./index-C-tepXAD.js";const r={},n={class:"oa-description-list"};function a(s,i){return t(),o("dl",n,[c(s.$slots,"default")])}const l=e(r,[["render",a]]);export{l as D};

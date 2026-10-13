@@ -1,0 +1,1 @@
+import{_ as a,b as s,c as o,Z as t,i as r}from"./index-C-tepXAD.js";const c={},n={class:"oa-filter-bar","aria-label":"筛选条件"},i={key:0,class:"oa-filter-actions"};function l(e,_){return s(),o("section",n,[t(e.$slots,"default"),e.$slots.actions?(s(),o("div",i,[t(e.$slots,"actions")])):r("",!0)])}const f=a(c,[["render",l]]);export{f as F};

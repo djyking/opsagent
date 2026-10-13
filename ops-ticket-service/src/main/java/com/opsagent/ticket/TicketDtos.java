@@ -1,0 +1,96 @@
+package com.opsagent.ticket;
+
+import jakarta.validation.constraints.*;
+
+import java.time.LocalDateTime;
+
+/**
+ * 工单服务内部使用的请求与响应模型集合。
+ *
+ * @author heyu
+ * @since 2026/8/11
+ */
+final class TicketDtos {
+    private TicketDtos() {}
+
+    /**
+     * 创建工单请求参数。
+     *
+     * @author heyu
+     * @since 2026/8/11
+     */
+    record Create(
+            @NotBlank @Size(max = 128) String title,
+            @NotBlank @Size(max = 20000) String description,
+            @NotBlank @Pattern(regexp = "LOW|MEDIUM|HIGH|URGENT") String priority,
+            @Size(max = 64) String affectedCiCode) {}
+
+    /**
+     * 领取工单请求参数。
+     *
+     * @author heyu
+     * @since 2026/8/11
+     */
+    record Claim(@NotNull @Min(0) Integer version) {}
+
+    /**
+     * 工单状态操作请求参数。
+     *
+     * @author heyu
+     * @since 2026/8/11
+     */
+    record Action(
+            @NotNull TicketStatus target,
+            @NotNull @Min(0) Integer version,
+            @Size(max = 512) String remark) {}
+
+    /**
+     * 新增工单评论请求参数。
+     *
+     * @author heyu
+     * @since 2026/8/11
+     */
+    record AddComment(@NotBlank @Size(max = 2000) String content) {}
+
+    /**
+     * 新增结构化处置记录请求参数。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record AddWorkRecord(
+            @NotBlank @Pattern(regexp = "DIAGNOSIS|ACTION|VERIFICATION|ROOT_CAUSE|BUSINESS_REPLY")
+                    String recordType,
+            @NotBlank @Size(max = 2000) String content,
+            @Size(max = 1000) String evidence) {}
+
+    /**
+     * 工单详情响应数据。
+     *
+     * @author heyu
+     * @since 2026/8/11
+     */
+    record View(
+            Long id,
+            String ticketNo,
+            String title,
+            String description,
+            String priority,
+            String status,
+            String eventId,
+            String eventStage,
+            boolean eventClosed,
+            boolean eventLegacyArchived,
+            Long creatorId,
+            Long assigneeId,
+            String affectedCiCode,
+            String sourceType,
+            String environment,
+            Long ownerActorId,
+            String incidentId,
+            String episodeId,
+            Boolean publicDemo,
+            Integer version,
+            LocalDateTime createTime,
+            LocalDateTime updateTime) {}
+}

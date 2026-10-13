@@ -1,0 +1,2 @@
+2026-08-28T20:03:12+08:00 ERROR traceId=demo-a81f route=order-create status=504 elapsedMs=8021
+2026-08-28T20:03:13+08:00 WARN traceId=demo-b91e sentinelBlock=true resource=POST:/api/orders

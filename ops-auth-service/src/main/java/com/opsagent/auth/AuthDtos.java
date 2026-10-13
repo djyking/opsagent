@@ -1,0 +1,123 @@
+package com.opsagent.auth;
+
+import jakarta.validation.constraints.*;
+
+import java.time.Instant;
+import java.util.List;
+
+/**
+ * 认证服务内部使用的请求与响应模型集合。
+ *
+ * @author heyu
+ * @since 2026/8/1
+ */
+final class AuthDtos {
+    private AuthDtos() {}
+
+    /**
+     * 用户登录请求参数。
+     *
+     * @author heyu
+     * @since 2026/8/1
+     */
+    record LoginRequest(
+            @NotBlank @Size(max = 64) String username,
+            @NotBlank String password,
+            @NotBlank @Pattern(regexp = "[a-f0-9]{32}") String captchaId,
+            @NotBlank @Size(max = 16) String captchaCode) {}
+
+    /**
+     * 图形验证码公开响应，不包含答案或校验摘要。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record CaptchaResponse(String captchaId, String imageDataUrl, long expiresInSeconds) {}
+
+    /**
+     * 公开注册只接受账号资料，不接受角色或权限字段。
+     *
+     * @author heyu
+     * @since 2026/9/3
+     */
+    record RegisterRequest(
+            @NotBlank @Size(max = 64) String username,
+            @NotBlank @Size(min = 6, max = 72) String password,
+            @Size(max = 64) String displayName) {}
+
+    /**
+     * 刷新访问令牌的请求参数。
+     *
+     * @author heyu
+     * @since 2026/8/1
+     */
+    record RefreshRequest(@NotBlank String refreshToken, Instant lastActivityAt) {
+        RefreshRequest(String refreshToken) {
+            this(refreshToken, null);
+        }
+    }
+
+    /**
+     * 认证令牌响应数据。
+     *
+     * @author heyu
+     * @since 2026/8/1
+     */
+    record TokenResponse(
+            String accessToken,
+            String refreshToken,
+            String tokenType,
+            Instant expiresAt,
+            String sessionId,
+            Instant sessionStartedAt,
+            Instant sessionExpiresAt,
+            Instant idleExpiresAt,
+            Instant lastActivityAt,
+            String visitorExperience) {
+        TokenResponse(
+                String accessToken,
+                String refreshToken,
+                String tokenType,
+                Instant expiresAt,
+                String sessionId,
+                Instant sessionStartedAt,
+                Instant sessionExpiresAt,
+                Instant idleExpiresAt,
+                Instant lastActivityAt) {
+            this(
+                    accessToken,
+                    refreshToken,
+                    tokenType,
+                    expiresAt,
+                    sessionId,
+                    sessionStartedAt,
+                    sessionExpiresAt,
+                    idleExpiresAt,
+                    lastActivityAt,
+                    null);
+        }
+
+        TokenResponse(
+                String accessToken, String refreshToken, String tokenType, Instant expiresAt) {
+            this(
+                    accessToken,
+                    refreshToken,
+                    tokenType,
+                    expiresAt,
+                    null,
+                    null,
+                    expiresAt,
+                    expiresAt,
+                    null);
+        }
+    }
+
+    /**
+     * 当前登录用户响应数据。
+     *
+     * @author heyu
+     * @since 2026/8/1
+     */
+    record CurrentUser(
+            long userId, String username, List<String> roles, List<String> permissions) {}
+}

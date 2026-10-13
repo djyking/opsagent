@@ -1,0 +1,65 @@
+{
+  "source": "cloud ticket 2087 events 960, 973, 981",
+  "metrics": {
+    "rps": {
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "OBSERVED",
+      "scope": "REQUEST_WINDOW",
+      "sampledAt": "2026-09-08T04:57:22.333Z",
+      "value": 1.350974930362117,
+      "windowSeconds": 1800,
+      "unit": "requests/s"
+    },
+    "errorRate": {
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "OBSERVED",
+      "scope": "REQUEST_WINDOW",
+      "sampledAt": "2026-09-08T04:57:22.333Z",
+      "value": 0.865979381443299,
+      "windowSeconds": 1800,
+      "unit": "%"
+    },
+    "p95Ms": {
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "METRIC_NOT_EXPOSED",
+      "scope": "REQUEST_WINDOW",
+      "sampledAt": null,
+      "value": null,
+      "windowSeconds": 1800,
+      "unit": "ms"
+    },
+    "cpuUsage": {
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "OBSERVED",
+      "scope": "JVM_RUNTIME",
+      "sampledAt": "2026-09-08T04:57:22.333Z",
+      "value": 6.756756756756757,
+      "windowSeconds": null,
+      "unit": "%"
+    },
+    "memoryUsage": {
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "OBSERVED",
+      "scope": "JVM_RUNTIME",
+      "sampledAt": "2026-09-08T04:57:22.333Z",
+      "value": 34.10083501025884,
+      "windowSeconds": null,
+      "unit": "%"
+    }
+  },
+  "correctedArgs": {
+    "conclusionLevel": "SUPPORTED",
+    "evidence": "ev-287b67309f4996c09919a0d9: 实测appliedRevision=223dbe16且configuration.redisPort=6380、business.httpStatus=503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0. ev-a7fffe812c8e2ad79b6aa342: 变更时间04:56:14 redisPort由6379改为6380、sentinelQps保持5. ev-c03c6a025b98f623adc56f27: 实测04:57:22 metrics.errorRate.value=0.865979381443299(%)、businessProbe=0.0、metrics.rps.value=1.350974930362117. 知识runbook确认正常Redis端口6379，6380为无监听端口。",
+    "evidenceIds": [
+      "ev-287b67309f4996c09919a0d9",
+      "ev-a7fffe812c8e2ad79b6aa342",
+      "ev-c03c6a025b98f623adc56f27"
+    ],
+    "evidenceGaps": "CONFIGURATION_AUDIT_NOT_AUTHORIZED，未能直接核对配置审计源；6380端口物理监听状态未直接测量(由REDIS_CONNECT_FAILED原因码与runbook间接支撑)。需求：恢复redisPort至6379基线后重新实测业务探针，确认HTTP恢复且REDIS_CONNECT_FAILED消除。",
+    "knownFacts": "1) recent_changes显示04:56:14配置变更redisPort由6379改为6380、revision更新为223dbe16(ev-a7fffe81). 2) demo_target_inspect实测appliedRevision=223dbe16、configuration.redisPort=6380、business.httpStatus=503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0(ev-287b6731). 3) observability_evidence实测04:57:22 metrics.errorRate.value=0.865979381443299(%)、businessProbe=0.0(ev-c03c6a02). 4) sentinel.qps=5且变更前后一致、blockedTotal=0未触发限流拦截。",
+    "candidateCauses": "主因：Redis连接配置端口由6379漂移至6380(无监听端口)，导致REDIS_CONNECT_FAILED、业务返回HTTP 503。配置变更时间(04:56:14)与故障时间高度吻合；知识runbook明确6380为演练置入的固定无监听端口。",
+    "recommendation": "恢复Redis连接基线，将redisPort从6380校正回6379(基线端口)。Sentinel限流未被触发(sentinelQps保持5、blockedTotal=0)，无需flow_restore。修复后重新探测确认HTTP恢复且REDIS_CONNECT_FAILED消除。",
+    "summary": "隔离订单服务(ops-demo-order-service)故障/工单2087/incident dc77ad58。证据链显示04:56:14配置变更将Redis连接端口从6379改为6380(无监听端口)，此后业务探针返回HTTP 503 reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0；观测metrics.errorRate.value=0.865979381443299(%)、businessProbe=0.0。知识runbook确认正常Redis端口为6379、6380为无监听端口。判定根因为Redis配置端口漂移。拟执行demo_config_restore将连接恢复至6379基线(需精确审批)，修复后重探。"
+  },
+  "firstSummary": "隔离订单服务(ops-demo-order-service)故障/工单2087/incident dc77ad58。证据链显示04:56:14配置变更将Redis连接端口从6379改为6380(无监听端口)，此后业务探针返回HTTP 503 reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0；可观测错误率86.6%，业务探针0.0。知识runbook确认正常Redis端口为6379、6380为无监听端口。判定根因为Redis配置端口漂移。拟执行demo_config_restore将连接恢复至6379基线(需精确审批)，修复后重探。"
+}

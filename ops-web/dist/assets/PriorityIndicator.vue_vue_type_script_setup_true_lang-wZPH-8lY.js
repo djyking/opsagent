@@ -1,0 +1,1 @@
+import{d as t,c as r,n,e as l,g as i,t as p,b as c}from"./index-C-tepXAD.js";const d=t({__name:"PriorityIndicator",props:{value:{}},setup(o){const e=o,s={LOW:"低",MEDIUM:"中",HIGH:"高",URGENT:"紧急"};return(u,a)=>(c(),r("span",{class:n(["priority-indicator",`priority-${e.value.toLowerCase()}`])},[a[0]||(a[0]=l("i",null,null,-1)),i(p(s[e.value]||e.value),1)],2))}});export{d as _};

@@ -1,0 +1,15 @@
+.git
+.idea
+.vscode
+**/target
+ops-web/node_modules
+ops-web/dist
+data
+.env
+*.log
+rag-eval/scripts/__pycache__
+ui-audit-output
+ui-final-output
+ui-consistency-final
+ui-final-polish-output
+ui-experience-final

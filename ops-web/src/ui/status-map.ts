@@ -1,0 +1,100 @@
+export type StatusTone = "default" | "info" | "success" | "warning" | "danger" | "purple";
+
+export interface StatusMeta {
+  label: string;
+  tone: StatusTone;
+  rawValue: string;
+}
+
+const statusMap: Record<string, Omit<StatusMeta, "rawValue">> = {
+  CREATED: { label: "待接单", tone: "info" },
+  CREATE: { label: "创建", tone: "info" },
+  CLAIM: { label: "接单", tone: "info" },
+  ASSIGNED: { label: "已接单", tone: "info" },
+  PROCESSING: { label: "处理中", tone: "info" },
+  SUSPENDED: { label: "已挂起", tone: "warning" },
+  WAITING_CONFIRM: { label: "待业务确认", tone: "warning" },
+  RESOLVED: { label: "待确认", tone: "success" },
+  CLOSED: { label: "已关闭", tone: "default" },
+  COMPLETED: { label: "已完成", tone: "success" },
+  RUNNING: { label: "计时中", tone: "info" },
+  BREACHED: { label: "已超时", tone: "danger" },
+  PENDING: { label: "待处理", tone: "warning" },
+  SUCCESS: { label: "成功", tone: "success" },
+  FAILED: { label: "失败", tone: "danger" },
+  SENT: { label: "已发送", tone: "success" },
+  UNREAD: { label: "未读", tone: "info" },
+  READ: { label: "已读", tone: "default" },
+  DRAFT: { label: "草稿", tone: "default" },
+  PARSING: { label: "解析中", tone: "info" },
+  PARSED: { label: "已解析", tone: "success" },
+  INDEXED: { label: "已索引", tone: "success" },
+  IN_REVIEW: { label: "待审核", tone: "warning" },
+  PUBLISHED: { label: "已发布", tone: "success" },
+  REJECTED: { label: "已驳回", tone: "danger" },
+  ARCHIVED: { label: "已归档", tone: "default" },
+  FIRING: { label: "告警中", tone: "danger" },
+  CRITICAL: { label: "严重", tone: "danger" },
+  WARNING: { label: "警告", tone: "warning" },
+  INFO: { label: "提示", tone: "info" },
+  ACTIVE: { label: "正常", tone: "success" },
+  INACTIVE: { label: "停用", tone: "default" },
+  PRIMARY: { label: "主值班", tone: "info" },
+  SECONDARY: { label: "备值班", tone: "purple" },
+  LOW: { label: "低", tone: "default" },
+  MEDIUM: { label: "中", tone: "info" },
+  HIGH: { label: "高", tone: "warning" },
+  URGENT: { label: "紧急", tone: "danger" },
+  ONCALL_SHIFT_CREATE: { label: "新增班次", tone: "info" },
+  ONCALL_SHIFT_UPDATE: { label: "更新班次", tone: "info" },
+  ONCALL_SHIFT_DELETE: { label: "删除班次", tone: "danger" },
+  CMDB_CREATE: { label: "新增配置项", tone: "info" },
+  CMDB_UPDATE: { label: "更新配置项", tone: "info" },
+  CMDB_RELATION_CHANGE: { label: "修改服务依赖", tone: "purple" },
+};
+
+export function getStatusMeta(value: unknown): StatusMeta {
+  const rawValue = String(value ?? "").trim();
+  const key = rawValue.toUpperCase();
+  const mapped = statusMap[key];
+  return mapped ? { ...mapped, rawValue } : { label: rawValue || "—", tone: "default", rawValue };
+}
+
+export function statusLabel(value: unknown) {
+  return getStatusMeta(value).label;
+}
+
+const businessTypeMap: Record<string, string> = {
+  TICKET: "工单",
+  DOCUMENT: "文档",
+  KNOWLEDGE_DOCUMENT: "知识文档",
+  ONCALL_SHIFT: "值班班次",
+  CMDB_CI: "配置项",
+  CMDB: "配置项",
+  CMDB_RELATION: "服务依赖",
+  AI_TASK: "AI 任务",
+};
+
+export function businessTypeLabel(value: unknown) {
+  const rawValue = String(value ?? "").trim();
+  return businessTypeMap[rawValue.toUpperCase()] || rawValue || "业务对象";
+}
+
+const operationMap: Record<string, string> = {
+  CREATED: "创建",
+  CREATE: "创建",
+  CLAIMED: "接单",
+  CLAIM: "接单",
+  PROCESSING: "开始处理",
+  SUSPENDED: "挂起",
+  WAITING_CONFIRM: "提交业务确认",
+  RESOLVED: "解决",
+  CLOSED: "关闭",
+  COMMENTED: "新增回复",
+  WORK_RECORD_CREATE: "添加处置记录",
+};
+
+export function operationLabel(value: unknown) {
+  const rawValue = String(value ?? "").trim();
+  return operationMap[rawValue.toUpperCase()] || statusLabel(rawValue);
+}

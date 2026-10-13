@@ -1,0 +1,63 @@
+server:
+  port: 8102
+spring:
+  application:
+    name: ops-ticket-service
+  config:
+    import: optional:nacos:${spring.application.name}.yaml
+  datasource:
+    url: ${OPS_TICKET_DB_URL:jdbc:mysql://localhost:3306/ops_ticket?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${OPS_TICKET_DB_USERNAME:root}
+    password: ${OPS_TICKET_DB_PASSWORD:}
+  rabbitmq:
+    host: ${OPS_RABBITMQ_HOST:localhost}
+    port: ${OPS_RABBITMQ_PORT:5672}
+    username: ${OPS_RABBITMQ_USERNAME:opsagent}
+    password: ${OPS_RABBITMQ_PASSWORD:opsagent_local}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 3s
+  data:
+    redis:
+      host: ${OPS_REDIS_HOST:localhost}
+      port: ${OPS_REDIS_PORT:6379}
+      password: ${OPS_REDIS_PASSWORD:opsagent_local}
+      timeout: 2s
+  cloud:
+    nacos:
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+    sentinel:
+      enabled: ${SENTINEL_ENABLED:false}
+      eager: ${SENTINEL_EAGER:false}
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
+ops:
+  mq:
+    outbox:
+      batch-size: ${OPS_OUTBOX_BATCH_SIZE:50}
+      fixed-delay-ms: ${OPS_OUTBOX_FIXED_DELAY_MS:2000}
+    confirm-timeout-seconds: ${OPS_OUTBOX_CONFIRM_TIMEOUT_SECONDS:5}
+    stale-publishing-seconds: ${OPS_OUTBOX_STALE_PUBLISHING_SECONDS:30}
+  security:
+    secret: ${OPS_JWT_SECRET:}
+    permit-all:
+      - /actuator/health
+      - /actuator/info
+      - /actuator/prometheus
+      - /api/integrations/alertmanager/webhook
+  alertmanager:
+    enabled: ${OPS_ALERTMANAGER_ENABLED:false}
+    webhook-token: ${OPS_ALERTMANAGER_WEBHOOK_TOKEN:}
+  sla:
+    scanner-enabled: ${OPS_SLA_SCANNER_ENABLED:true}
+    scan-delay-millis: ${OPS_SLA_SCAN_DELAY_MILLIS:10000}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

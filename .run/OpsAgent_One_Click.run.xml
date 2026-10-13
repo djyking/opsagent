@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="OpsAgent 一键启动" type="CompoundRunConfigurationType">
+    <toRun name="OpsAgent Backend" type="SpringBootApplicationConfigurationType" />
+    <toRun name="OpsAgent Frontend" type="js.build_tools.npm" />
+    <method v="2" />
+  </configuration>
+</component>

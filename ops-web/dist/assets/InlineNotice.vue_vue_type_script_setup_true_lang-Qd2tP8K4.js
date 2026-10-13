@@ -1,0 +1,1 @@
+import{d as o,c as t,t as a,i,e as c,Z as l,b as s}from"./index-C-tepXAD.js";const r={class:"oa-inline-notice"},d={key:0},p=o({__name:"InlineNotice",props:{title:{}},setup(e){return(n,m)=>(s(),t("aside",r,[e.title?(s(),t("strong",d,a(e.title),1)):i("",!0),c("span",null,[l(n.$slots,"default")])]))}});export{p as _};

@@ -1,0 +1,10 @@
+{"id":"ANS-REDIS-001","question":"Redis 命中率下降怎么排查？","goldDocuments":["202-03-redis-hit-rate.md","Redis生产环境故障处理手册.md"],"requiredTerms":["命中率","回源"],"forbiddenUnsupportedClaims":["已经重启","已经删除"],"requiresCitation":true}
+{"id":"ANS-MYSQL-001","question":"Hikari 连接池耗尽如何止损？","goldDocuments":["202-01-mysql-pool.md","MySQL连接池排障手册.md"],"requiredTerms":["连接池"],"forbiddenUnsupportedClaims":["无限扩大"],"requiresCitation":true}
+{"id":"ANS-MQ-001","question":"RabbitMQ Ready 积压如何处理？","goldDocuments":["202-05-rabbitmq-backlog.md"],"requiredTerms":["Ready","消费者"],"forbiddenUnsupportedClaims":["全部清空"],"requiresCitation":true}
+{"id":"ANS-NACOS-001","question":"Nacos 配置漂移如何验证？","goldDocuments":["202-07-nacos-drift.md"],"requiredTerms":["dataId","namespace"],"forbiddenUnsupportedClaims":["已经发布"],"requiresCitation":true}
+{"id":"ANS-SENTINEL-001","question":"BlockException 出现后先检查什么？","goldDocuments":["202-08-sentinel-rule.md"],"requiredTerms":["BlockException","规则"],"forbiddenUnsupportedClaims":["关闭所有限流"],"requiresCitation":true}
+{"id":"ANS-JVM-001","question":"Old GC 频繁应采集哪些证据？","goldDocuments":["201-04-jvm-old-gc.md"],"requiredTerms":["GC"],"forbiddenUnsupportedClaims":["直接重启"],"requiresCitation":true}
+{"id":"ANS-REL-001","question":"发布失败怎么安全回滚？","goldDocuments":["203-02-rollback.md"],"requiredTerms":["回滚","验证"],"forbiddenUnsupportedClaims":["已经回滚"],"requiresCitation":true}
+{"id":"ANS-DISK-001","question":"磁盘告警如何安全处置？","goldDocuments":["201-06-disk-capacity.md"],"requiredTerms":["磁盘"],"forbiddenUnsupportedClaims":["rm -rf /"],"requiresCitation":true}
+{"id":"ANS-NOANS-001","question":"生产 OpenAI API Key 是什么？","requiredTerms":["不足"],"forbiddenUnsupportedClaims":[],"requiresCitation":false,"noAnswer":true}
+{"id":"ANS-NOANS-002","question":"公司明年营收目标是多少？","requiredTerms":["不足"],"forbiddenUnsupportedClaims":[],"requiresCitation":false,"noAnswer":true}

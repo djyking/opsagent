@@ -1,0 +1,36 @@
+.modal-backdrop, .detail-panel-mask { position: fixed; inset: 0; border: 0; background: color-mix(in srgb, var(--oa-text-primary) 28%, transparent); backdrop-filter: blur(2px); }
+.modal-backdrop { z-index: var(--oa-z-modal); padding: 24px; display: grid; place-items: center; }
+.modal { width: min(560px, 100%); max-height: calc(100vh - 48px); overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--oa-border-default); border-radius: var(--oa-radius-raised); background: var(--oa-bg-surface); box-shadow: var(--oa-shadow-float); }
+.modal-wide { width: min(760px, 100%); }
+.modal > header { min-height: 56px; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--oa-border-subtle); }
+.modal > header h2 { margin: 0; color: var(--oa-text-primary); font-size: var(--oa-font-size-section); line-height: var(--oa-line-height-section); font-weight: 600; }
+.detail-panel > header { min-height: 64px; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--oa-border-subtle); }
+.detail-panel > header h2 { max-width: 360px; margin: 0; overflow: hidden; color: var(--oa-text-primary); font-size: 20px; line-height: 28px; font-weight: 600; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.modal > header p { margin: 2px 0 0; color: var(--oa-text-secondary); font-size: var(--oa-font-size-sm); line-height: var(--oa-line-height-sm); }
+.modal-body { min-height: 0; padding: 16px; overflow: auto; }
+.modal > footer { min-height: 56px; padding: 10px 16px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--oa-border-subtle); }
+.detail-panel-mask { z-index: var(--oa-z-overlay); }
+.detail-panel { position: fixed; inset: 0 0 0 auto; z-index: var(--oa-z-drawer); width: min(440px, calc(100vw - 24px)); display: flex; flex-direction: column; border-left: 1px solid var(--oa-border-default); background: var(--oa-bg-surface); box-shadow: var(--oa-shadow-float); }
+.detail-panel-wide { width: min(480px, calc(100vw - 24px)); }
+.detail-panel > footer { min-height: 64px; padding: 10px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--oa-border-subtle); }
+.detail-panel > header span { display: block; margin-bottom: 2px; color: var(--oa-text-tertiary); font-family: var(--oa-font-mono); font-size: var(--oa-font-size-xs); line-height: var(--oa-line-height-xs); }
+.detail-panel-header-actions { display: flex; align-items: center; gap: 8px; }
+.detail-panel-body { min-height: 0; flex: 1; padding: 20px; overflow: auto; }
+.rail-user-popover, .topbar-create-popover, .ticket-action-menu > div { position: absolute; z-index: var(--oa-z-overlay); padding: 8px; border: 1px solid var(--oa-border-default); border-radius: var(--oa-radius-raised); background: var(--oa-bg-surface); box-shadow: var(--oa-shadow-float); }
+.rail-user-popover { bottom: 0; left: 42px; width: 184px; display: grid; gap: 4px; }
+.rail-user-popover strong { font-size: var(--oa-font-size-body); font-weight: 600; }
+.rail-user-popover small { font-size: var(--oa-font-size-xs); }
+.rail-user-popover button { margin-top: 8px; height: 36px; padding: 0 10px; display: flex; align-items: center; gap: 8px; border: 0; border-radius: var(--oa-radius-control); color: var(--oa-text-secondary); background: var(--oa-bg-subtle); }
+.topbar-create-menu, .ticket-action-menu { position: relative; }
+.topbar-create-menu > summary, .ticket-action-menu > summary { list-style: none; }
+.topbar-create-menu > summary::-webkit-details-marker, .ticket-action-menu > summary::-webkit-details-marker { display: none; }
+.topbar-create-popover { top: 44px; right: 0; width: 260px; }
+.topbar-create-popover a { padding: 10px; display: flex; gap: 10px; border-radius: var(--oa-radius-control); }
+.topbar-create-popover a:hover { background: var(--oa-bg-subtle); }
+.topbar-create-popover span { display: grid; }
+.topbar-create-popover strong { font-size: var(--oa-font-size-body); font-weight: 500; }
+.topbar-create-popover small { font-size: var(--oa-font-size-xs); }
+.ticket-action-menu > div { top: 42px; right: 0; width: 180px; display: grid; gap: 4px; }
+.ticket-action-menu > div button { height: 36px; padding: 0 10px; border: 0; border-radius: var(--oa-radius-control); color: var(--oa-text-primary); background: transparent; text-align: left; }
+.ticket-action-menu > div button:hover { background: var(--oa-bg-subtle); }
+@media (max-width: 640px) { .modal-backdrop { padding: 12px; } .detail-panel, .detail-panel-wide { width: 100%; } }

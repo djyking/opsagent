@@ -1,0 +1,95 @@
+{
+  "source": "Cloud ticket 2092; original state_json text preserves original numeric serialization",
+  "originalMetricId": "ev-7d3f24e17f2ee6e78b4b9dc1",
+  "originalProbeId": "ev-31a4dfe61b6e5164e0dc27ed",
+  "originalChangeId": "ev-679640fc349edb3ad6c1a64a",
+  "metrics": {
+    "rps": {
+      "unit": "requests/s",
+      "windowSeconds": 1800,
+      "value": 1.4557103064066852,
+      "sampledAt": "2026-09-08T15:06:32.333Z",
+      "scope": "REQUEST_WINDOW",
+      "reasonCode": "OBSERVED",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION"
+    },
+    "errorRate": {
+      "unit": "%",
+      "windowSeconds": 1800,
+      "value": 0.9567546880979717,
+      "sampledAt": "2026-09-08T15:06:32.333Z",
+      "scope": "REQUEST_WINDOW",
+      "reasonCode": "OBSERVED",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION"
+    },
+    "p95Ms": {
+      "unit": "ms",
+      "windowSeconds": 1800,
+      "value": null,
+      "sampledAt": null,
+      "scope": "REQUEST_WINDOW",
+      "reasonCode": "METRIC_NOT_EXPOSED",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION"
+    },
+    "cpuUsage": {
+      "unit": "%",
+      "windowSeconds": null,
+      "value": 6.097560975609756,
+      "sampledAt": "2026-09-08T15:06:32.333Z",
+      "scope": "JVM_RUNTIME",
+      "reasonCode": "OBSERVED",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION"
+    },
+    "memoryUsage": {
+      "unit": "%",
+      "windowSeconds": null,
+      "value": 27.48063315446128,
+      "sampledAt": "2026-09-08T15:06:32.333Z",
+      "scope": "JVM_RUNTIME",
+      "reasonCode": "OBSERVED",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION"
+    }
+  },
+  "firstArgs": {
+    "summary": "隔离演练工单2092。目标服务HTTP 503且reasonCode=REDIS_CONNECT_FAILED。recent_changes显示15:05:19一次RUNTIME配置应用将redisPort从6379改为6380，sentinelQps未变。现场业务探针无连续成功，指标错误率95.68%。知识runbook明确正常基线Redis端口为6379，演练改至固定无监听端口6380导致连接失败。根因高度指向Redis连接配置漂移（端口6380），而非流量控制（sentinel未阻塞）或Trace资源问题。",
+    "evidence": "观测@15:06:29 ev-31a4dfe61b6e5164e0dc27ed: redisPort=6380, business.httpStatus=503, reasonCode=REDIS_CONNECT_FAILED, consecutiveSuccesses=0；变更@15:05:19 ev-679640fc349edb3ad6c1a64a: redisPort 6379→6380，sentinelQps保持5；观察ev-7d3f24e17f2ee6e78b4b9dc1: businessProbe=0.0, errorRate%=95.68, RPS≈1.46, P95未暴露。",
+    "knownFacts": "1) 15:05:19运行时配置应用把redisPort从6379改为6380（ev-679640fc349edb3ad6c1a64a，sentinelQps保持5）。2) 业务探针HTTP 503、reasonCode=REDIS_CONNECT_FAILED、连续成功0（ev-31a4...）。3) 指标businessProbe=0.0、errorRate%=95.68%、RPS约1.46、P95未暴露（ev-7d3f...）。4) sentinel blockedTotal=0，非限流。",
+    "evidenceIds": [
+      "ev-31a4dfe61b6e5164e0dc27ed",
+      "ev-679640fc349edb3ad6c1a64a",
+      "ev-7d3f24e17f2ee6e78b4b9dc1"
+    ],
+    "evidenceGaps": "CONFIGURATION_AUDIT_NOT_AUTHORIZED（来源审计缺失）。未见6379/6380端口实际监听状态的直接探测证据，需通过demo_config_restore恢复后复测来收敛。",
+    "recommendation": "执行 demo_config_restore 将独立订单服务 Redis 连接配置基线端口恢复为 6379（当前配置漂移至 6380 无监听端口）。属人工审批修复，审批通过后复测并确认业务连续恢复。",
+    "candidateCauses": "Redis连接配置漂移：service配置redisPort被改为6380，而该端口无监听服务，导致Redis连接失败。知识runbook确认正常基线端口为6379。Sentinel流量控制非因（blocked=0）。",
+    "conclusionLevel": "SUPPORTED"
+  },
+  "secondArgs": {
+    "summary": "隔离演练工单2092。目标服务HTTP 503且reasonCode=REDIS_CONNECT_FAILED。recent_changes显示15:05:19一次RUNTIME配置应用将redisPort从6379改为6380，sentinelQps未变。现场业务探针无连续成功，指标错误率0.9567546880979717%（单位%已是百分数）。知识runbook明确正常基线Redis端口为6379，演练改至固定无监听端口6380导致连接失败。根因高度指向Redis连接配置漂移（端口6380），而非流量控制（sentinel未阻塞）或Trace资源问题。",
+    "evidence": "观测@15:06:29 ev-31a4dfe61b6e5164e0dc27ed: redisPort=6380, business.httpStatus=503, reasonCode=REDIS_CONNECT_FAILED, consecutiveSuccesses=0；变更@15:05:19 ev-679640fc349edb3ad6c1a64a: redisPort 6379→6380，sentinelQps保持5；观察ev-7d3f24e17f2ee6e78b4b9dc1: businessProbe=0.0, errorRate%=0.9567546880979717（单位%已是百分数）, RPS≈1.46, P95未暴露。",
+    "knownFacts": "1) 15:05:19运行时配置应用把redisPort从6379改为6380（ev-679640fc349edb3ad6c1a64a，sentinelQps保持5）。2) 业务探针HTTP 503、reasonCode=REDIS_CONNECT_FAILED、连续成功0（ev-31a4...）。3) 指标businessProbe=0.0、errorRate%=0.9567546880979717（单位已%）、RPS约1.46、P95未暴露（ev-7d3f...）。4) sentinel blockedTotal=0，非限流。",
+    "evidenceIds": [
+      "ev-31a4dfe61b6e5164e0dc27ed",
+      "ev-679640fc349edb3ad6c1a64a",
+      "ev-7d3f24e17f2ee6e78b4b9dc1"
+    ],
+    "evidenceGaps": "CONFIGURATION_AUDIT_NOT_AUTHORIZED（来源审计缺失）。未见6379/6380端口实际监听状态的直接探测证据，需通过demo_config_restore恢复后复测来收敛。",
+    "recommendation": "执行 demo_config_restore 将独立订单服务 Redis 连接配置基线端口恢复为 6379（当前配置漂移至 6380 无监听端口）。属人工审批修复，审批通过后复测并确认业务连续恢复。",
+    "candidateCauses": "Redis连接配置漂移：service配置redisPort被改为6380，而该端口无监听服务，导致Redis连接失败。知识runbook确认正常基线端口为6379。Sentinel流量控制非因（blocked=0）。",
+    "conclusionLevel": "SUPPORTED"
+  },
+  "finalArgs": {
+    "summary": "隔离演练工单2092。目标服务HTTP 503且reasonCode=REDIS_CONNECT_FAILED。recent_changes显示15:05:19一次RUNTIME配置应用将redisPort从6379改为6380，sentinelQps未变。现场业务探针无连续成功，指标错误率0.9567546880979717%。知识runbook明确正常基线Redis端口为6379，演练改至固定无监听端口6380导致连接失败。根因高度指向Redis连接配置漂移（端口6380），而非流量控制（sentinel未阻塞）或Trace资源问题。",
+    "evidence": "观察ev-7d3f24e17f2ee6e78b4b9dc1 metrics.errorRate.value=0.9567546880979717%，businessProbe=0.0，RPS约1.46，P95未暴露；观察ev-31a4dfe61b6e5164e0dc27ed redisPort=6380、business.httpStatus=503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0（@15:06:29）；变更ev-679640fc349edb3ad6c1a64a 于15:05:19把redisPort从6379改为6380、sentinelQps保持5。",
+    "knownFacts": "1) 15:05:19运行时配置应用把redisPort从6379改为6380（ev-679640fc349edb3ad6c1a64a，sentinelQps保持5）。2) 业务探针HTTP 503、reasonCode=REDIS_CONNECT_FAILED、连续成功0（ev-31a4...）。3) 指标businessProbe=0.0、errorRate=0.9567546880979717%、RPS约1.46、P95未暴露（ev-7d3f...）。4) sentinel blockedTotal=0，非限流。",
+    "evidenceIds": [
+      "ev-31a4dfe61b6e5164e0dc27ed",
+      "ev-679640fc349edb3ad6c1a64a",
+      "ev-7d3f24e17f2ee6e78b4b9dc1"
+    ],
+    "evidenceGaps": "CONFIGURATION_AUDIT_NOT_AUTHORIZED（来源审计缺失）。未见6379/6380端口实际监听状态的直接探测证据，需通过demo_config_restore恢复后复测来收敛。",
+    "recommendation": "执行 demo_config_restore 将独立订单服务 Redis 连接配置基线端口恢复为 6379（当前配置漂移至 6380 无监听端口）。属人工审批修复，审批通过后复测并确认业务连续恢复。",
+    "candidateCauses": "Redis连接配置漂移：service配置redisPort被改为6380，而该端口无监听服务，导致Redis连接失败。知识runbook确认正常基线端口为6379。Sentinel流量控制非因（blocked=0）。",
+    "conclusionLevel": "SUPPORTED"
+  }
+}

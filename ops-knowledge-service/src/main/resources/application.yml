@@ -1,0 +1,103 @@
+server:
+  port: 8103
+spring:
+  application:
+    name: ops-knowledge-service
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 12MB
+  config:
+    import: optional:nacos:${spring.application.name}.yaml
+  datasource:
+    url: ${OPS_KNOWLEDGE_DB_URL:jdbc:mysql://localhost:3306/ops_knowledge?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${OPS_KNOWLEDGE_DB_USERNAME:root}
+    password: ${OPS_KNOWLEDGE_DB_PASSWORD:}
+  rabbitmq:
+    host: ${OPS_RABBITMQ_HOST:localhost}
+    port: ${OPS_RABBITMQ_PORT:5672}
+    username: ${OPS_RABBITMQ_USERNAME:opsagent}
+    password: ${OPS_RABBITMQ_PASSWORD:opsagent_local}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    connection-timeout: 3s
+    listener:
+      simple:
+        acknowledge-mode: manual
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 5s
+  data:
+    redis:
+      host: ${OPS_REDIS_HOST:localhost}
+      port: ${OPS_REDIS_PORT:6379}
+      password: ${OPS_REDIS_PASSWORD:opsagent_local}
+      database: ${OPS_REDIS_DATABASE:0}
+  cloud:
+    nacos:
+      config:
+        enabled: ${NACOS_CONFIG_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+      discovery:
+        enabled: ${NACOS_ENABLED:false}
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+    sentinel:
+      enabled: ${SENTINEL_ENABLED:false}
+      eager: ${SENTINEL_EAGER:false}
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:localhost:8858}
+ops:
+  mq:
+    document-parse:
+      confirm-timeout-seconds: ${OPS_DOCUMENT_PARSE_CONFIRM_TIMEOUT_SECONDS:5}
+  security:
+    secret: ${OPS_JWT_SECRET:}
+    permit-all:
+      - /actuator/health
+      - /actuator/info
+      - /actuator/prometheus
+  knowledge:
+    ticket-url: ${OPS_TICKET_URL:}
+    storage-root: ${OPS_UPLOAD_DIR:./data/uploads}
+    max-file-size-bytes: ${OPS_KNOWLEDGE_MAX_FILE_SIZE_BYTES:10485760}
+    chunk:
+      target-tokens: ${OPS_CHUNK_TARGET_TOKENS:500}
+      max-tokens: ${OPS_CHUNK_MAX_TOKENS:800}
+      min-tokens: ${OPS_CHUNK_MIN_TOKENS:100}
+      overlap-tokens: ${OPS_CHUNK_OVERLAP_TOKENS:80}
+      strategy-version: ${OPS_CHUNK_STRATEGY_VERSION:structure-v1}
+    vector:
+      enabled: ${OPS_VECTOR_ENABLED:false}
+      elasticsearch-url: ${OPS_ES_URL:http://localhost:9200}
+      index-name: ${OPS_ES_KNOWLEDGE_INDEX:ops_knowledge_chunk_v2}
+      read-alias: ${OPS_ES_KNOWLEDGE_READ_ALIAS:ops_knowledge_chunk_read}
+      write-alias: ${OPS_ES_KNOWLEDGE_WRITE_ALIAS:ops_knowledge_chunk_write}
+      analyzer: ${OPS_ES_ANALYZER:smartcn}
+      qdrant-url: ${OPS_QDRANT_URL:http://localhost:6333}
+      qdrant-collection: ${OPS_QDRANT_COLLECTION:ops_knowledge_vector_v1}
+      qdrant-alias: ${OPS_QDRANT_ALIAS:ops_knowledge_vector_read}
+      qdrant-api-key: ${OPS_QDRANT_API_KEY:}
+      dimensions: ${OPS_EMBEDDING_DIMENSIONS:1536}
+      minimum-score: ${OPS_VECTOR_MINIMUM_SCORE:0.72}
+      embedding-base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+      embedding-api-key: ${OPENAI_API_KEY:}
+      embedding-model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
+      timeout-seconds: ${OPS_EMBEDDING_TIMEOUT_SECONDS:30}
+      embedding-batch-size: ${OPS_EMBEDDING_BATCH_SIZE:32}
+      embedding-batch-max-tokens: ${OPS_EMBEDDING_BATCH_MAX_TOKENS:12000}
+      bulk-size: ${OPS_ES_BULK_SIZE:100}
+      bm25-top-k: ${OPS_RAG_BM25_TOP_K:50}
+      vector-top-k: ${OPS_RAG_VECTOR_TOP_K:50}
+      vector-candidates: ${OPS_RAG_VECTOR_CANDIDATES:100}
+      rrf-window: ${OPS_RAG_RRF_WINDOW:50}
+      rrf-rank-constant: ${OPS_RAG_RRF_RANK_CONSTANT:60}
+      hybrid-candidates: ${OPS_RAG_HYBRID_CANDIDATES:30}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

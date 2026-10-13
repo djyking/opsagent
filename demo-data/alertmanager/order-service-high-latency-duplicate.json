@@ -1,0 +1,10 @@
+{
+  "status": "firing",
+  "alerts": [{
+    "status": "firing",
+    "labels": {"alertname": "OrderServiceHighLatency", "service": "order-service", "severity": "critical"},
+    "annotations": {"summary": "订单服务 P99 延迟仍然超过 2 秒", "description": "重复告警只累计 occurrence，不重复创建工单。"},
+    "startsAt": "2026-09-04T04:01:00Z",
+    "fingerprint": "opsagent-demo-order-latency-v1"
+  }]
+}

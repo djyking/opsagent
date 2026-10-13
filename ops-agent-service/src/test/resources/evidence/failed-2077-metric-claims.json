@@ -1,0 +1,47 @@
+{
+  "basis": "Cloud native MODEL_OBSERVATION 806 arguments and TOOL_OBSERVATION 799 metric values. No credentials, no provider replay.",
+  "originalObservationEvidenceId": "ev-ea8a6d05db901c0b760d3d84",
+  "metrics": {
+    "rps": {
+      "unit": "requests/s",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "OBSERVED",
+      "scope": "REQUEST_WINDOW",
+      "sampledAt": "2026-09-07T22:07:47.333Z",
+      "value": 1.4466146762795342,
+      "windowSeconds": 1800
+    },
+    "errorRate": {
+      "unit": "%",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "OBSERVED",
+      "scope": "REQUEST_WINDOW",
+      "sampledAt": "2026-09-07T22:07:47.333Z",
+      "value": 0.6939090208172707,
+      "windowSeconds": 1800
+    },
+    "p95Ms": {
+      "unit": "ms",
+      "aggregation": "PROMQL_SCOPED_AGGREGATION",
+      "reasonCode": "METRIC_NOT_EXPOSED",
+      "scope": "REQUEST_WINDOW",
+      "sampledAt": null,
+      "value": null,
+      "windowSeconds": 1800
+    }
+  },
+  "arguments": {
+    "evidence": "- ev-64fcf00b: demo_target_inspect @22:07:44, redisPort=6380, business.httpStatus=503, business.reasonCode=REDIS_CONNECT_FAILED, business.consecutiveSuccesses=0, configurationStatus=APPLIED, expectedRevision==appliedRevision\n  \n- ev-2dc92790: recent_changes @22:06:35, redisPort 从 6379(RUNTIME_CONFIGURATION_APPLIED) 变更为 6380\n\n- ev-ea8a6d05: observability_evidence @22:07:47, businessProbe=0.0, errorRate=69.39%, RPS=1.45 requests/s",
+    "evidenceIds": [
+      "ev-64fcf00b0c4d93909ddaeddd",
+      "ev-2dc92790eea77d1a9db58d36",
+      "ev-ea8a6d05db901c0b760d3d84"
+    ],
+    "recommendation": "执行 demo_config_restore 将 Redis 连接端口从错误的 6380 恢复至基线 6379。expectedRevision 取当前 appliedRevision = 0196ec31b01c1f718ce1d56f02b88a96d0f99c5eec23d3e2a27558be11aa70f4。",
+    "summary": "隔离演练事件 b7eb62db 触发的订单服务 Redis 连接配置漂移故障。变更记录显示 redisPort 在 22:06:35 由 6379 被改为 6380 并 APPLIED。demo_target_inspect 显示配置 redisPort=6380、configurationStatus=APPLIED，同时业务探针 HTTP 503、reasonCode=REDIS_CONNECT_FAILED、consecutiveSuccesses=0。Observability 显示 businessProbe=0.0、errorRate=69.39%，业务持续不可用。知识库确认该场景为 Nacos 专用配置指向无监听端口 6380（正常 6379），故障点为 Redis 连接配置，匹配修复工具为 demo_config_restore。无 Sentinel 限流迹象（blockedTotal=0, QPS=5）。证据充分指向 Redis 连接配置漂移为根因。",
+    "knownFacts": "1. demo_target_inspect: redisPort=6380, HTTP 503, REDIS_CONNECT_FAILED, consecutiveSuccesses=0, configurationStatus=APPLIED (ev-64fcf00b)\n2. recent_changes: redisPort 6379→6380 于 22:06:35.952Z，RUNTIME_CONFIGURATION_APPLIED (ev-2dc92790)\n3. observability: businessProbe=0.0, errorRate=69.39%, RPS=1.45/s (ev-ea8a6d05)\n4. Sentinel 正常: sentinelQps=5, blockedTotal=0, passedTotal=534",
+    "candidateCauses": "1. Redis 连接端口配置被改为 6380（无监听端口），导致连接失败 — 配置变更证据(ev-2dc92790) + 当前配置 APPLIED 且业务失败(ev-64fcf00b) 强支持\n2. 排除 Sentinel 限流（blockedTotal=0, HTTP非429），排除流量过高因素",
+    "evidenceGaps": "无显著缺口；根因证据链完整：变更→配置APPLIED→业务连接失败相互印证。",
+    "conclusionLevel": "SUPPORTED"
+  }
+}

@@ -1,14 +1,420 @@
+name: opsagent
+
+x-app-environment: &app-environment
+  OPS_JWT_SECRET: ${OPS_JWT_SECRET:-opsagent-local-jwt-secret-key-20260903-at-least-32-bytes}
+  NACOS_ENABLED: "true"
+  NACOS_CONFIG_ENABLED: "true"
+  NACOS_SERVER_ADDR: nacos:8848
+  SENTINEL_ENABLED: "true"
+  SENTINEL_EAGER: "true"
+  SENTINEL_DASHBOARD: sentinel:8858
+  OPS_REDIS_HOST: redis
+  OPS_REDIS_PORT: "6379"
+  OPS_REDIS_PASSWORD: ${OPS_REDIS_PASSWORD:-opsagent_local}
+  OPS_REDIS_DATABASE: "0"
+  OPS_RABBITMQ_HOST: rabbitmq
+  OPS_RABBITMQ_PORT: "5672"
+  OPS_RABBITMQ_USERNAME: ${OPS_RABBITMQ_USERNAME:-opsagent}
+  OPS_RABBITMQ_PASSWORD: ${OPS_RABBITMQ_PASSWORD:-opsagent_local}
+  TZ: Asia/Shanghai
+
+x-java-service: &java-service
+  profiles: ["apps"]
+  restart: unless-stopped
+  depends_on:
+    mysql:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
+    elasticsearch:
+      condition: service_healthy
+    qdrant:
+      condition: service_healthy
+    nacos:
+      condition: service_healthy
+    sentinel:
+      condition: service_started
+
 services:
   mysql:
-    image: 'mysql:latest'
+    image: mysql:8.4
+    restart: unless-stopped
     environment:
-      - 'MYSQL_DATABASE=mydatabase'
-      - 'MYSQL_PASSWORD=secret'
-      - 'MYSQL_ROOT_PASSWORD=verysecret'
-      - 'MYSQL_USER=myuser'
+      MYSQL_ROOT_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-2491125}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
     ports:
-      - '3306'
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${OPS_MYSQL_ROOT_PASSWORD:-2491125}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   redis:
-    image: 'redis:latest'
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${OPS_REDIS_PASSWORD:-opsagent_local}"]
     ports:
-      - '6379'
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${OPS_REDIS_PASSWORD:-opsagent_local}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  nacos:
+    image: nacos/nacos-server:v3.0.3
+    restart: unless-stopped
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: ${NACOS_AUTH_TOKEN:-b3BzYWdlbnQtbG9jYWwtbmFjb3Mtc2VjcmV0LWtleS0yMDI2MDkwMw==}
+      NACOS_AUTH_IDENTITY_KEY: ${NACOS_AUTH_IDENTITY_KEY:-opsagent-local}
+      NACOS_AUTH_IDENTITY_VALUE: ${NACOS_AUTH_IDENTITY_VALUE:-opsagent-local-identity-2026}
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "8849:8080"
+    volumes:
+      - nacos-data:/home/nacos/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8848/nacos/v3/admin/core/state/readiness | grep -q '\"code\":0'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+  sentinel:
+    image: eclipse-temurin:17-jre-jammy
+    restart: unless-stopped
+    command: ["java", "-Dserver.port=8858", "-Dcsp.sentinel.dashboard.server=localhost:8858", "-Dproject.name=sentinel-dashboard", "-jar", "/opt/sentinel/sentinel-dashboard.jar"]
+    ports:
+      - "8858:8858"
+    volumes:
+      - D:/middleware/runtime/sentinel-1.8.9/sentinel-dashboard-1.8.9.jar:/opt/sentinel/sentinel-dashboard.jar:ro
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    # Keep the node identity stable so container recreation reuses the same Mnesia data.
+    hostname: ${OPS_RABBITMQ_HOSTNAME:-opsagent-rabbitmq}
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${OPS_RABBITMQ_USERNAME:-opsagent}
+      RABBITMQ_DEFAULT_PASS: ${OPS_RABBITMQ_PASSWORD:-opsagent_local}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  elasticsearch:
+    build:
+      context: D:/middleware/elasticsearch
+    image: opsagent/elasticsearch:8.19.0-smartcn
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${OPS_ES_JAVA_OPTS:--Xms512m -Xmx512m}
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  ops-auth-app:
+    <<: *java-service
+    image: opsagent/auth-service:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_MODULE: ops-auth-service
+    environment:
+      <<: *app-environment
+      OPS_AUTH_DB_URL: jdbc:mysql://mysql:3306/ops_auth?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_AUTH_DB_USERNAME: root
+      OPS_AUTH_DB_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-2491125}
+      OPS_REDIS_ENABLED: "true"
+    ports:
+      - "8101:8101"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8101/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  ops-ticket-app:
+    <<: *java-service
+    image: opsagent/ticket-service:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_MODULE: ops-ticket-service
+    environment:
+      <<: *app-environment
+      OPS_TICKET_DB_URL: jdbc:mysql://mysql:3306/ops_ticket?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_TICKET_DB_USERNAME: root
+      OPS_TICKET_DB_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-2491125}
+      OPS_ALERTMANAGER_ENABLED: "true"
+      OPS_ALERTMANAGER_WEBHOOK_TOKEN: ${OPS_ALERTMANAGER_WEBHOOK_TOKEN:-}
+    ports:
+      - "8102:8102"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8102/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  ops-knowledge-app:
+    <<: *java-service
+    image: opsagent/knowledge-service:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_MODULE: ops-knowledge-service
+    environment:
+      <<: *app-environment
+      OPS_KNOWLEDGE_DB_URL: jdbc:mysql://mysql:3306/ops_knowledge?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_KNOWLEDGE_DB_USERNAME: root
+      OPS_KNOWLEDGE_DB_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-2491125}
+      OPS_UPLOAD_DIR: /app/data/uploads
+      OPS_VECTOR_ENABLED: ${OPS_VECTOR_ENABLED:-true}
+      OPS_ES_URL: http://elasticsearch:9200
+      OPS_QDRANT_URL: http://qdrant:6333
+      OPS_QDRANT_COLLECTION: ${OPS_QDRANT_COLLECTION:-ops_knowledge_vector_v1}
+      OPS_QDRANT_ALIAS: ${OPS_QDRANT_ALIAS:-ops_knowledge_vector_read}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+    ports:
+      - "8103:8103"
+    volumes:
+      - knowledge-uploads:/app/data/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8103/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+  ops-rag-app:
+    <<: *java-service
+    image: opsagent/rag-service:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_MODULE: ops-rag-service
+    environment:
+      <<: *app-environment
+      OPS_RAG_DB_URL: jdbc:mysql://mysql:3306/ops_rag?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_RAG_DB_USERNAME: root
+      OPS_RAG_DB_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-2491125}
+      OPS_KNOWLEDGE_URL: http://ops-knowledge-app:8103
+      OPS_AI_ENABLED: ${OPS_AI_ENABLED:-true}
+      OPS_AI_PROVIDER: ${OPS_AI_PROVIDER:-deepseek}
+      OPS_AI_TIMEOUT_SECONDS: ${OPS_AI_TIMEOUT_SECONDS:-90}
+      OPS_AI_MAX_OUTPUT_TOKENS: ${OPS_AI_MAX_OUTPUT_TOKENS:-4096}
+      OPS_AI_MAX_CONTINUATIONS: ${OPS_AI_MAX_CONTINUATIONS:-2}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-luna}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:-}
+      MOONSHOT_BASE_URL: ${MOONSHOT_BASE_URL:-https://api.moonshot.cn/v1}
+      MOONSHOT_MODEL: ${MOONSHOT_MODEL:-kimi-k2.6}
+      OPS_RAG_NEIGHBOR_WINDOW: ${OPS_RAG_NEIGHBOR_WINDOW:-1}
+      OPS_RAG_RETRIEVAL_CANDIDATES: ${OPS_RAG_RETRIEVAL_CANDIDATES:-30}
+      OPS_RERANK_ENABLED: ${OPS_RERANK_ENABLED:-false}
+      OPS_RERANK_TIMEOUT_SECONDS: ${OPS_RERANK_TIMEOUT_SECONDS:-3}
+      OPS_RERANK_BASE_URL: http://reranker:8010
+    ports:
+      - "8104:8104"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8104/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  ops-platform-app:
+    <<: *java-service
+    image: opsagent/platform-service:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_MODULE: ops-platform-service
+    environment:
+      <<: *app-environment
+      OPS_PLATFORM_DB_URL: jdbc:mysql://mysql:3306/ops_platform?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      OPS_PLATFORM_DB_USERNAME: root
+      OPS_PLATFORM_DB_PASSWORD: ${OPS_MYSQL_ROOT_PASSWORD:-2491125}
+      OPS_PROMETHEUS_URL: http://prometheus:9090
+      OPS_ALERTMANAGER_URL: http://alertmanager:9093
+      OPS_GRAFANA_URL: http://grafana:3000
+      OPS_PROMETHEUS_PUBLIC_URL: ${OPS_PROMETHEUS_PUBLIC_URL:-http://127.0.0.1:9090}
+      OPS_GRAFANA_PUBLIC_URL: ${OPS_GRAFANA_PUBLIC_URL:-http://127.0.0.1:3000}
+    ports:
+      - "8105:8105"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8105/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  ops-gateway-app:
+    <<: *java-service
+    image: opsagent/gateway:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_MODULE: ops-gateway
+    environment:
+      <<: *app-environment
+      OPS_GATEWAY_PORT: "18080"
+    ports:
+      - "18080:18080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:18080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  ops-web-app:
+    profiles: ["apps"]
+    image: opsagent/web:1.0.0
+    build:
+      context: ./ops-web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      ops-gateway-app:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - D:/middleware/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - D:/middleware/config/opsagent-alerts.yml:/etc/prometheus/opsagent-alerts.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]
+    ports:
+      - "9093:9093"
+    volumes:
+      - D:/middleware/config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - D:/middleware/config/alertmanager-webhook-token.txt:/run/secrets/opsagent-webhook-token:ro
+      - alertmanager-data:/alertmanager
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  grafana:
+    image: grafana/grafana:13.2.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${OPS_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${OPS_GRAFANA_ADMIN_PASSWORD:-opsagent_local}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - D:/middleware/config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - D:/middleware/config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+  reranker:
+    profiles: ["rerank"]
+    build:
+      context: ./rag-inference/reranker
+    image: opsagent/bge-reranker-v2-m3:1.0.0
+    restart: unless-stopped
+    environment:
+      MODEL_NAME: ${OPS_RERANK_MODEL:-BAAI/bge-reranker-v2-m3}
+      RERANK_MAX_LENGTH: ${OPS_RERANK_MAX_LENGTH:-512}
+      RERANK_BATCH_SIZE: ${OPS_RERANK_BATCH_SIZE:-8}
+      RERANK_CPU_THREADS: ${OPS_RERANK_CPU_THREADS:-4}
+      HF_HOME: /models
+    ports:
+      - "8010:8010"
+    volumes:
+      - reranker-models:/models
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 5m
+
+volumes:
+  nacos-data:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
+  elasticsearch-data:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:
+  reranker-models:
+  qdrant-data:
+  knowledge-uploads:

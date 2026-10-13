@@ -1,0 +1,195 @@
+package com.opsagent.rag;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+
+import com.opsagent.common.core.BusinessException;
+import com.opsagent.common.security.OpsPrincipal;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 验证预算在同步与 SSE 的实际供应商调用之前生效，失败后不会泄漏并发名额。
+ *
+ * @author heyu
+ * @since 2026/9/3
+ */
+class LlmBudgetIntegrationTest {
+    private final LlmClient client = mock(LlmClient.class);
+    private final LlmRequest request = new LlmRequest("system", "test", 100);
+    private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
+    private final AiUsageRepository usage = mock(AiUsageRepository.class);
+    private AiBudgetGuard budget;
+    private LlmInvocationService service;
+
+    @BeforeEach
+    void setUp() {
+        var jdbc =
+                new JdbcTemplate(
+                        new DriverManagerDataSource(
+                                "jdbc:h2:mem:llm-budget-"
+                                        + UUID.randomUUID()
+                                        + ";MODE=MySQL;DB_CLOSE_DELAY=-1",
+                                "sa",
+                                ""));
+        budget = new AiBudgetGuard(jdbc, new RagProperties(), true, 1, 2);
+        budget.initialize();
+        LlmClientRouter router = mock(LlmClientRouter.class);
+        when(router.selected()).thenReturn(client);
+        service = new LlmInvocationService(router, metrics, usage, budget);
+        var user = new OpsPrincipal(10, "demo", "test", List.of("USER"));
+        SecurityContextHolder.getContext()
+                .setAuthentication(new UsernamePasswordAuthenticationToken(user, "", List.of()));
+    }
+
+    @AfterEach
+    void cleanUp() {
+        SecurityContextHolder.clearContext();
+        metrics.close();
+    }
+
+    @Test
+    void shouldBlockBothGenerationPathsBeforeCallingProviderWhenBudgetIsExhausted() {
+        budget.acquire().close();
+        budget.acquire().close();
+        assertThatThrownBy(() -> service.invoke(client, "test", request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("今日");
+        assertThatThrownBy(
+                        () ->
+                                service.stream(
+                                        "test", request, delta -> {}, service.currentContext()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("今日");
+        verifyNoInteractions(client);
+    }
+
+    @Test
+    void shouldReleaseConcurrencyForBothPathsEvenWhenProviderThrowsUnexpectedly() {
+        when(client.generate(request)).thenThrow(new IllegalStateException("sync test failure"));
+        when(client.stream(eq(request), any()))
+                .thenThrow(new IllegalStateException("stream test failure"));
+        assertThatThrownBy(() -> service.invoke(client, "test", request))
+                .hasMessage("sync test failure");
+        assertThatThrownBy(
+                        () ->
+                                service.stream(
+                                        "test", request, delta -> {}, service.currentContext()))
+                .hasMessage("stream test failure");
+        verify(client).generate(request);
+        verify(client).stream(eq(request), any());
+    }
+
+    @Test
+    void auditDistinguishesPreRequestBudgetFailureFromProviderHttpRejection() {
+        when(client.provider()).thenReturn("deepseek");
+        when(client.model()).thenReturn("test-model");
+        when(client.generate(request))
+                .thenThrow(
+                        new AiProviderException(
+                                "deepseek",
+                                0,
+                                "额度不足",
+                                null,
+                                AiProviderException.FailureKind.BUDGET));
+        when(client.stream(eq(request), any()))
+                .thenThrow(
+                        new AiProviderException(
+                                "deepseek",
+                                503,
+                                "模型暂不可用",
+                                null,
+                                AiProviderException.FailureKind.HTTP));
+
+        assertThatThrownBy(() -> service.invoke(client, "test", request))
+                .isInstanceOf(AiProviderException.class);
+        assertThatThrownBy(
+                        () ->
+                                service.stream(
+                                        "test", request, delta -> {}, service.currentContext()))
+                .isInstanceOf(AiProviderException.class);
+
+        var records = org.mockito.ArgumentCaptor.forClass(AiUsageRepository.AiUsage.class);
+        verify(usage, times(2)).save(records.capture());
+        assertThat(records.getAllValues())
+                .extracting(AiUsageRepository.AiUsage::errorCode)
+                .containsExactly("BUDGET:BUDGET", "HTTP_503");
+        assertThat(records.getAllValues()).allMatch(record -> !record.success());
+    }
+
+    @Test
+    void failedProviderCallPreservesActualAttemptAndConservativeLedger() {
+        when(client.provider()).thenReturn("deepseek");
+        when(client.model()).thenReturn("test-model");
+        when(client.generate(any()))
+                .thenAnswer(
+                        call -> {
+                            var reserved =
+                                    AssistantTokenBudget.reserve(
+                                            "deepseek",
+                                            java.util.Map.of(
+                                                    "max_tokens",
+                                                    4096,
+                                                    "messages",
+                                                    java.util.List.of()));
+                            reserved.finish(null);
+                            throw new AiProviderException(
+                                    "deepseek",
+                                    0,
+                                    "模型超时",
+                                    null,
+                                    AiProviderException.FailureKind.TIMEOUT);
+                        });
+        try {
+            service.invoke(client, "test", request.withPriorReservedTokens(5046));
+            org.junit.jupiter.api.Assertions.fail("Expected timeout");
+        } catch (AiProviderException failure) {
+            assertThat(failure.invocation().model()).isEqualTo("test-model");
+            assertThat(failure.invocation().attempts()).isEqualTo(1);
+            assertThat(failure.invocation().chargedTokens()).isGreaterThan(5046);
+            assertThat(failure.invocation().usageKnown()).isFalse();
+        }
+    }
+
+    @Test
+    void bothInvocationPathsStartWithRetrievalReservation() {
+        when(client.provider()).thenReturn("deepseek");
+        when(client.model()).thenReturn("test-model");
+        LlmRequest withRetrieval = request.withPriorReservedTokens(3000);
+        org.mockito.stubbing.Answer<LlmResult> provider =
+                ignored -> {
+                    var reservation =
+                            AssistantTokenBudget.reserve(
+                                    "deepseek",
+                                    java.util.Map.of(
+                                            "max_tokens", 100000, "messages", java.util.List.of()));
+                    assertThat((int) reservation.body().get("max_tokens")).isLessThan(47000);
+                    reservation.finish(null);
+                    return new LlmResult("answer", "deepseek", "test-model", 1, 1);
+                };
+        when(client.generate(withRetrieval)).thenAnswer(provider);
+        when(client.stream(eq(withRetrieval), any())).thenAnswer(provider);
+        var sync = service.invoke(client, "test", withRetrieval).result();
+        var streamed =
+                service.stream("test", withRetrieval, delta -> {}, service.currentContext())
+                        .result();
+        assertThat(sync.budgetChargedTokens()).isEqualTo(50000);
+        assertThat(streamed.budgetChargedTokens()).isEqualTo(50000);
+        assertThat(sync.budgetUsageKnown()).isFalse();
+        assertThat(streamed.budgetUsageKnown()).isFalse();
+    }
+}

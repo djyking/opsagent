@@ -1,0 +1,27 @@
+/* Shared motion primitives; page geometry and colors remain in their owning styles. */
+.button, .icon-button, .text-button { transition: background-color var(--oa-motion-fast) var(--oa-ease-standard), border-color var(--oa-motion-fast) var(--oa-ease-standard), transform var(--oa-motion-instant) var(--oa-ease-standard); }
+.button:active:not(:disabled), .icon-button:active:not(:disabled) { transform: translateY(1px); }
+.page-enter-active, .page-leave-active, .toast-enter-active, .toast-leave-active { transition: opacity var(--oa-motion-enter) var(--oa-ease-standard), transform var(--oa-motion-enter) var(--oa-ease-standard); }
+.page-enter-from, .page-leave-to { opacity: 0; transform: translateY(4px); }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-8px); }
+.story-enter-active, .story-leave-active { transition: opacity var(--oa-motion-story) var(--oa-ease-standard), transform var(--oa-motion-story) var(--oa-ease-emphasized); }
+.story-enter-from { opacity: 0; transform: translateX(12px); }
+.story-leave-to { opacity: 0; transform: translateX(-8px); }
+.motion-spin { animation: motion-spin 1s linear infinite; }
+@keyframes motion-spin { to { transform: rotate(360deg); } }
+@keyframes motion-panel-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes motion-drawer-in { from { opacity: 0; transform: translateX(24px); } }
+.modal[data-motion], .guided-empty[data-motion] { animation: motion-panel-in var(--oa-motion-panel) var(--oa-ease-emphasized); }
+.detail-panel[data-motion] { animation: motion-drawer-in var(--oa-motion-panel) var(--oa-ease-emphasized); }
+[data-refreshing] { transition: opacity var(--oa-motion-enter) var(--oa-ease-standard); }
+[data-refreshing="true"] { opacity: .96; }
+[data-motion="tab"] { animation: motion-panel-in var(--oa-motion-enter) var(--oa-ease-standard); }
+@media (prefers-reduced-motion: reduce) {
+  [data-motion], [data-motion] *, [data-motion]::before, [data-motion]::after,
+  .button, .icon-button, .text-button, .motion-spin, [data-refreshing],
+  .page-enter-active, .page-leave-active, .story-enter-active, .story-leave-active,
+  .toast-enter-active, .toast-leave-active, .context-sidebar, .main-area,
+  .loading-spinner, .answer-skeleton i, .pulse {
+    animation: none !important; transition-duration: 1ms !important; scroll-behavior: auto !important;
+  }
+}

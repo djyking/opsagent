@@ -1,0 +1,13 @@
+# Qdrant's untagged MaxOptimizationThreads enum requires a YAML integer.
+# Environment variables provide strings and fail deserialization in v1.15.4.
+service:
+  host: 0.0.0.0
+  max_workers: 2
+storage:
+  performance:
+    max_search_threads: 2
+    optimizer_cpu_budget: 1
+  optimizers:
+    max_optimization_threads: 1
+  optimizers_overwrite:
+    max_optimization_threads: 1

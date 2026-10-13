@@ -1,0 +1,137 @@
+:root {
+  --oa-font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --oa-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, "Microsoft YaHei UI", "PingFang SC", monospace;
+
+  --oa-font-size-xs: 12px;
+  --oa-line-height-xs: 18px;
+  --oa-font-size-sm: 13px;
+  --oa-line-height-sm: 20px;
+  --oa-font-size-body: 14px;
+  --oa-line-height-body: 22px;
+  --oa-font-size-section: 16px;
+  --oa-line-height-section: 24px;
+  --oa-font-size-page: 22px;
+  --oa-line-height-page: 30px;
+  --oa-font-size-detail: 24px;
+  --oa-line-height-detail: 32px;
+  --oa-font-size-metric: 24px;
+  --oa-line-height-metric: 30px;
+
+  --oa-font-xs: var(--oa-font-size-xs);
+  --oa-font-sm: var(--oa-font-size-sm);
+  --oa-font-md: var(--oa-font-size-body);
+  --oa-font-body: var(--oa-font-size-body);
+  --oa-font-title: var(--oa-font-size-page);
+
+  --oa-bg-shell: #fbfcfe;
+  --oa-bg-canvas: #f6f8fb;
+  --oa-bg-surface: #ffffff;
+  --oa-bg-subtle: #f8fafc;
+  --oa-bg-hover: #f3f6fa;
+  --oa-bg-selected: #eef3ff;
+  --oa-border-subtle: #e8ecf2;
+  --oa-border-default: #dce3eb;
+  --oa-border-strong: #cbd4df;
+  --oa-border: var(--oa-border-subtle);
+  --oa-text-primary: #182230;
+  --oa-text-secondary: #5f6b7a;
+  --oa-text-tertiary: #8793a5;
+  --oa-text-disabled: #aeb7c4;
+  --oa-primary: #4b6fe7;
+  --oa-primary-hover: #3f61d2;
+  --oa-primary-soft: #eef3ff;
+  --oa-primary-subtle: var(--oa-primary-soft);
+  --oa-success: #16845f;
+  --oa-success-soft: #eaf7f1;
+  --oa-warning: #ad6b18;
+  --oa-warning-soft: #fff5e8;
+  --oa-danger: #c44740;
+  --oa-danger-soft: #fceceb;
+  --oa-purple: #7656c5;
+  --oa-purple-soft: #f3effb;
+  --oa-info: var(--oa-primary);
+
+  --oa-radius-control: 8px;
+  --oa-radius-panel: 10px;
+  --oa-radius-raised: 12px;
+  --oa-radius-xs: 6px;
+  --oa-radius-sm: var(--oa-radius-control);
+  --oa-radius-md: var(--oa-radius-panel);
+  --oa-radius-lg: var(--oa-radius-raised);
+  --oa-radius-chat: var(--oa-radius-raised);
+  --oa-shadow-float: 0 12px 32px rgba(16, 24, 40, 0.10);
+  --oa-shadow-composer: 0 10px 28px rgba(16, 24, 40, 0.09);
+
+  --oa-rail-width: 56px;
+  --oa-context-width: 216px;
+  --oa-workspace-sidebar-width: 240px;
+  --oa-topbar-height: 52px;
+  --oa-control-small: 32px;
+  --oa-control-default: 36px;
+  --oa-control-icon: 32px;
+  --oa-tab-height: 40px;
+  --oa-badge-height: 22px;
+  --oa-table-header-height: 38px;
+  --oa-table-row-height: 50px;
+  --oa-table-row-tall-height: 56px;
+
+  --oa-space-1: 4px;
+  --oa-space-2: 8px;
+  --oa-space-3: 12px;
+  --oa-space-4: 16px;
+  --oa-space-5: 20px;
+  --oa-space-6: 24px;
+  --oa-space-8: 32px;
+
+  --oa-z-topbar: 35;
+  --oa-z-context: 40;
+  --oa-z-rail: 45;
+  --oa-z-overlay: 70;
+  --oa-z-drawer: 80;
+  --oa-z-modal: 90;
+  --oa-z-toast: 100;
+  --oa-motion-instant: 70ms;
+  --oa-motion-fast: 120ms;
+  --oa-motion-enter: 180ms;
+  --oa-motion-panel: 240ms;
+  --oa-motion-story: 360ms;
+  --oa-ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --oa-ease-emphasized: cubic-bezier(.2, .8, .2, 1);
+  --oa-ease-exit: cubic-bezier(.4, 0, 1, 1);
+  --oa-duration-fast: var(--oa-motion-fast);
+  --oa-duration-normal: var(--oa-motion-enter);
+  --oa-bg-experience: #f4f7ff;
+  --oa-accent-knowledge: #16845f;
+  --oa-accent-review: #ad6b18;
+  --oa-accent-index: #7656c5;
+}
+/* Auth remains the approved baseline; the interior contract also reaches teleported dialogs. */
+body:has(.app-shell) {
+  --oa-font-sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  --oa-bg-shell: #f5f9ff;
+  --oa-bg-canvas: #f0f6fe;
+  --oa-bg-subtle: #f5f9fd;
+  --oa-bg-hover: #edf4fd;
+  --oa-bg-selected: #eaf1ff;
+  --oa-border-subtle: #e1eaf4;
+  --oa-border-default: #d6e2f0;
+  --oa-border-strong: #b9cee6;
+  --oa-text-primary: #234366;
+  --oa-text-secondary: #526d88;
+  --oa-text-tertiary: #71869c;
+  --oa-radius-control: 10px;
+  --oa-radius-panel: 16px;
+  --oa-radius-raised: 20px;
+  --oa-font-size-page: 26px;
+  --oa-line-height-page: 34px;
+  --oa-font-size-metric: 28px;
+  --oa-line-height-metric: 36px;
+  --oa-control-default: 38px;
+  --oa-topbar-height: 68px;
+  --oa-sidebar-width: 240px;
+  --oa-shadow-surface: 0 5px 20px #375e8506;
+  --oa-shadow-card: 0 8px 24px #375e850b;
+  --oa-shadow-float: 0 16px 42px #2343661a;
+  --oa-shadow-composer: 0 10px 30px #375e8512;
+  --oa-bg-feature: radial-gradient(ellipse at 0 0, #deebff 0, transparent 65%), radial-gradient(ellipse at 100% 100%, #e6f5f2 0, transparent 50%), #f4f8ff;
+}

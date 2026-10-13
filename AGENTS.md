@@ -2,11 +2,11 @@
 
 ## Project Goal
 
-This is a Java backend interview practice project.
+This is a Java 17 enterprise operations and RAG practice project.
 
 Project name: opsagent.
 
-The project simulates an enterprise intelligent operations platform. The first phase only implements basic CRUD modules. Later phases may add Redis cache, MQ, Elasticsearch, vector database, RAG, Agent, scheduled jobs, rate limiting, monitoring, and model gateway.
+The project simulates an enterprise intelligent operations platform. It currently includes ITSM workflows, Redis, RabbitMQ, Elasticsearch hybrid retrieval, RAG, Sentinel rate limiting, Nacos discovery/configuration and Prometheus/Grafana observability.
 
 ## Current Environment
 
@@ -15,10 +15,10 @@ The project simulates an enterprise intelligent operations platform. The first p
 - Maven
 - IntelliJ IDEA 2026.1
 - Windows
-- Docker is not required in the first phase.
+- Docker Compose runs middleware only; Java services run on Windows.
 - Docker Compose auto-start is currently disabled by `spring.docker.compose.enabled=false`.
 
-## Tech Stack For First Phase
+## Current Tech Stack
 
 - Spring Boot Web
 - Spring Validation
@@ -28,9 +28,9 @@ The project simulates an enterprise intelligent operations platform. The first p
 - Spring Data Redis dependency may exist, but Redis usage can be minimal in the first phase.
 - springdoc-openapi for Swagger UI
 
-## First Phase Scope
+## Current Scope
 
-Only implement:
+Maintain and extend:
 
 1. Common response wrapper
 2. Global exception handling
@@ -45,27 +45,13 @@ Only implement:
 11. Swagger/OpenAPI
 12. README startup instructions
 
-## Do Not Implement Yet
+## Out Of Scope Unless Explicitly Requested
 
-Do not implement:
-
-- Login or permission system
-- Frontend pages
-- AI model calls
-- RAG
-- Agent
-- Elasticsearch
-- MQ
-- XXL-JOB
-- Sentinel
-- Prometheus
-- Grafana
-- Spring Cloud microservices
-- Docker-dependent startup logic
+Do not introduce Milvus/Qdrant, GraphRAG, Agentic RAG or Java service containers unless explicitly requested. Do not send new internal documents to an external AI provider without a matching data-processing authorization.
 
 ## Coding Rules
 
-- Use modular monolith architecture.
+- Preserve the existing Spring Cloud microservice architecture.
 - Keep code simple and interview-friendly.
 - Use RESTful APIs.
 - Do not return Entity directly from Controller.
@@ -78,10 +64,13 @@ Do not implement:
 - Put local database configuration in application-local.yml if needed.
 - Do not remove existing project files unless clearly necessary.
 - Do not introduce unnecessary dependencies.
+- Keep API keys and local passwords outside Git.
+- Do not clear databases or delete Docker named volumes during routine development and testing.
+- Java class headers use `@author heyu` and a project date no later than `2026/9/3`.
 
 ## Check Commands
 
 After changes, run:
 
 ```bash
-mvn clean package -DskipTests
+mvn clean verify

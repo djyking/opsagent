@@ -1,0 +1,86 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "sum(opsagent_sla_warning_total)", "legendFormat": "SLA 预警", "refId": "A"}],
+      "title": "SLA 预警事件", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "sum(opsagent_sla_breach_total)", "legendFormat": "SLA 超时", "refId": "A"}],
+      "title": "SLA 超时事件", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "sum(opsagent_sla_escalation_total)", "legendFormat": "升级", "refId": "A"}],
+      "title": "SLA 升级事件", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "id": 4,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "opsagent_alert_created_total", "legendFormat": "自动建单", "refId": "A"},
+        {"expr": "opsagent_alert_deduplicated_total", "legendFormat": "重复抑制", "refId": "B"},
+        {"expr": "opsagent_alert_resolved_total", "legendFormat": "告警恢复", "refId": "C"},
+        {"expr": "opsagent_alert_mapping_miss_total", "legendFormat": "CI 映射缺失", "refId": "D"}
+      ],
+      "title": "Alertmanager 接入结果", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "id": 5,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "opsagent_knowledge_review_submit_total", "legendFormat": "提交", "refId": "A"},
+        {"expr": "opsagent_knowledge_review_approve_total", "legendFormat": "通过", "refId": "B"},
+        {"expr": "opsagent_knowledge_review_reject_total", "legendFormat": "驳回", "refId": "C"},
+        {"expr": "opsagent_knowledge_review_publish_total", "legendFormat": "发布", "refId": "D"}
+      ],
+      "title": "知识审核流转", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 14},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"expr": "opsagent_oncall_lookup_total", "legendFormat": "值班查询", "refId": "A"},
+        {"expr": "opsagent_oncall_miss_total", "legendFormat": "未命中排班", "refId": "B"}
+      ],
+      "title": "值班查询", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "opsagent-prometheus"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 14},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (job) (rate(http_server_requests_seconds_count{uri=~\".*(sla|alerts|cmdb|oncall|review).*\"}[5m]))", "legendFormat": "{{job}}", "refId": "A"}],
+      "title": "ITSM API 请求速率", "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 40,
+  "tags": ["opsagent", "itsm"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "OpsAgent ITSM Overview",
+  "uid": "opsagent-itsm-overview",
+  "version": 1
+}
