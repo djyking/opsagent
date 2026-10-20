@@ -66,6 +66,8 @@ Auth 表中应用凭据仅存 SHA-256。`ops_harness_grant` 的 `(application_id
 
 本机真实服务联调报告由中台仓库统一保存。VPS 部署、Linux 持续观察和跨主机灾备的执行结果不能由本地测试代替。
 
+GitHub 的 `.github/workflows/verify.yml` 在 push、pull request 或手动触发时执行两项独立验证：Java 17 使用仓库 Maven Wrapper 固定的 Maven 3.9.16 执行 `clean verify`，包含单元测试和 Checkstyle；前端使用 Node.js 22 与 pnpm 10，按既有 `pnpm-lock.yaml` 执行 `pnpm install --frozen-lockfile`，逐个运行 `ops-web/tests/*.test.mjs`，再执行 `pnpm run build`（包含 Vue/TypeScript 检查及 Vite 构建）。仓库没有 npm 锁文件，因此 CI 沿用既有 pnpm 锁，不生成第二套锁文件。需要外部环境的既有门控测试仍按原条件执行，不能将跳过计为通过。流程仅有 `contents: read` 权限，不使用生产 secret，不部署、发布 release 或上传构建制品；实际远端运行成功后才能登记 GitHub 构建通过。
+
 2026-10-20 的 VPS 前补充修复将 RAG 的中台调用、身份委托和引用权限核验统一接入有完整正文等待时限的 HTTP 传输。时限覆盖取得响应头之后的正文等待，超时或中断取消未完成请求；按实际字节数限制正文，包括没有 `Content-Length` 的分块响应。权限响应不可核验时拒绝展示，写请求响应未知时保留既有未知结果语义，不自动重试或切换执行器。身份响应的业务码还需满足 32 位整数范围，不能因大整数截断而被判为成功。验证码、登录流程、会话有效期、请求归属和来源 ACL 规则未改变。
 
 第一轮 HTTP 修复取得 16 项定向回归和 167 suites、1,061 tests 的全量构建证据。随后真实联调发现，旧 HARNESS Run 的输出读取错误依赖已到期的执行委托；新鲜登录态与仍可读的来源文档不能解除这一依赖。上述独立历史输出授权修复增加过期委托读取、撤销与权限上限、跨应用/项目/主体/Run、访客期限、专属 audience 及当前来源拒绝测试。旧执行接口仍拒绝过期委托，输出读取不会重新调用模型。
