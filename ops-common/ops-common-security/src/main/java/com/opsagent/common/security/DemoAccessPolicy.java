@@ -45,6 +45,7 @@ public final class DemoAccessPolicy {
                     || path.matches(
                             "/api/platform/operations/(?:overview|context|workflows|runs(?:/[0-9]+)?)")
                     || path.equals("/api/rag/providers")
+                    || path.matches("/api/rag/harness/answers/[a-f0-9-]{36}(?:/events)?")
                     || path.equals("/api/rag/runtime/sentinel")
                     || path.matches("/api/rag/conversations(?:/[a-f0-9-]+(?:/messages)?)?")
                     || path.equals("/api/knowledge/bases")

@@ -1,0 +1,24 @@
+# Real Auth Spring Boot application. Dedicated SQL schema/least-privilege credentials are external.
+server:
+  address: 127.0.0.1
+  port: ${OPS_AUTH_LOCAL_PORT:18401}
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+    sentinel:
+      enabled: false
+ops:
+  auth:
+    registration-enabled: false
+  harness:
+    identity:
+      enabled: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

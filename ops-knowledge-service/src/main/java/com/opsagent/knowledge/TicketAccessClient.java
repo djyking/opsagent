@@ -3,6 +3,7 @@ package com.opsagent.knowledge;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.opsagent.common.core.BusinessException;
 import com.opsagent.common.core.ErrorCode;
+import com.opsagent.common.security.InternalActorTokens;
 import com.opsagent.common.security.SecurityUsers;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +31,9 @@ class TicketAccessClient {
     private final String configuredUrl;
     private final DiscoveryClient discovery;
     private final RestClient client;
+
+    @Value("${OPS_AGENT_INTERNAL_SECRET:}")
+    private String internalSecret = "";
 
     TicketAccessClient(
             @Value("${ops.knowledge.ticket-url:}") String configuredUrl,
@@ -114,12 +118,32 @@ class TicketAccessClient {
                     || base.getUserInfo() != null) {
                 throw new IllegalStateException("Invalid ticket service configuration");
             }
+            String authorization = request.getRequest().getHeader("Authorization");
+            String effectivePath = path;
+            var authentication =
+                    org.springframework.security.core.context.SecurityContextHolder.getContext()
+                            .getAuthentication();
+            if (authentication != null
+                    && authentication.getPrincipal()
+                            instanceof com.opsagent.common.security.OpsPrincipal principal
+                    && principal.tokenId().startsWith("internal:")) {
+                // Never relay the knowledge-audience token as a public login credential.
+                // Only the single-ticket read projection is available to this delegated scope.
+                if (!path.matches("/api/tickets/[1-9][0-9]*"))
+                    throw new BusinessException(
+                            ErrorCode.FORBIDDEN, "INTERNAL_TICKET_SCOPE_DENIED");
+                var tokens = new InternalActorTokens(internalSecret);
+                var actor = tokens.verify(authorization, "knowledge");
+                if (actor.userId() != SecurityUsers.current().userId())
+                    throw new BusinessException(
+                            ErrorCode.FORBIDDEN, "INTERNAL_TICKET_ACTOR_MISMATCH");
+                effectivePath = path.replace("/api/tickets/", "/internal/knowledge/tickets/");
+                authorization = "Bearer " + tokens.issue("ticket-knowledge", actor);
+            }
             var call =
                     client.get()
-                            .uri(endpoint.replaceAll("/+$", "") + path)
-                            .header(
-                                    "Authorization",
-                                    request.getRequest().getHeader("Authorization"));
+                            .uri(endpoint.replaceAll("/+$", "") + effectivePath)
+                            .header("Authorization", authorization);
             String trace = request.getRequest().getHeader("X-Trace-Id");
             if (trace != null) call.header("X-Trace-Id", trace);
             JsonNode response = call.retrieve().body(JsonNode.class);

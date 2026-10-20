@@ -33,6 +33,47 @@ import java.util.List;
  * @since 2026/9/3
  */
 class TicketAccessClientTest {
+    @Test
+    void delegatedCitationChecksUseDedicatedTicketAudienceWithoutPublicJwtImpersonation()
+            throws Exception {
+        String secret = "synthetic-knowledge-ticket-audience-secret-32-characters";
+        var tokens = new InternalActorTokens(secret);
+        var actor =
+                new InternalActorTokens.Context(
+                        17,
+                        "reader",
+                        List.of("USER"),
+                        "run-citation",
+                        "",
+                        Instant.now().plusSeconds(60));
+        try (MockWebServer server = new MockWebServer();
+                var scope = InternalActorAccess.open(actor)) {
+            server.start();
+            server.enqueue(
+                    new MockResponse()
+                            .setHeader("Content-Type", "application/json")
+                            .setBody("{\"code\":0,\"data\":{\"id\":2053}}"));
+            var incoming = new MockHttpServletRequest();
+            incoming.addHeader("Authorization", "Bearer " + tokens.issue("knowledge", actor));
+            RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(incoming));
+            var client = client(server);
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    client, "internalSecret", secret);
+            client.requireVisible(2053);
+            var outgoing = server.takeRequest();
+            assertThat(outgoing.getPath()).isEqualTo("/internal/knowledge/tickets/2053");
+            var delegated = tokens.verify(outgoing.getHeader("Authorization"), "ticket-knowledge");
+            assertThat(delegated.userId()).isEqualTo(17);
+            assertThat(delegated.runId()).isEqualTo(actor.runId());
+            assertThat(delegated.roles()).containsExactly("USER");
+            incoming.removeHeader("Authorization");
+            incoming.addHeader("Authorization", "Bearer " + tokens.issue("rag", actor));
+            assertThatThrownBy(() -> client.requireVisible(2053))
+                    .isInstanceOf(BusinessException.class);
+            assertThat(server.getRequestCount()).isEqualTo(1);
+        }
+    }
+
     @AfterEach
     void cleanup() {
         RequestContextHolder.resetRequestAttributes();
@@ -135,8 +176,10 @@ class TicketAccessClientTest {
     @Test
     void shouldRelayOriginalAuthorizationWithoutInventingAnElevatedIdentity() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
-            server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
-                    .setBody("{\"code\":0,\"data\":{\"id\":2053}}"));
+            server.enqueue(
+                    new MockResponse()
+                            .setHeader("Content-Type", "application/json")
+                            .setBody("{\"code\":0,\"data\":{\"id\":2053}}"));
             server.start();
             var request = new MockHttpServletRequest();
             request.addHeader("Authorization", "Bearer original-user-token");
@@ -145,7 +188,8 @@ class TicketAccessClientTest {
             client(server).requireVisible(2053);
             var forwarded = server.takeRequest();
             assertThat(forwarded.getPath()).isEqualTo("/api/tickets/2053");
-            assertThat(forwarded.getHeader("Authorization")).isEqualTo("Bearer original-user-token");
+            assertThat(forwarded.getHeader("Authorization"))
+                    .isEqualTo("Bearer original-user-token");
             assertThat(forwarded.getHeader("X-Trace-Id")).isEqualTo("scope-check");
             assertThat(forwarded.getHeader("X-User-Id")).isNull();
         }
@@ -154,17 +198,21 @@ class TicketAccessClientTest {
     @Test
     void shouldDenyWithoutTokenAndSanitizeBusinessAccessDenial() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
-            server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
-                    .setBody("{\"code\":40300,\"message\":\"internal password=secret\"}"));
+            server.enqueue(
+                    new MockResponse()
+                            .setHeader("Content-Type", "application/json")
+                            .setBody("{\"code\":40300,\"message\":\"internal password=secret\"}"));
             server.start();
             var client = client(server);
-            assertThatThrownBy(() -> client.requireVisible(2053)).isInstanceOf(BusinessException.class);
+            assertThatThrownBy(() -> client.requireVisible(2053))
+                    .isInstanceOf(BusinessException.class);
             assertThat(server.getRequestCount()).isZero();
             var request = new MockHttpServletRequest();
             request.addHeader("Authorization", "Bearer user-token");
             RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
             assertThatThrownBy(() -> client.requireVisible(2053))
-                    .isInstanceOf(BusinessException.class).hasMessageContaining("不可访问")
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("不可访问")
                     .hasMessageNotContaining("secret");
         }
     }
@@ -172,17 +220,21 @@ class TicketAccessClientTest {
     @Test
     void shouldFetchAccessibleTicketIdsOnceWithoutPerDocumentRequests() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
-            server.enqueue(new MockResponse().setHeader("Content-Type", "application/json")
-                    .setBody("{\"code\":0,\"data\":[{\"id\":2053},{\"id\":2055}]}"));
+            server.enqueue(
+                    new MockResponse()
+                            .setHeader("Content-Type", "application/json")
+                            .setBody("{\"code\":0,\"data\":[{\"id\":2053},{\"id\":2055}]}"));
             server.start();
             var principal = new OpsPrincipal(-99, "visitor", "jwt-id", List.of("DEMO"));
-            SecurityContextHolder.getContext().setAuthentication(
-                    new UsernamePasswordAuthenticationToken(principal, null, List.of()));
+            SecurityContextHolder.getContext()
+                    .setAuthentication(
+                            new UsernamePasswordAuthenticationToken(principal, null, List.of()));
             try {
                 var request = new MockHttpServletRequest();
                 request.addHeader("Authorization", "Bearer ordinary-user-token");
                 RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
-                assertThat(client(server).visibleTicketIds()).containsExactlyInAnyOrder(2053L, 2055L);
+                assertThat(client(server).visibleTicketIds())
+                        .containsExactlyInAnyOrder(2053L, 2055L);
                 assertThat(server.takeRequest().getPath()).isEqualTo("/api/tickets");
                 assertThat(server.getRequestCount()).isEqualTo(1);
             } finally {
@@ -195,8 +247,14 @@ class TicketAccessClientTest {
     void internalAudienceMustNotBeRelayedAsAnOrdinaryUserToken() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.start();
-            var actor = new InternalActorTokens.Context(-99, "visitor", List.of("DEMO"), "run-1",
-                    "ops-demo-order-service", Instant.now().plusSeconds(60));
+            var actor =
+                    new InternalActorTokens.Context(
+                            -99,
+                            "visitor",
+                            List.of("DEMO"),
+                            "run-1",
+                            "ops-demo-order-service",
+                            Instant.now().plusSeconds(60));
             try (var scope = InternalActorAccess.open(actor)) {
                 assertThat(client(server).visibleTicketIds()).isEmpty();
                 assertThat(server.getRequestCount()).isZero();
@@ -205,6 +263,7 @@ class TicketAccessClientTest {
     }
 
     private TicketAccessClient client(MockWebServer server) {
-        return new TicketAccessClient(server.url("/").toString(), mock(DiscoveryClient.class), RestClient.builder());
+        return new TicketAccessClient(
+                server.url("/").toString(), mock(DiscoveryClient.class), RestClient.builder());
     }
 }

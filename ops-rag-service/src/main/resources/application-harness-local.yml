@@ -1,0 +1,38 @@
+# Real RAG Spring Boot application; no embedded fake identity or fake model endpoint.
+server:
+  address: 127.0.0.1
+  port: ${OPS_RAG_LOCAL_PORT:18404}
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+    sentinel:
+      enabled: false
+ops:
+  harness:
+    auth-origin: ${OPS_HARNESS_AUTH_ORIGIN:http://127.0.0.1:18401}
+    platform-origin: ${OPS_HARNESS_PLATFORM_ORIGIN:http://127.0.0.1:8110}
+    application-id: ${OPS_HARNESS_APPLICATION_ID:opsagent}
+    project: ${OPS_HARNESS_PROJECT:ops-dev}
+    application-credential: ${OPS_HARNESS_APPLICATION_CREDENTIAL}
+    answer:
+      enabled: true
+      new-owner: ${OPS_HARNESS_NEW_OWNER:LEGACY}
+      release-id: ${OPS_HARNESS_RELEASE_ID:}
+      release-digest: ${OPS_HARNESS_RELEASE_DIGEST:}
+      provider: ${OPS_HARNESS_PROVIDER:deepseek}
+      model: ${OPS_HARNESS_MODEL:platform-managed}
+  rag:
+    schema-auto-initialize: false
+    knowledge-url: ${OPS_KNOWLEDGE_URL:http://127.0.0.1:18403}
+    platform-url: ${OPS_PLATFORM_URL:http://127.0.0.1:18405}
+  agent:
+    auth-url: ${OPS_AUTH_INTERNAL_URL:http://127.0.0.1:18401}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

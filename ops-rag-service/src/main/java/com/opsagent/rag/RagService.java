@@ -51,6 +51,7 @@ public class RagService {
                     + "kubectl exec、交互shell或容器内执行命令可能改变运行状态，不得笼统归为只读；"
                     + "run/create/apply/delete/scale/expose均为变更。"
                     + "不要给文档编造有效期、版本或本系统参数，不能声称完成了无限范围搜索。";
+    private final ThreadLocal<Boolean> harnessPreparation = ThreadLocal.withInitial(() -> false);
     private final KnowledgeClient knowledge;
     private final RagProperties ragProperties;
     private final AiProperties aiProperties;
@@ -360,7 +361,9 @@ public class RagService {
         int priorReservedTokens =
                 QueryEmbeddingBudget.reserve(retrievalQuestion) * (visitorGlobal ? 2 : 1);
         int minimumGeneration =
-                aiProperties.isEnabled() && aiProperties.settings(provider).configured()
+                (harnessPreparation.get()
+                                || aiProperties.isEnabled()
+                                        && aiProperties.settings(provider).configured())
                         ? promptBuilder.inputOverhead(question) + 64
                         : 0;
         if ((long) priorReservedTokens + minimumGeneration > AssistantTokenBudget.LIMIT) {
@@ -459,7 +462,8 @@ public class RagService {
                 observed == null
                         ? 0
                         : ObservabilityPromptContext.attach(observed, 0).inputOverhead();
-        if (aiProperties.isEnabled() && aiProperties.settings(provider).configured()) {
+        if ((harnessPreparation.get()
+                || aiProperties.isEnabled() && aiProperties.settings(provider).configured())) {
             int promptOverhead = promptBuilder.inputOverhead(question);
             int publicPromptReserve =
                     publicKnowledgeScope
@@ -535,7 +539,7 @@ public class RagService {
                                     : attachment.reason());
             fallback = observationFallback(attachment, sources, "以下仅列出已取得的证据引用，未生成诊断结论。");
         }
-        if (!aiProperties.isEnabled()) {
+        if (!harnessPreparation.get() && !aiProperties.isEnabled()) {
             return completedAfterRetrieval(
                     question,
                     fallback == null
@@ -544,7 +548,7 @@ public class RagService {
                     started,
                     priorReservedTokens);
         }
-        if (!aiProperties.settings(provider).configured()) {
+        if (!harnessPreparation.get() && !aiProperties.settings(provider).configured()) {
             return completedAfterRetrieval(
                     question,
                     fallback == null
@@ -642,7 +646,8 @@ public class RagService {
             String question, String history, String requestedProvider, long started) {
         String provider = aiProperties.resolveProvider(requestedProvider);
         var empty = new ContextAssembler.AssembledContext("", List.of(), 0, 0);
-        if (!aiProperties.isEnabled() || !aiProperties.settings(provider).configured()) {
+        if (!harnessPreparation.get()
+                && (!aiProperties.isEnabled() || !aiProperties.settings(provider).configured())) {
             String reason = aiProperties.isEnabled() ? "LLM_NOT_CONFIGURED" : "LLM_DISABLED";
             return completedAfterRetrieval(
                     question, localFallback(empty, List.of(), reason), started, 0);
@@ -890,6 +895,39 @@ public class RagService {
                     .toList();
         }
         return List.of();
+    }
+
+    StreamPlan prepareHarness(RagController.ChatRequest request) {
+        harnessPreparation.set(true);
+        try {
+            return prepareStream(
+                    request.question(),
+                    request.topK(),
+                    request.documentId(),
+                    request.ticketId(),
+                    null,
+                    null,
+                    request.observabilityContext(),
+                    request.answerStyle(),
+                    phase -> {});
+        } finally {
+            harnessPreparation.remove();
+        }
+    }
+
+    boolean legacyDomainRequired(RagController.ChatRequest request) {
+        // This legacy aggregate embeds per-user ticket summaries without stable citation IDs.
+        // Select its owner before starting work; transport/model failures never select a fallback.
+        return request.observabilityContext() == null
+                && operations.supports(
+                        AssistantIntent.body(request.question()),
+                        request.documentId(),
+                        request.ticketId());
+    }
+
+    Answer completeHarness(StreamPlan plan, LlmResult result, long latencyMs, AnswerStyle style) {
+        return complete(plan, new LlmInvocationService.Invocation(result, latencyMs))
+                .withPresentation(AnswerStyle.orDefault(style), null);
     }
 
     private Answer complete(StreamPlan plan, LlmInvocationService.Invocation invocation) {

@@ -1,0 +1,27 @@
+# Uses the real Knowledge service and its SQL authorization/search implementation.
+server:
+  address: 127.0.0.1
+  port: ${OPS_KNOWLEDGE_LOCAL_PORT:18403}
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+    sentinel:
+      enabled: false
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: ${OPS_HARNESS_MQ_ENABLED:false}
+      direct:
+        auto-startup: ${OPS_HARNESS_MQ_ENABLED:false}
+ops:
+  agent:
+    auth-url: ${OPS_AUTH_INTERNAL_URL:http://127.0.0.1:18401}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

@@ -1,5 +1,6 @@
 import { request } from "./http";
 import { withExperienceLock } from "./session";
+import { routedRagAnswer } from "./harness-answers";
 import type {
   AiAnswer,
   AiQuestion,
@@ -323,21 +324,17 @@ export const aiApi = {
     ticketId: number,
     data: { question: string; documentId?: number; topK?: number },
   ) => {
-    const result = await request<{
+    const result = await routedRagAnswer<{
       answer: string;
       references: AiReference[];
       model: string;
       provider: string;
       latencyMs: number;
     }>({
-      method: "POST",
-      url: "/api/rag/ask",
-      data: {
         question: data.question,
         ticketId,
         topK: data.topK || 5,
         documentId: data.documentId,
-      },
     });
     return {
       questionId: Date.now(),

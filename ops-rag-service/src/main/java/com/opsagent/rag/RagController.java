@@ -30,6 +30,9 @@ public class RagController {
     private final RagRateLimiter rateLimiter;
     private final RagStreamingService streamingService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private HarnessAnswerService harness;
+
     RagController(
             RagService service, RagRateLimiter rateLimiter, RagStreamingService streamingService) {
         this.service = service;
@@ -68,6 +71,24 @@ public class RagController {
     }
 
     @PostMapping({"/ask", "/chat"})
+    org.springframework.http.ResponseEntity<?> routedChat(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestHeader(value = "Idempotency-Key", required = false) String key,
+            @Valid @RequestBody ChatRequest request) {
+        if (harness == null) return org.springframework.http.ResponseEntity.ok(chat(request));
+        rateLimiter.check();
+        var scope = rateLimiter.requestScope();
+        try {
+            return HarnessAnswerController.response(
+                    harness.submit(authorization, key, request, () -> legacyAnswer(request)));
+        } catch (RuntimeException failure) {
+            scope.failure(failure);
+            throw failure;
+        } finally {
+            scope.close();
+        }
+    }
+
     ApiResponse<RagService.Answer> chat(@Valid @RequestBody ChatRequest r) {
         rateLimiter.check();
         var scope = rateLimiter.requestScope();
@@ -102,6 +123,17 @@ public class RagController {
         } finally {
             scope.close();
         }
+    }
+
+    private RagService.Answer legacyAnswer(ChatRequest request) {
+        return service.ask(
+                request.question(),
+                request.topK(),
+                request.documentId(),
+                request.ticketId(),
+                request.provider(),
+                request.observabilityContext(),
+                request.answerStyle());
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
