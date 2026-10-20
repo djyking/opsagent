@@ -66,6 +66,20 @@ public class HarnessIdentityController {
         return response(identities.token(authorization, id, request.runId(), request.audience()));
     }
 
+    @PostMapping("/delegations/{id}/output-token")
+    public ResponseEntity<?> outputToken(
+            @RequestHeader("Authorization") String authorization,
+            @PathVariable String id,
+            @Valid @RequestBody OutputMint request) {
+        return response(
+                identities.outputToken(
+                        authorization,
+                        id,
+                        request.projectId(),
+                        request.subject(),
+                        request.runId()));
+    }
+
     private ResponseEntity<?> response(Object value) {
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store")
@@ -105,4 +119,12 @@ public class HarnessIdentityController {
      */
     public record Mint(
             @NotBlank @Size(max = 128) String runId, @NotBlank @Size(max = 64) String audience) {}
+
+    /**
+     * @author heyu
+     */
+    public record OutputMint(
+            @NotBlank @Size(max = 64) String projectId,
+            @NotBlank @Size(max = 128) String subject,
+            @NotBlank @Size(max = 128) String runId) {}
 }

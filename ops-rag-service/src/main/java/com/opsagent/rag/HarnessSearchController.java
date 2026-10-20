@@ -22,7 +22,6 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -230,18 +229,14 @@ public class HarnessSearchController {
                             .header("Content-Type", "application/json");
             if (userToken != null) request.header("X-Harness-User-Token", userToken);
             if (key != null) request.header("Idempotency-Key", key);
-            HttpResponse<java.io.InputStream> response =
-                    http.send(
+            var response =
+                    HarnessHttpTransport.send(
+                            http,
                             request.POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                                     .build(),
-                            HttpResponse.BodyHandlers.ofInputStream());
-            byte[] bytes;
-            try (var stream = response.body()) {
-                bytes = stream.readNBytes(1024 * 1024 + 1);
-            }
-            if (bytes.length > 1024 * 1024
-                    || response.statusCode() < 200
-                    || response.statusCode() >= 300) {
+                            1024 * 1024);
+            byte[] bytes = response.body();
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new BusinessException(
                         ErrorCode.MIDDLEWARE_UNAVAILABLE, "HARNESS_UPSTREAM_REJECTED");
             }

@@ -103,12 +103,32 @@ public class HarnessAnswerController {
     ResponseEntity<?> access(
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @Valid @RequestBody Access request) {
+        return access(authorization, request, false);
+    }
+
+    @PostMapping("/internal/rag/harness/output-answer-access")
+    ResponseEntity<?> outputAccess(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody Access request) {
+        return access(authorization, request, true);
+    }
+
+    private ResponseEntity<?> access(String authorization, Access request, boolean output) {
         boolean allowed;
         try {
-            var actor = actors.verify(authorization, "rag");
+            var actor = actors.verify(authorization, output ? "rag-output" : "rag");
             allowed =
-                    answers.answerAccess(
-                            actor, authorization, request.contextId(), request.promptSha256());
+                    output
+                            ? answers.outputAnswerAccess(
+                                    actor,
+                                    authorization,
+                                    request.contextId(),
+                                    request.promptSha256())
+                            : answers.answerAccess(
+                                    actor,
+                                    authorization,
+                                    request.contextId(),
+                                    request.promptSha256());
         } catch (RuntimeException denied) {
             allowed = false;
         }

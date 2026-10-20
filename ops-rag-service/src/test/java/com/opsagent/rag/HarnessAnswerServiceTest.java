@@ -319,6 +319,52 @@ class HarnessAnswerServiceTest {
                                                         List.of(
                                                                 new HarnessCitationAccessController
                                                                         .Citation(3, 11, 1)))));
+        when(citations.validateOutput(eq("signed-output"), any()))
+                .thenReturn(ApiResponse.success(new HarnessCitationAccessController.Verdict(true)));
+        assertThat(service.outputAnswerAccess(actor, "signed-output", route, hash)).isTrue();
+        assertThat(service.outputAnswerAccess(actor, "signed-output", route, "b".repeat(64)))
+                .isFalse();
+        for (var wrong :
+                List.of(
+                        new InternalActorTokens.Context(
+                                8,
+                                "other",
+                                List.of("USER"),
+                                runId,
+                                "",
+                                Instant.now().plusSeconds(60)),
+                        new InternalActorTokens.Context(
+                                7,
+                                "user",
+                                List.of("USER"),
+                                "other-run",
+                                "",
+                                Instant.now().plusSeconds(60)))) {
+            assertThat(service.outputAnswerAccess(wrong, "signed-output", route, hash)).isFalse();
+        }
+        jdbc.update("UPDATE ops_harness_answer SET project_id='other-project'");
+        assertThat(service.outputAnswerAccess(actor, "signed-output", route, hash)).isFalse();
+        jdbc.update(
+                "UPDATE ops_harness_answer SET"
+                    + " project_id='ops-project',application_id='other-app'");
+        assertThat(service.outputAnswerAccess(actor, "signed-output", route, hash)).isFalse();
+        jdbc.update("UPDATE ops_harness_answer SET application_id='ops-app'");
+        when(citations.validateOutput(eq("signed-output"), any()))
+                .thenReturn(
+                        ApiResponse.success(new HarnessCitationAccessController.Verdict(false)));
+        assertThat(service.outputAnswerAccess(actor, "signed-output", route, hash)).isFalse();
+        verify(citations, times(2))
+                .validateOutput(
+                        eq("signed-output"),
+                        argThat(
+                                request ->
+                                        request.citations()
+                                                .equals(
+                                                        List.of(
+                                                                new HarnessCitationAccessController
+                                                                        .Citation(3, 11, 1)))));
+        verify(citations, times(2)).validate(eq("signed-delegation"), any());
+        assertThat(platform.getRequestCount()).isEqualTo(2);
     }
 
     @Test

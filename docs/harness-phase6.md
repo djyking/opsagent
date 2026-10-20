@@ -46,15 +46,17 @@ Auth 表中应用凭据仅存 SHA-256。`ops_harness_grant` 的 `(application_id
 
 受控模型 release 必须使用 `agentId=ops-rag-answer`、`publicOutput=false`、无工具的 Model→End 图，静态 system、user=`{{prompt}}`，输入为 `{prompt,contextId}`。不能用 publicOutput 绕过知识权限。
 
-平台在每次读取生成输出时，使用本次 Run 的当前委托调用 `/internal/rag/harness/answer-access`，仅提交 `{contextId,promptSha256}`。Ops 检查上下文所属用户、配置应用/项目、精确 Run 绑定、原始 prompt hash，再验证 **所有进入 prompt 的来源**。只检查模型最终展示的引用不够。
+平台在每次读取 HARNESS 生成输出时，先核验当前读取者与原 Run 的应用、项目、主体及输出读取/检索权限，再向 Auth 的 `POST /internal/harness/delegations/{id}/output-token` 提交 `{projectId,subject,runId}`。Auth 校验原委托绑定、未撤销状态、当前应用/用户/项目授权，以及当前角色和权限与原委托上限的交集；必须同时拥有 `runs:output:read` 和 `opsagent:rag:search`。只有这条输出读取路径允许原执行委托已经过期，不续期或修改该委托，也不恢复其执行权限。
+
+签发的令牌固定使用 `rag-output` audience，最长 120 秒且不超过当前访客期限。平台携带该令牌调用 `/internal/rag/harness/output-answer-access`，仅提交 `{contextId,promptSha256}`；Ops 检查上下文所属用户、配置应用/项目、精确 Run 绑定、原始 prompt hash，再通过 `/internal/rag/output/validate-citations` 复核 **所有进入 prompt 的来源**。只检查模型最终展示的引用不够。输出令牌不能用于旧 `rag` audience 的模型调用、检索或执行端点；旧 `/internal/rag/harness/answer-access` 与 `/internal/rag/validate-citations` 的执行授权约束保留。
 
 - 知识文档：现查文档 ACL、版本以及 chunk 属于该文档。全局检索要求仍为已发布；明确选择文档/工单附件时沿用原领域的授权草稿/体验文档规则，归档文档始终拒绝。工单附件使用独立 `ticket-knowledge` audience 向真实 Ticket 服务复核读取权限，不把内部 token 冒充用户 JWT。
 - 官方公开网页：只接受服务端固定官方文档 CATALOG 中的 URL；客户端不能上传来源或覆盖上下文。
-- 观测证据：在当前委托主体下重新读取原 evidenceBundleId，匹配原服务/环境/时间窗和全部 evidenceId；不可用或不再授权时拒绝。
+- 观测证据：在本次输出读取主体下重新读取原 evidenceBundleId，匹配原服务/环境/时间窗和全部 evidenceId；不可用或不再授权时拒绝。
 - CMDB 目录：保留领域确定性只读回答，当前领域读权限为已登录用户；不调用模型伪造目录。
 - 旧实时 Operations 聚合问答包含未保存实体 ID 的账号告警摘要，无法按条重新验证历史权限。因此在开始请求、分配归属前明确选择 **LEGACY**，继续使用现有完整领域链路。该例外由 `RagService.legacyDomainRequired` 决定，发生在调用平台前，不是平台故障时临时回退。带明确 `observabilityContext` 的新证据链可以走 HARNESS。
 
-旧会话 SSE、旧运维聚合和业务工作流的执行权保留是显式迁移边界；未把整个 OpsAgent 业务系统迁入中台。没有真实业务订单后端时不把运维 demo-order 当作客户订单服务。
+旧会话 SSE、旧运维聚合和业务工作流的执行权保留是显式迁移边界；未把整个 OpsAgent 业务系统迁入中台。历史输出授权修复限定 HARNESS 平台输出，LEGACY 和立即答复的原有委托与保留期限未变，不提供无期限历史访问保证。没有真实业务订单后端时不把运维 demo-order 当作客户订单服务。
 
 问答上下文保留 30 天；`harness-answer-retention.sql` 先列出终态候选，再由管理员填入逐条核对的 id、input digest、首次观察到终态的时间作条件清理。默认参数全为 NULL，不会清理任何内容。UNKNOWN、PREPARING、READY 和未确认平台终态的行不进入候选。清理仅擦除 prompt、上下文与答案，保留 owner、请求摘要、Run 关联及时间等 tombstone。首次观察到完成状态的时间只用于保留周期和端到端等待耗时，不冒称模型服务端耗时。
 
@@ -63,6 +65,16 @@ Auth 表中应用凭据仅存 SHA-256。`ops_harness_grant` 的 `(application_id
 新增测试覆盖持久所有权、并发单次 claim、UNKNOWN 防重、创建幂等与回退、原 prompt/context/run/user 绑定、逐引用撤权、Auth 失效拒绝，以及既有身份桥/只读检索测试。实际服务联调还应验证验证码登录、真实 SQL 授权、真实 Knowledge ACL、模型 Run、读结果后的撤权、旧请求回退归属和错误的 If-Match。
 
 本机真实服务联调报告由中台仓库统一保存。VPS 部署、Linux 持续观察和跨主机灾备的执行结果不能由本地测试代替。
+
+2026-10-20 的 VPS 前补充修复将 RAG 的中台调用、身份委托和引用权限核验统一接入有完整正文等待时限的 HTTP 传输。时限覆盖取得响应头之后的正文等待，超时或中断取消未完成请求；按实际字节数限制正文，包括没有 `Content-Length` 的分块响应。权限响应不可核验时拒绝展示，写请求响应未知时保留既有未知结果语义，不自动重试或切换执行器。身份响应的业务码还需满足 32 位整数范围，不能因大整数截断而被判为成功。验证码、登录流程、会话有效期、请求归属和来源 ACL 规则未改变。
+
+第一轮 HTTP 修复取得 16 项定向回归和 167 suites、1,061 tests 的全量构建证据。随后真实联调发现，旧 HARNESS Run 的输出读取错误依赖已到期的执行委托；新鲜登录态与仍可读的来源文档不能解除这一依赖。上述独立历史输出授权修复增加过期委托读取、撤销与权限上限、跨应用/项目/主体/Run、访客期限、专属 audience 及当前来源拒绝测试。旧执行接口仍拒绝过期委托，输出读取不会重新调用模型。
+
+最新源码快照的 17 模块 `clean verify` 汇总为 **168 suites、1,071 tests，零失败、零错误，2 项既有环境门控测试跳过，Checkstyle 零违规**；1,129 个构建输入（含测试、不含文档）已逐文件核对一致。跳过项分别需要 `OPS_AGENT_DIAGNOSIS_REVIEW_DIRECTORY` 和 `opsagent.docs.live`，未将其计为已执行通过。构建报告由中台仓库保存在忽略目录 `.work/phase6/ops-bugfix2-build-report.json`。
+
+本次 `bugfix2` 制品另行取得真实服务联调证据：原已完成 Run 的只读回读 **8 项通过**，确认原答案、事件时间线、拒绝越权和调用账本不变；新建独立 DeepSeek Run 的问答接入 **10 项通过**，覆盖幂等复用、输入冲突、不同主体拒绝、只读用户拒绝、过期 If-Match 拒绝，以及单个完成 Run 的带引用答案；真实 Ticket 附件权限复核 **3 项通过**；来源 ACL 与版本复核 **5 项通过**，确认归档后 Ops 与平台同时拒绝历史答案、恢复后读取同一答案、来源版本变更后拒绝旧答案，并恢复原测试来源的 ACL 与版本。对应报告分别为 `.work/phase6/ops-bugfix2-readonly-report.json`、`ops-bugfix2-integration-report.json`、`ops-bugfix2-ticket-report.json`、`ops-bugfix2-acl-report.json`，均保存在中台仓库忽略目录。这些结果不替代浏览器验收、VPS 部署或新的完整 24 小时观察；长时观察须独立取得完整时长，尚未取得通过证据。
+
+第一轮新制品联调另有一次真实 DeepSeek 调用进入 `NEEDS_ATTENTION / UNKNOWN`，持久错误码为 `MODEL_CALL_OUTCOME_UNKNOWN`。该 Run 仅有一次模型调用、零工具调用，原 Run、调用账本及失败报告保留且未重放；具体传输根因尚未确定，不能据此认定为超时或供应商故障，也不能将历史输出委托修复当作其已证实原因。中台忽略目录中的 `ops-bugfix-integration-report.json`、`ops-bugfix-readonly-report.json` 和对应私有诊断证据继续保留，后续联调另建报告。
 
 ## 部署交付核对
 

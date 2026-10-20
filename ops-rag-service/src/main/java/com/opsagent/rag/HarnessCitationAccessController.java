@@ -19,7 +19,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 
@@ -65,6 +64,19 @@ class HarnessCitationAccessController {
             @RequestHeader(value = "Authorization", required = false) String authorization,
             @Valid @RequestBody Request request) {
         var actor = access.verify(authorization, "rag");
+        return validateCurrentSources(actor, request);
+    }
+
+    @PostMapping("/internal/rag/output/validate-citations")
+    ApiResponse<Verdict> validateOutput(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @Valid @RequestBody Request request) {
+        var actor = access.verify(authorization, "rag-output");
+        return validateCurrentSources(actor, request);
+    }
+
+    private ApiResponse<Verdict> validateCurrentSources(
+            InternalActorTokens.Context actor, Request request) {
         try {
             var outbound =
                     HttpRequest.newBuilder(knowledge)
@@ -75,19 +87,16 @@ class HarnessCitationAccessController {
                                     HttpRequest.BodyPublishers.ofByteArray(
                                             json.writeValueAsBytes(request)))
                             .build();
-            var response = http.send(outbound, HttpResponse.BodyHandlers.ofInputStream());
-            try (var body = response.body()) {
-                byte[] bytes = body.readNBytes(4097);
-                if (response.statusCode() != 200 || bytes.length > 4096) return denied();
-                var envelope = json.readTree(bytes);
-                boolean allowed =
-                        envelope.path("code").isIntegralNumber()
-                                && envelope.path("code").canConvertToInt()
-                                && envelope.path("code").asInt() == 0
-                                && envelope.path("data").path("allowed").isBoolean()
-                                && envelope.path("data").path("allowed").asBoolean();
-                return ApiResponse.success(new Verdict(allowed));
-            }
+            var response = HarnessHttpTransport.send(http, outbound, 4096);
+            if (response.statusCode() != 200) return denied();
+            var envelope = json.readTree(response.body());
+            boolean allowed =
+                    envelope.path("code").isIntegralNumber()
+                            && envelope.path("code").canConvertToInt()
+                            && envelope.path("code").asInt() == 0
+                            && envelope.path("data").path("allowed").isBoolean()
+                            && envelope.path("data").path("allowed").asBoolean();
+            return ApiResponse.success(new Verdict(allowed));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return denied();

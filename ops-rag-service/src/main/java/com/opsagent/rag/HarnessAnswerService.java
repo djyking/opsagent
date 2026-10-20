@@ -277,6 +277,23 @@ public class HarnessAnswerService {
             String authorization,
             String contextId,
             String promptHash) {
+        return answerAccess(actor, authorization, contextId, promptHash, false);
+    }
+
+    boolean outputAnswerAccess(
+            InternalActorTokens.Context actor,
+            String authorization,
+            String contextId,
+            String promptHash) {
+        return answerAccess(actor, authorization, contextId, promptHash, true);
+    }
+
+    private boolean answerAccess(
+            InternalActorTokens.Context actor,
+            String authorization,
+            String contextId,
+            String promptHash,
+            boolean output) {
         try {
             var row = repository.get(contextId);
             if (!application.equals(row.application())
@@ -292,7 +309,8 @@ public class HarnessAnswerService {
                 return sourcesAllowed(
                         authorization,
                         plan.sources(),
-                        convert(row.request(), RagController.ChatRequest.class));
+                        convert(row.request(), RagController.ChatRequest.class),
+                        output);
             }
         } catch (RuntimeException denied) {
             return false;
@@ -306,14 +324,17 @@ public class HarnessAnswerService {
                 client.domainAuthorization(
                         project, token, "ops-answer-" + row.id(), row.createdEpoch() + 86400);
         if (!sourcesAllowed(
-                authorization, sources, convert(row.request(), RagController.ChatRequest.class)))
-            throw failure(ErrorCode.FORBIDDEN, "HARNESS_ANSWER_ACCESS_REVOKED");
+                authorization,
+                sources,
+                convert(row.request(), RagController.ChatRequest.class),
+                false)) throw failure(ErrorCode.FORBIDDEN, "HARNESS_ANSWER_ACCESS_REVOKED");
     }
 
     private boolean sourcesAllowed(
             String authorization,
             List<RagService.Source> sources,
-            RagController.ChatRequest original) {
+            RagController.ChatRequest original,
+            boolean output) {
         requireSupportedSources(sources);
         if (sources.isEmpty()) return true;
         var evidence =
@@ -327,12 +348,13 @@ public class HarnessAnswerService {
                                                 source.version()))
                         .toList();
         if (!evidence.isEmpty()) {
+            var request =
+                    new HarnessCitationAccessController.Request(
+                            evidence, original.documentId() != null || original.ticketId() != null);
             var verdict =
-                    citations.validate(
-                            authorization,
-                            new HarnessCitationAccessController.Request(
-                                    evidence,
-                                    original.documentId() != null || original.ticketId() != null));
+                    output
+                            ? citations.validateOutput(authorization, request)
+                            : citations.validate(authorization, request);
             if (verdict.code() != 0 || verdict.data() == null || !verdict.data().allowed())
                 return false;
         }

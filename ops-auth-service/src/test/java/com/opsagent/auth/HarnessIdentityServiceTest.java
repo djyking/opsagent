@@ -242,6 +242,231 @@ class HarnessIdentityServiceTest {
                 .hasMessageContaining("EXPIRED_OR_REVOKED");
     }
 
+    @Test
+    void expiredExecutionDelegationCanReadOutputWithoutBeingRenewedOrUsedToExecute() {
+        var bound = outputDelegation();
+        long expired = Instant.now().minusSeconds(3600).getEpochSecond();
+        jdbc.update("UPDATE ops_harness_delegation SET expires_at=?", expired);
+        var before = jdbc.queryForList("SELECT * FROM ops_harness_delegation");
+        Instant beforeMint = Instant.now();
+        var minted =
+                service.outputToken(
+                        "Bearer " + APP, bound.delegationId(), "ops-dev", "10", "output-run");
+        var verifier = new InternalActorTokens(INTERNAL);
+        var actor = verifier.verify(minted.authorization(), "rag-output");
+        assertThat(actor.userId()).isEqualTo(10);
+        assertThat(actor.runId()).isEqualTo("output-run");
+        assertThat(actor.roles()).containsExactly("USER");
+        assertThat(actor.validUntil()).isAfter(beforeMint);
+        assertThat(actor.validUntil()).isBeforeOrEqualTo(Instant.now().plusSeconds(120));
+        assertThat(Instant.parse(minted.expiresAt()))
+                .isBeforeOrEqualTo(Instant.now().plusSeconds(120));
+        for (String audience : List.of("rag", "knowledge", "auth", "agent")) {
+            assertThatThrownBy(() -> verifier.verify(minted.authorization(), audience))
+                    .hasMessageContaining("INTERNAL_AUTH_INVALID");
+        }
+        assertThatThrownBy(
+                        () -> service.current("Bearer " + APP, bound.delegationId(), "output-run"))
+                .hasMessageContaining("EXPIRED_OR_REVOKED");
+        assertThatThrownBy(
+                        () ->
+                                service.token(
+                                        "Bearer " + APP, bound.delegationId(), "output-run", "rag"))
+                .hasMessageContaining("EXPIRED_OR_REVOKED");
+        assertThat(jdbc.queryForList("SELECT * FROM ops_harness_delegation")).isEqualTo(before);
+    }
+
+    @Test
+    void historicalOutputMintRequiresOriginalApplicationProjectSubjectAndRun() {
+        var bound = outputDelegation();
+        assertThatThrownBy(
+                        () ->
+                                service.outputToken(
+                                        "Bearer " + APP,
+                                        bound.delegationId(),
+                                        "other",
+                                        "10",
+                                        "output-run"))
+                .hasMessageContaining("OUTPUT_SCOPE_DENIED");
+        assertThatThrownBy(
+                        () ->
+                                service.outputToken(
+                                        "Bearer " + APP,
+                                        bound.delegationId(),
+                                        "ops-dev",
+                                        "11",
+                                        "output-run"))
+                .hasMessageContaining("OUTPUT_SCOPE_DENIED");
+        assertThatThrownBy(
+                        () ->
+                                service.outputToken(
+                                        "Bearer " + APP,
+                                        bound.delegationId(),
+                                        "ops-dev",
+                                        "10",
+                                        "other-run"))
+                .hasMessageContaining("NOT_FOUND");
+        String other = "another-synthetic-application-credential-at-least-thirty-two";
+        jdbc.update(
+                "INSERT INTO ops_harness_application(application_id,credential_hash,enabled)"
+                        + " VALUES(?,?,1)",
+                "other-app",
+                HarnessIdentityService.sha256(other));
+        assertThatThrownBy(
+                        () ->
+                                service.outputToken(
+                                        "Bearer " + other,
+                                        bound.delegationId(),
+                                        "ops-dev",
+                                        "10",
+                                        "output-run"))
+                .hasMessageContaining("NOT_FOUND");
+    }
+
+    @Test
+    void historicalOutputMintStillObservesDelegationApplicationUserAndGrantRevocation() {
+        var bound = outputDelegation();
+        jdbc.update("UPDATE ops_harness_delegation SET revoked=1");
+        assertOutputDenied(bound, "EXPIRED_OR_REVOKED");
+        jdbc.update("UPDATE ops_harness_delegation SET revoked=0");
+        jdbc.update("UPDATE ops_harness_application SET enabled=0");
+        assertOutputDenied(bound, "APPLICATION_INVALID");
+        jdbc.update("UPDATE ops_harness_application SET enabled=1");
+        when(auth.actor(10))
+                .thenReturn(new AuthService.ActorView(false, 10, "", List.of(), null, null, null));
+        assertOutputDenied(bound, "ACTOR_DISABLED");
+        active(List.of("USER"));
+        jdbc.update("UPDATE ops_harness_grant SET enabled=0");
+        assertOutputDenied(bound, "GRANT_DENIED");
+        jdbc.update("UPDATE ops_harness_grant SET enabled=1");
+        active(List.of("ADMIN"));
+        assertOutputDenied(bound, "ROLES_REVOKED");
+    }
+
+    @Test
+    void historicalOutputRequiresBothPermissionsNowAndWithinTheOriginalPermissionCeiling() {
+        var bound = outputDelegation();
+        for (String permission : List.of("runs:output:read", "opsagent:rag:search")) {
+            jdbc.update(
+                    "UPDATE ops_harness_grant SET permissions_json=?", "[\"" + permission + "\"]");
+            assertOutputDenied(bound, "OUTPUT_DENIED");
+        }
+        jdbc.update(
+                "UPDATE ops_harness_grant SET permissions_json=?",
+                "[\"runs:output:read\",\"opsagent:rag:search\",\"runs:admin\"]");
+        for (String permission : List.of("runs:output:read", "opsagent:rag:search")) {
+            jdbc.update(
+                    "UPDATE ops_harness_delegation SET permissions_json=?",
+                    "[\"" + permission + "\"]");
+            assertOutputDenied(bound, "OUTPUT_DENIED");
+        }
+    }
+
+    @Test
+    void historicalOutputTokenCannotGainRolesAddedAfterOriginalDelegation() {
+        var bound = outputDelegation();
+        active(List.of("USER", "ADMIN"));
+        var minted =
+                service.outputToken(
+                        "Bearer " + APP, bound.delegationId(), "ops-dev", "10", "output-run");
+        assertThat(
+                        new InternalActorTokens(INTERNAL)
+                                .verify(minted.authorization(), "rag-output")
+                                .roles())
+                .containsExactly("USER");
+        assertThatThrownBy(
+                        () ->
+                                service.token(
+                                        "Bearer " + APP,
+                                        bound.delegationId(),
+                                        "output-run",
+                                        "rag-output"))
+                .hasMessageContaining("AUDIENCE_DENIED");
+    }
+
+    @Test
+    void historicalOutputTokenCannotOutliveCurrentVisitorLease() {
+        Instant expiry = Instant.now().plusSeconds(45);
+        when(auth.actor(-20))
+                .thenReturn(
+                        new AuthService.ActorView(
+                                true, -20, "visitor", List.of("DEMO"), expiry, null, null));
+        jdbc.update(
+                "UPDATE ops_harness_grant SET user_id=-20,required_role='DEMO',permissions_json=?",
+                "[\"runs:output:read\",\"opsagent:rag:search\"]");
+        var bound =
+                service.delegate(
+                        "Bearer " + APP,
+                        "ops-dev",
+                        jwt.issue(-20, "visitor", List.of("DEMO")).token(),
+                        "visitor-output",
+                        Instant.now().plusSeconds(600));
+        jdbc.update(
+                "UPDATE ops_harness_delegation SET expires_at=?",
+                Instant.now().minusSeconds(60).getEpochSecond());
+        var minted =
+                service.outputToken(
+                        "Bearer " + APP, bound.delegationId(), "ops-dev", "-20", "visitor-output");
+        assertThat(Instant.parse(minted.expiresAt())).isEqualTo(expiry);
+        assertThat(
+                        new InternalActorTokens(INTERNAL)
+                                .verify(minted.authorization(), "rag-output")
+                                .validUntil())
+                .isBeforeOrEqualTo(expiry);
+        when(auth.actor(-20))
+                .thenReturn(
+                        new AuthService.ActorView(
+                                true,
+                                -20,
+                                "visitor",
+                                List.of("DEMO"),
+                                Instant.now().minusSeconds(1),
+                                null,
+                                null));
+        assertThatThrownBy(
+                        () ->
+                                service.outputToken(
+                                        "Bearer " + APP,
+                                        bound.delegationId(),
+                                        "ops-dev",
+                                        "-20",
+                                        "visitor-output"))
+                .hasMessageContaining("ACTOR_DISABLED");
+        when(auth.actor(-20))
+                .thenReturn(
+                        new AuthService.ActorView(
+                                true, -20, "visitor", List.of("DEMO"), null, null, null));
+        assertThatThrownBy(
+                        () ->
+                                service.outputToken(
+                                        "Bearer " + APP,
+                                        bound.delegationId(),
+                                        "ops-dev",
+                                        "-20",
+                                        "visitor-output"))
+                .hasMessageContaining("ACTOR_DISABLED");
+    }
+
+    private HarnessIdentityService.DelegationView outputDelegation() {
+        jdbc.update(
+                "UPDATE ops_harness_grant SET permissions_json=?",
+                "[\"runs:output:read\",\"opsagent:rag:search\"]");
+        return service.delegate(
+                "Bearer " + APP, "ops-dev", login, "output-run", Instant.now().plusSeconds(600));
+    }
+
+    private void assertOutputDenied(HarnessIdentityService.DelegationView bound, String code) {
+        assertThatThrownBy(
+                        () ->
+                                service.outputToken(
+                                        "Bearer " + APP,
+                                        bound.delegationId(),
+                                        "ops-dev",
+                                        "10",
+                                        "output-run"))
+                .hasMessageContaining(code);
+    }
+
     private void active(List<String> roles) {
         when(auth.actor(10))
                 .thenReturn(

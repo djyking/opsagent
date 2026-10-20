@@ -182,8 +182,59 @@ public class HarnessIdentityService {
         return new TokenView(authorization, expiry.toString());
     }
 
+    /** Historical output reads do not renew the original execution lease or its authority. */
+    public TokenView outputToken(
+            String applicationAuthorization,
+            String delegationId,
+            String projectId,
+            String subject,
+            String runId) {
+        Delegation delegation = delegation(applicationAuthorization, delegationId, runId);
+        if (!delegation.project().equals(projectId)
+                || !Long.toString(delegation.user()).equals(subject)) {
+            throw denied(ErrorCode.FORBIDDEN, "HARNESS_OUTPUT_SCOPE_DENIED");
+        }
+        IdentityView identity = identityWithinCeiling(delegation);
+        if (!identity.permissions()
+                .containsAll(List.of("runs:output:read", "opsagent:rag:search"))) {
+            throw denied(ErrorCode.FORBIDDEN, "HARNESS_OUTPUT_DENIED");
+        }
+        AuthService.ActorView actor = auth.actor(delegation.user());
+        Instant now = Instant.now();
+        if (!actor.active()
+                || actor.revokedAt() != null
+                || actor.userId() != delegation.user()
+                || actor.userId() < 0 && actor.expiresAt() == null
+                || actor.expiresAt() != null && !actor.expiresAt().isAfter(now)) {
+            throw denied(ErrorCode.FORBIDDEN, "HARNESS_ACTOR_DISABLED");
+        }
+        List<String> roles = currentRoles(delegation.user(), strings(delegation.roles()));
+        Instant deadline = now.plusSeconds(120);
+        if (actor.expiresAt() != null && actor.expiresAt().isBefore(deadline))
+            deadline = actor.expiresAt();
+        String authorization =
+                "Bearer "
+                        + tokens.issue(
+                                "rag-output",
+                                new InternalActorTokens.Context(
+                                        actor.userId(),
+                                        actor.username(),
+                                        roles,
+                                        runId,
+                                        "",
+                                        deadline));
+        return new TokenView(authorization, deadline.toString());
+    }
+
     private IdentityView identityFor(Delegation delegation) {
         if (delegation.revoked() || delegation.expiresAt() <= Instant.now().getEpochSecond()) {
+            throw denied(ErrorCode.FORBIDDEN, "HARNESS_DELEGATION_EXPIRED_OR_REVOKED");
+        }
+        return identityWithinCeiling(delegation);
+    }
+
+    private IdentityView identityWithinCeiling(Delegation delegation) {
+        if (delegation.revoked()) {
             throw denied(ErrorCode.FORBIDDEN, "HARNESS_DELEGATION_EXPIRED_OR_REVOKED");
         }
         IdentityView current =

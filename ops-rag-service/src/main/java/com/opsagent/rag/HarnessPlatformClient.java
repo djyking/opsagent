@@ -8,7 +8,6 @@ import com.opsagent.common.core.ErrorCode;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
@@ -117,13 +116,8 @@ final class HarnessPlatformClient {
                     body == null
                             ? HttpRequest.BodyPublishers.noBody()
                             : HttpRequest.BodyPublishers.ofString(body.toString()));
-            var response = http.send(request.build(), HttpResponse.BodyHandlers.ofInputStream());
-            byte[] bytes;
-            try (var stream = response.body()) {
-                bytes = stream.readNBytes(1024 * 1024 + 1);
-            }
-            if (bytes.length > 1024 * 1024)
-                throw failure(ErrorCode.MIDDLEWARE_UNAVAILABLE, "HARNESS_RESPONSE_TOO_LARGE");
+            var response = HarnessHttpTransport.send(http, request.build(), 1024 * 1024);
+            byte[] bytes = response.body();
             if (response.statusCode() == 401 || response.statusCode() == 403)
                 throw failure(ErrorCode.FORBIDDEN, "HARNESS_ACCESS_REVOKED");
             if (response.statusCode() == 404)
@@ -138,13 +132,17 @@ final class HarnessPlatformClient {
                 throw failure(ErrorCode.MIDDLEWARE_UNAVAILABLE, "HARNESS_UPSTREAM_REJECTED");
             JsonNode result = json.readTree(bytes);
             if (envelope) {
-                if (!result.path("code").isIntegralNumber() || result.path("code").asInt(-1) != 0)
+                if (!result.path("code").isIntegralNumber()
+                        || !result.path("code").canConvertToInt()
+                        || result.path("code").asInt(-1) != 0)
                     throw failure(ErrorCode.FORBIDDEN, "HARNESS_IDENTITY_DENIED");
                 result = result.path("data");
             }
             return new Reply(result, response.headers().firstValue("ETag").orElse(null));
         } catch (BusinessException failure) {
             throw failure;
+        } catch (HarnessHttpTransport.ResponseTooLargeException tooLarge) {
+            throw failure(ErrorCode.MIDDLEWARE_UNAVAILABLE, "HARNESS_RESPONSE_TOO_LARGE");
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw failure(ErrorCode.MIDDLEWARE_UNAVAILABLE, "HARNESS_UPSTREAM_OUTCOME_UNKNOWN");
