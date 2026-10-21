@@ -223,11 +223,15 @@ class AgentTools {
                             // 引用参数由写入准备前的专用校验给出可纠正反馈。
                             if (name.equals("ticket_add_analysis") && field.equals("evidenceIds"))
                                 return;
-                            if (!fields.contains(field)
-                                    || !args.path(field).isTextual()
-                                    || args.path(field).asText().length() > fieldLimit(field)) {
-                                throw AgentJson.invalid("工具参数超出固定协议");
-                            }
+                            if (!fields.contains(field))
+                                throw AgentJson.invalid("工具参数包含未声明字段");
+                            if (!args.path(field).isTextual())
+                                throw AgentJson.invalid("工具参数 " + field + " 必须为 string");
+                            int actual = args.path(field).asText().length();
+                            if (actual > fieldLimit(field))
+                                throw AgentJson.invalid(
+                                        "工具参数 " + field + " actualLength=" + actual
+                                                + " 超出当前 maxLength=" + fieldLimit(field));
                         });
         for (JsonNode required : schema.path("parameters").path("required")) {
             if (!required.asText().equals("evidenceIds")
@@ -431,9 +435,12 @@ class AgentTools {
                                 throw AgentJson.invalid("工具参数超出本次运行的冻结协议");
                             if (name.equals("ticket_add_analysis") && field.equals("evidenceIds"))
                                 return;
-                            if (args.path(field).asText().length()
-                                    > property.path("maxLength").asInt(Integer.MAX_VALUE))
-                                throw AgentJson.invalid("工具参数超出本次运行的冻结协议");
+                            int actual = args.path(field).asText().length();
+                            int maximum = property.path("maxLength").asInt(Integer.MAX_VALUE);
+                            if (actual > maximum)
+                                throw AgentJson.invalid(
+                                        "工具参数 " + field + " actualLength=" + actual
+                                                + " 超出冻结 maxLength=" + maximum);
                             if (property.path("enum").isArray()) {
                                 boolean matched = false;
                                 for (JsonNode allowed : property.path("enum"))

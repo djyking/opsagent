@@ -72,7 +72,7 @@ GitHub 的 `.github/workflows/verify.yml` 在 push、pull request 或手动触�
 
 第一轮 HTTP 修复取得 16 项定向回归和 167 suites、1,061 tests 的全量构建证据。随后真实联调发现，旧 HARNESS Run 的输出读取错误依赖已到期的执行委托；新鲜登录态与仍可读的来源文档不能解除这一依赖。上述独立历史输出授权修复增加过期委托读取、撤销与权限上限、跨应用/项目/主体/Run、访客期限、专属 audience 及当前来源拒绝测试。旧执行接口仍拒绝过期委托，输出读取不会重新调用模型。
 
-最新源码快照的 17 模块 `clean verify` 汇总为 **168 suites、1,071 tests，零失败、零错误，2 项既有环境门控测试跳过，Checkstyle 零违规**；1,129 个构建输入（含测试、不含文档）已逐文件核对一致。跳过项分别需要 `OPS_AGENT_DIAGNOSIS_REVIEW_DIRECTORY` 和 `opsagent.docs.live`，未将其计为已执行通过。构建报告由中台仓库保存在忽略目录 `.work/phase6/ops-bugfix2-build-report.json`。
+2026-10-20 该轮源码快照的 17 模块 `clean verify` 汇总为 **168 suites、1,071 tests，零失败、零错误，2 项既有环境门控测试跳过，Checkstyle 零违规**；1,129 个构建输入（含测试、不含文档）已逐文件核对一致。跳过项分别需要 `OPS_AGENT_DIAGNOSIS_REVIEW_DIRECTORY` 和 `opsagent.docs.live`，未将其计为已执行通过。构建报告由中台仓库保存在忽略目录 `.work/phase6/ops-bugfix2-build-report.json`。
 
 本次 `bugfix2` 制品另行取得真实服务联调证据：原已完成 Run 的只读回读 **8 项通过**，确认原答案、事件时间线、拒绝越权和调用账本不变；新建独立 DeepSeek Run 的问答接入 **10 项通过**，覆盖幂等复用、输入冲突、不同主体拒绝、只读用户拒绝、过期 If-Match 拒绝，以及单个完成 Run 的带引用答案；真实 Ticket 附件权限复核 **3 项通过**；来源 ACL 与版本复核 **5 项通过**，确认归档后 Ops 与平台同时拒绝历史答案、恢复后读取同一答案、来源版本变更后拒绝旧答案，并恢复原测试来源的 ACL 与版本。对应报告分别为 `.work/phase6/ops-bugfix2-readonly-report.json`、`ops-bugfix2-integration-report.json`、`ops-bugfix2-ticket-report.json`、`ops-bugfix2-acl-report.json`，均保存在中台仓库忽略目录。这些结果不替代浏览器验收、VPS 部署或新的完整 24 小时观察；长时观察须独立取得完整时长，尚未取得通过证据。
 
@@ -86,3 +86,57 @@ GitHub 的 `.github/workflows/verify.yml` 在 push、pull request 或手动触�
 4. 用即将部署的平台可执行包输出 releaseRef，核对 Model→End 图、来源保护、模型绑定和准确 digest，再配置到 RAG。先以 LEGACY 保持新请求归属，完成身份、授权、委托、公开/私有/工单附件引用、幂等和控制命令检查后，切换新请求到 HARNESS。
 5. 回退仅切换新请求归属，保留原版本查询能力、SQL ownership tombstone 与平台 Run。UNKNOWN 不自动重放；超过一小时的 PREPARING 按离线恢复规程审阅。不得用删除旧请求行的方式“恢复”。
 6. 运维包同时保留 `harness-answer-recovery.sql`、`harness-answer-retention.sql`、变更前备份与审核记录。保留清理、恢复演练和 Linux 持续观察必须记录实际环境与执行时间，不以本机单元测试代替。
+
+## 2026-10-21 公网集成验收与追加修复
+
+本节记录 `https://opsagent.cloud` 上实际执行的集成验收，时间均为 UTC。服务使用真实 Auth、Knowledge、Ticket、RAG、Agent、Platform 和既有中间件；生产配置、凭据与完整请求证据留在中台仓库忽略目录，不写入 Git。
+
+### 已验证的集成边界
+
+- 新的非流式文档与工单问答已切到 HARNESS，固定 release `3c101ddc-9461-4aef-8744-238ef6e073f5`，digest `sha256:381716233624488517080583498c19dd55b02c40a80fa355c85b473d43d1fdc1`。文档 1036 和工单 2099 的真实附件 1043 分别产生已完成的平台 Run，保留版本引用。切换前生成的 LEGACY 请求仍能读取完全相同的原答案，没有迁移或重放旧请求。
+- 主会话 `POST /api/rag/conversations/{id}/stream` 仍由原会话执行器承担；实际 DeepSeek SSE 完成，引用 1036 v1 并持久化历史。旧实时运维聚合和 Agent 业务工作流也仍由 Ops 的领域链路执行。不能把问答开关开启表述为整个 OpsAgent 已迁入 Harness。
+- 使用实际验证码登录的独立访客身份验证：管理员私有文档、工单、Harness 答案与 Agent Run 的跨用户读取均拒绝，业务码为 `40300`。部分领域响应的 HTTP 状态仍为 200，验收同时检查 HTTP 与业务码，没有将这些拒绝计为成功读取。
+- 原维护手册 1036 及两份明确标注为部署验收事实的文档 1042、1043 完成解析、人工复核、发布与索引。02:45:47 的一致性检查为 29 个已发布文档、62 个已发布 chunk，ES/Qdrant 缺失与孤儿均为 0；合法草稿预索引不算孤儿。使用真实手册 chunk 的查询取得 `HYBRID_RRF`，短关键词查询在当前阈值下可能只有 BM25。被删除文档 1034/1035 的历史失败任务保留。
+- DeepSeek 取得真实生成证据；Ops 原生 OpenAI Responses 探针也成功。Kimi 因目标未配置密钥未验证；不能由原生 OpenAI 探针推断 Harness 已支持 OpenAI Responses。
+
+### 三类恢复演练
+
+验收串行执行，每场使用独立 incident。只批准当前事件、目标、配置 revision 与工具完全匹配的修复，随后检查新鲜业务探针、同一个告警 episode 的恢复及工单状态。以下通过结果来自逐步修复过程中的不同 Agent 镜像；最后一列明确对应版本，避免将早先结果冒称为最终镜像重跑。
+
+| 场景 | 成功工单 / Run | 实际恢复证据 | Agent 镜像前缀 |
+| --- | --- | --- | --- |
+| Nacos Redis 配置漂移 | 2099 / `631c6d4d-9a28-448c-a315-263bbefe7ab0` | 503→200；`demo_config_restore`；AGENT_TOOL；同 episode resolved；工单 RESOLVED、Run COMPLETED | `cc992ae2ccb5` |
+| Sentinel 规则回归，新独立重验 | 2101 / `4f621c90-8352-45b4-926b-a6b371ec8eba` | 429→200，QPS 0→5；`demo_flow_restore`；AGENT_TOOL；同 episode resolved；工单 RESOLVED、Run COMPLETED | `f1c1dedf06f3` |
+| RabbitMQ 消费暂停，新独立重验 | 2103 / `021f7b48-681f-48ab-90d3-e0d8ea9d01bf` | 503→200；`demo_queue_restore`；AGENT_TOOL；`notifications` vhost 的 `opsagent.demo.notification.v1` 消费者恢复为 1、积压 0、真实投递及 Redis 回执读回；同 episode resolved；工单 RESOLVED、Run COMPLETED | `9d06f119a554` |
+
+最终 RabbitMQ 场在 03:36:33 观察到发布/投递计数均为 3925、`queueDrained=true`、连续成功 34 次，目标恢复 `canStart=true`。这是隔离通知业务队列的验证，不表示主 RabbitMQ 所有队列都已清空；主审计死信队列另行记录与排查，不确认、重放或删除其中消息。
+
+两次先行失败没有被覆盖：
+
+- Sentinel 工单 2100 / Run `536eb182-24a3-4c29-b886-5deff87e3a66` 的已知模型结果中，`evidence` 长度 1107 超过冻结上限 700；未准备写入或审批，安全停在 NEEDS_ATTENTION。02:24:16 由精确的人工恢复动作恢复，来源为 MANUAL。
+- RabbitMQ 工单 2102 / Run `e560c5df-2ef9-4733-9290-d7c5250b6514` 的三份诊断 `evidence` 长度分别为 856、1159、1012，均超过 700；两次有界纠正耗尽后停在 NEEDS_ATTENTION，未执行同批修复。03:09:23 人工恢复消费者、积压清零并取得实际 200，来源同样为 MANUAL。
+
+这两场保留原 Run、计费、模型结果与工单工作记录，不计作 Agent 或 TTL 恢复成功；后续成功场没有复用、重置或重放它们。既有其他 UNKNOWN/PREPARING 记录也没有为验收清理。
+
+### 诊断参数与 Web 权限修复
+
+`AgentDiagnosticCorrections` 仅处理已知模型返回中尚未执行的 `ticket_add_analysis` 参数错误。整批工具先校验，原始响应与取消的调用持久审计；通过原生 tool-call ID 反馈后，使用新的模型回合纠正，最多两次。纠正未成功落入合法诊断前不能创建修复审批；第三次错误安全停止，resume 不能重置纠正次数。UNKNOWN、已准备写入及修复工具参数不进入这条纠正路径，预算、已计费 token、期限均不重置。
+
+RabbitMQ 失败进一步表明，笼统的“超出协议”反馈不足。最终修复在错误中给出字段、`actualLength` 和当前/冻结 `maxLength`，并从本次冻结 schema 生成紧凑证据指导：保留完整引用 ID、原值和单位，只选支持结论的关键观测。未提高 700 字限制、截断事实或放宽审批。旧 v1 schema 不会收到它没有的诊断字段指导。新 RabbitMQ 场的诊断为 620 字，零参数纠正、零引用纠正，正常进入审批并恢复。
+
+`ops-web/Dockerfile` 另修复 Windows 构建产物带入镜像后的静态文件权限：目录归 root 且为 0755、文件 0644，Nginx worker 可遍历读取而不可写。已核对原 `dist` 的 150 个清单文件及镜像全部 151 个静态文件字节不变，并以真实非特权 Nginx worker 验证页面、JS、CSS、图标读取。该修复没有改动前端业务内容。
+
+### 最终 Agent 构建与部署指纹
+
+最新 17 模块源码快照执行 `clean verify`：**169 suites、1076 tests，0 failures、0 errors、2 项既有条件跳过，Checkstyle 0 违规**。两项跳过仍是外部保存诊断样本与显式联网官方文档测试；其余 1074 项实际执行通过。Windows JDK 17 测试 JVM 显式加载本地 Byte Buddy agent，未改变生产 JVM 配置。最终源码输入清单的 1190 个文件在构建后重新核对一致；本节交付文档在验收后追加，不属于先前冻结构建内容。
+
+| 项目 | SHA-256 |
+| --- | --- |
+| 最终源码输入 manifest | `8eb4dd148fc7c5a94959a2fa865b61fb002aa3171acf76e5d0e44c1be7cd675a` |
+| Agent 可执行 JAR | `72bc0004811b04bb2754a9ffdeaafddc2194c04dde147308b27f95415dd51236` |
+| Agent 不可变镜像 | `9d06f119a554520694b88786f027cdf56912b9155bd0ace7258a5ff5a34370b0` |
+| 最终 pinned Compose | `cda33cd6eb819a48b3203193e8ed63005baa3408027e578309c1781b325487c2` |
+
+镜像沿用原固定 digest 的 Temurin 17 JRE 与运行时 Dockerfile，上传后和容器内均回读核验 JAR。最后一次部署只替换 Agent 服务，其他容器 ID 不变，`unless-stopped` 策略和旧镜像保留；本机与目标 pinned Compose 已同步，维护入口按最终 Compose 摘要重新绑定。
+
+中台忽略目录中的主要证据：`.work/phase6/target-acceptance-20261021/ops-business/acceptance-summary.json`、`diagnostic-feedback-build-report.json`、`drill3-outcome.json`、`drill5-outcome.json`，以及 `.work/phase6/agent-feedback-image-20261021T032831Z/deployment-report.json`。这些真实短时验收不替代新的完整 24 小时观察或跨主机灾备演练。

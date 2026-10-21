@@ -424,6 +424,7 @@ class AgentRuntime {
         ArrayNode pending = AgentJson.MAPPER.createArrayNode();
         Set<String> seen = new HashSet<>();
         int index = 0;
+        String diagnosticArgumentFailure = null;
         for (JsonNode raw : message.path("tool_calls")) {
             String providerId = raw.path("id").asText();
             if (providerId.isBlank() || providerId.length() > 160 || !seen.add(providerId)) {
@@ -435,7 +436,14 @@ class AgentRuntime {
             }
             JsonNode args = raw.path("function").path("arguments");
             if (args.isTextual()) args = AgentJson.read(args.asText());
-            AgentTools.validateForSnapshot(run, name, args);
+            try {
+                AgentTools.validateForSnapshot(run, name, args);
+            } catch (com.opsagent.common.core.BusinessException invalidArguments) {
+                // The whole model batch is still unexecuted. Never correct repair arguments.
+                if (!name.equals("ticket_add_analysis") || diagnosticArgumentFailure != null)
+                    throw invalidArguments;
+                diagnosticArgumentFailure = invalidArguments.getMessage();
+            }
             ObjectNode call =
                     AgentJson.object()
                             .put(
@@ -459,6 +467,19 @@ class AgentRuntime {
                                         "observability_evidence"));
         if (pending.isEmpty() || pending.size() > 4 && !completeFactBatch)
             throw AgentJson.invalid("单步工具调用数量无效");
+        if (diagnosticArgumentFailure != null) {
+            ObjectNode correction =
+                    AgentDiagnosticCorrections.correct(
+                            run, response, pending, diagnosticArgumentFailure);
+            if (correction == null) throw AgentJson.invalid(diagnosticArgumentFailure);
+            if (correction.path("exhausted").asBoolean()) {
+                state.set("diagnosticParameterFailure", correction);
+                finish(run, "NEEDS_ATTENTION", "诊断参数纠正已用尽 2 次；原始模型结果保留，未执行该批工具");
+            } else {
+                save(run, "QUEUED", "DIAGNOSTIC_ARGUMENT_CORRECTION", correction);
+            }
+            return;
+        }
         state.remove("modelIntent");
         ((ArrayNode) state.path("messages")).add(message);
         state.set("pendingCalls", pending);
@@ -510,6 +531,7 @@ class AgentRuntime {
         }
         JsonNode properties =
                 AgentTools.frozenParameters(run, "ticket_add_analysis").path("properties");
+        changes += AgentDiagnosticCorrections.policy(run);
         changes +=
                 properties.has("evidenceIds")
                         ? "ticket_add_analysis 的 evidenceIds 填映射中的 ev- ID 数组；evidence"

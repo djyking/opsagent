@@ -870,6 +870,8 @@ WHERE status IN ('WAITING_APPROVAL','WAITING_INPUT') AND EXISTS
                     if (modelFailure != null) {
                         throw AgentJson.invalid(modelFailure.path("reason").asText());
                     }
+                    if (current.state().path("diagnosticParameterFailure").path("exhausted").asBoolean())
+                        throw AgentJson.invalid("诊断参数纠正已用尽；恢复不会重置次数或重放无效模型结果");
                     ObjectNode referenceCorrection = AgentReferenceCorrections.resume(current);
                     if (referenceCorrection != null)
                         event(
