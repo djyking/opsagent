@@ -8,6 +8,7 @@ import com.opsagent.common.security.InternalActorTokens;
 
 import jakarta.annotation.PostConstruct;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -31,6 +32,9 @@ class InternalAgentStore {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
 
+    @Value("${ops.rag.schema-auto-initialize:true}")
+    private boolean autoInitialize = true;
+
     InternalAgentStore(JdbcTemplate jdbc, ObjectMapper mapper) {
         this.jdbc = jdbc;
         this.mapper = mapper;
@@ -38,6 +42,24 @@ class InternalAgentStore {
 
     @PostConstruct
     void initialize() {
+        if (!autoInitialize) {
+            try {
+                jdbc.queryForList(
+                        "SELECT provider,model,profile_hash,status,verified_at"
+                                + " FROM rag_agent_model_capability WHERE 1=0");
+                jdbc.queryForList(
+                        "SELECT call_id,actor_id,run_id,request_hash,status,result_json,error_code,"
+                                + "created_at,updated_at FROM rag_agent_model_turn WHERE 1=0");
+                jdbc.queryForList(
+                        "SELECT call_id,attempt_no,provider,status,input_tokens,output_tokens,"
+                                + "total_tokens,reserved_tokens,error_code"
+                                + " FROM rag_agent_model_attempt WHERE 1=0");
+                return;
+            } catch (org.springframework.dao.DataAccessException missing) {
+                throw new IllegalStateException(
+                        "RAG_INTERNAL_AGENT_SCHEMA_MIGRATION_REQUIRED", missing);
+            }
+        }
         jdbc.execute(
                 "CREATE TABLE IF NOT EXISTS rag_agent_model_capability (provider VARCHAR(20) NOT"
                         + " NULL, model VARCHAR(128) NOT NULL, profile_hash VARCHAR(64) NOT NULL,"

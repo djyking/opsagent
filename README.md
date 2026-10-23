@@ -1,5 +1,8 @@
 # opsagent
 
+集中 Agent 平台接入、异步问答、来源撤权和本机联调配置见
+[Harness 第六阶段接入说明](docs/harness-phase6.md)。
+
 本轮服务与观测改造见 [服务拓扑与可观测工作台实施记录](docs/observability-workspace-implementation.md)。
 
 `opsagent` 是一个前后端分离的运维工单、知识库与智能问答系统。后端已重构为 Java 17 / Spring Boot 3.5 / Spring Cloud 多模块工程；前端位于 `ops-web`，采用 Vue 3、Vite、TypeScript、Pinia 和 Vue Router。

@@ -35,6 +35,8 @@ target/
 .env
 !.env.example
 .pnpm-store/
+__pycache__/
+*.py[cod]
 data/
 !ops-web/src/data/
 .mvn/wrapper/maven-wrapper.jar

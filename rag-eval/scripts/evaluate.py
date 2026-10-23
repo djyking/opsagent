@@ -10,8 +10,10 @@ import re
 import statistics
 import subprocess
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -19,14 +21,77 @@ CASES = ROOT / "rag-eval" / "cases" / "retrieval_cases.jsonl"
 ANSWER_CASES = ROOT / "rag-eval" / "cases" / "answer_cases.jsonl"
 
 
-def request_json(url, method="GET", body=None, token=None, timeout=120):
+class NoApiRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        raise urllib.error.HTTPError(request.full_url, code, "API redirect rejected", headers, response)
+
+
+def request_json(url, method="GET", body=None, token=None, timeout=120, idempotency_key=None):
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     request = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    # Never forward a login/application token to a redirect target.
+    with urllib.request.build_opener(NoApiRedirect()).open(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def answer_key(run_id, case_id):
+    """The same explicit evaluation run and case keep their key, including changed-input conflicts."""
+    return str(uuid.uuid5(uuid.UUID(run_id), case_id))
+
+
+def ask_answer(base_url, body, token, key, timeout=300):
+    """Submit once, then only read that owner/route. An uncertain write never starts a new Run."""
+    if timeout <= 0:
+        raise ValueError("Answer timeout must be positive")
+    deadline = time.monotonic() + timeout
+    route = None
+    owner = None
+    try:
+        response = request_json(
+            f"{base_url.rstrip('/')}/api/rag/ask", "POST", body, token,
+            timeout=min(120, timeout), idempotency_key=key)
+        while True:
+            if not isinstance(response, dict) or response.get("code") != 0:
+                code = response.get("code") if isinstance(response, dict) else "INVALID_RESPONSE"
+                raise RuntimeError(f"Answer API rejected the request: code={code}")
+            data = response.get("data")
+            if not isinstance(data, dict):
+                raise RuntimeError("Answer API returned invalid data")
+            if isinstance(data.get("answer"), str):
+                return data
+            current_route = data.get("routeId", "")
+            if (not isinstance(current_route, str)
+                    or not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", current_route)
+                    or data.get("statusUrl") != f"/api/rag/harness/answers/{current_route}"
+                    or data.get("owner") not in ("LEGACY", "HARNESS")
+                    or (route is not None and (route != current_route or owner != data["owner"]))):
+                raise RuntimeError("Answer API returned an invalid or changed execution route")
+            route, owner = current_route, data["owner"]
+            status = data.get("status")
+            if status not in ("NEW", "PREPARING", "READY", "SUBMITTED", "QUEUED", "RUNNING"):
+                raise RuntimeError(f"Answer execution requires attention: status={status}")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Answer polling timed out")
+            time.sleep(min(1, remaining))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Answer polling timed out")
+            response = request_json(
+                f"{base_url.rstrip('/')}/api/rag/harness/answers/{route}",
+                token=token, timeout=min(120, remaining))
+    except (OSError, ValueError, RuntimeError) as failure:
+        # Include only opaque recovery identifiers; never a question, credential or response body.
+        reason = str(failure) if isinstance(failure, RuntimeError) else "Answer transport/JSON failure"
+        raise RuntimeError(
+            f"{reason}; key={key}; route={route or 'not-received'}. "
+            "No write was automatically replayed. Keep the same --answer-run-id when resuming."
+        ) from None
 
 
 def percentile(values, quantile):
@@ -123,7 +188,17 @@ def main():
     parser.add_argument("--captcha-id", help="ID returned by GET /api/auth/captcha")
     parser.add_argument("--captcha-code", help="Characters read from the same captcha image")
     parser.add_argument("--include-answers", action="store_true")
+    parser.add_argument("--answer-run-id", help="UUID to resume answer cases with their original keys")
+    parser.add_argument("--answer-timeout", type=float, default=300, help="Seconds allowed per answer")
     args = parser.parse_args()
+    if not 0 < args.answer_timeout <= 3600:
+        parser.error("--answer-timeout must be greater than 0 and at most 3600")
+    try:
+        answer_run_id = str(uuid.UUID(args.answer_run_id)) if args.answer_run_id else str(uuid.uuid4())
+    except ValueError:
+        parser.error("--answer-run-id must be a UUID")
+    if args.include_answers:
+        print(f"Answer evaluation run ID: {answer_run_id}", flush=True)
     token = args.token
     if not token:
         if not all((args.password, args.captcha_id, args.captcha_code)):
@@ -179,16 +254,20 @@ def main():
     answer_metrics = None
     if args.include_answers:
         answer_cases = [json.loads(line) for line in ANSWER_CASES.read_text(encoding="utf-8").splitlines() if line]
+        case_ids = [case["id"] for case in answer_cases]
+        if len(case_ids) != len(set(case_ids)):
+            raise ValueError("Answer case IDs must be unique within an evaluation run")
         document_hits = []
         citation_validity = []
         deterministic = []
         for case in answer_cases:
-            response = request_json(
-                f"{args.base_url}/api/rag/ask",
-                "POST",
+            response = ask_answer(
+                args.base_url,
                 {"question": case["question"], "topK": 6},
                 token,
-            )["data"]
+                answer_key(answer_run_id, case["id"]),
+                args.answer_timeout,
+            )
             answer = response.get("answer", "")
             references = response.get("references", [])
             allowed = {reference.get("sourceId") for reference in references}
@@ -213,6 +292,7 @@ def main():
         "configuration": {
             "gitCommit": git_commit(),
             "timestamp": now,
+            "answerRunId": answer_run_id if args.include_answers else None,
             "chunkStrategyVersion": "structure-v1",
             "chunkTargetTokens": 500,
             "chunkOverlapTokens": 80,
